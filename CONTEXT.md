@@ -9,7 +9,7 @@ One Taskwarrior 3 data store: the TaskChampion database directory that `TASKDATA
 _Avoid_: File, document, database, task list
 
 **Taskrc**:
-The Taskwarrior configuration file paired with a replica, supplying its UDA definitions and urgency coefficients.
+The Taskwarrior configuration file paired with a replica, together with the files it includes, supplying its UDA definitions and urgency coefficients.
 _Avoid_: Config, settings, rc file
 
 **Context**:
