@@ -12,6 +12,10 @@ _Avoid_: File, document, database, task list
 The Taskwarrior configuration file paired with a replica, supplying its UDA definitions and urgency coefficients.
 _Avoid_: Config, settings, rc file
 
+**Context**:
+A named pair defined in a taskrc: a read filter narrowing which tasks show, and write modifications applied to new tasks, plus optional overrides of other taskrc settings. At most one is active.
+_Avoid_: Workspace, perspective, filter
+
 **UDA**:
 A user-defined attribute declared in a taskrc, extending the attributes every task can carry.
 _Avoid_: Custom field
