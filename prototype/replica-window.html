@@ -1,0 +1,528 @@
+<!--
+PROTOTYPE — throwaway. Answers "Design the Replica window" (brzzdev/SimpleTaskWarrior#5).
+Three structurally different Replica windows over the same in-memory Replica, switched with ?variant=A|B|C
+(or ← → / the bottom bar). Nothing persists; reload resets. Urgency here is a crude stand-in.
+Open by double-clicking the file.
+-->
+<!doctype html>
+<meta charset="utf-8">
+<title>PROTOTYPE · Replica window</title>
+<style>
+	:root { --acc:#0a64d8; --line:#d9d9de; --mut:#8a8a90; --bg:#fff; --side:#eeeef1; --sel:#dce8fb; --selStrong:#0a64d8; }
+	* { box-sizing:border-box; }
+	body { margin:0; font:13px -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; background:#6b7384; color:#1d1d1f; padding:28px 28px 80px; }
+	.win { background:var(--bg); border-radius:11px; box-shadow:0 20px 60px rgba(0,0,0,.35); height:calc(100vh - 110px); min-height:560px; display:flex; flex-direction:column; overflow:hidden; }
+	.titlebar { height:52px; display:flex; align-items:center; gap:10px; padding:0 12px; border-bottom:1px solid var(--line); background:#f6f6f8; flex:none; }
+	.lights { display:flex; gap:8px; margin-right:8px; } .lights i { width:12px; height:12px; border-radius:50%; display:block; }
+	.lights i:nth-child(1){background:#ff5f57}.lights i:nth-child(2){background:#febc2e}.lights i:nth-child(3){background:#28c840}
+	.wtitle { font-weight:600; } .wsub { color:var(--mut); font-size:11px; }
+	.spacer { flex:1; }
+	button, select, input, textarea { font:inherit; }
+	.tb { border:1px solid var(--line); background:#fff; border-radius:6px; padding:3px 9px; cursor:pointer; }
+	.tb:hover { background:#f0f0f3; } .tb.on { background:var(--acc); color:#fff; border-color:var(--acc); }
+	.search { border:1px solid var(--line); border-radius:7px; padding:4px 8px; width:200px; }
+	.body { flex:1; display:flex; min-height:0; }
+	.sidebar { width:210px; background:var(--side); border-right:1px solid var(--line); overflow:auto; padding:8px 6px; flex:none; }
+	.sh { font-size:11px; font-weight:600; color:var(--mut); margin:12px 8px 4px; }
+	.si { padding:3px 8px; border-radius:6px; cursor:pointer; display:flex; justify-content:space-between; }
+	.si:hover { background:#e2e2e7; } .si.on { background:#cfd3db; font-weight:500; }
+	.si .n { color:var(--mut); font-size:11px; }
+	.banner { background:#fff7e0; border-bottom:1px solid #f0dca0; padding:5px 12px; font-size:12px; display:flex; gap:8px; align-items:center; flex:none; }
+	table { border-collapse:collapse; width:100%; }
+	th { position:sticky; top:0; background:#fafafb; text-align:left; font-weight:500; color:#555; border-bottom:1px solid var(--line); padding:4px 8px; cursor:pointer; white-space:nowrap; user-select:none; }
+	td { padding:4px 8px; border-bottom:1px solid #f0f0f2; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:320px; }
+	tr.row { cursor:default; } tr.row:nth-child(even) { background:#fafafc; }
+	tr.row.sel { background:var(--sel); } tr.row.sel.focus { background:var(--selStrong); color:#fff; } tr.row.sel.focus .mut { color:#dde; }
+	.mut { color:var(--mut); } .tag { display:inline-block; background:#eef0f4; border-radius:4px; padding:0 5px; margin-right:3px; font-size:11px; color:#445; }
+	.sel.focus .tag { background:rgba(255,255,255,.25); color:#fff; }
+	.active-dot { color:#28a745; } .blocked { color:#c55; font-size:11px; }
+	.urg { font-variant-numeric:tabular-nums; }
+	.field { margin-bottom:10px; } .field label { display:block; font-size:11px; color:var(--mut); margin-bottom:2px; }
+	.field input, .field select, .field textarea { width:100%; border:1px solid var(--line); border-radius:5px; padding:3px 6px; background:#fff; }
+	.field textarea { resize:vertical; min-height:44px; }
+	.ro { color:#555; padding:3px 0; }
+	.lst { margin:0; padding:0; list-style:none; } .lst li { display:flex; justify-content:space-between; gap:6px; padding:2px 0; }
+	.x { border:none; background:none; color:#b44; cursor:pointer; padding:0 4px; }
+	.h3 { font-weight:600; font-size:12px; margin:14px 0 6px; padding-top:10px; border-top:1px solid #eee; }
+	.empty { color:var(--mut); padding:40px; text-align:center; }
+	.newrow td { background:#f3f8ff; } .newrow input { width:100%; border:1px solid var(--acc); border-radius:4px; padding:2px 6px; }
+	.pop { position:absolute; background:#fff; border:1px solid var(--line); border-radius:8px; box-shadow:0 8px 24px rgba(0,0,0,.18); padding:8px 10px; z-index:20; }
+	.pop label { display:block; padding:2px 0; }
+	.modalbg { position:fixed; inset:0; background:rgba(0,0,0,.25); display:flex; align-items:flex-start; justify-content:center; padding-top:120px; z-index:50; }
+	.modal { background:#fff; border-radius:12px; width:420px; padding:18px 20px; box-shadow:0 20px 50px rgba(0,0,0,.35); }
+	.modal h4 { margin:0 0 8px; } .modal .btns { display:flex; justify-content:flex-end; gap:8px; margin-top:14px; }
+	#switcher { position:fixed; left:50%; bottom:18px; transform:translateX(-50%); background:#111; color:#fff; border-radius:999px; padding:6px 8px; display:flex; align-items:center; gap:10px; box-shadow:0 6px 20px rgba(0,0,0,.4); z-index:100; font-size:12px; }
+	#switcher button { background:#333; color:#fff; border:none; border-radius:999px; width:28px; height:28px; cursor:pointer; }
+	#statebar { position:fixed; right:12px; bottom:18px; background:rgba(17,17,17,.85); color:#ddd; font:11px ui-monospace, Menlo, monospace; padding:6px 9px; border-radius:8px; z-index:100; max-width:380px; }
+
+	/* Variant B */
+	.bl { flex:1; overflow:auto; }
+	.bhdr { display:flex; align-items:center; gap:8px; padding:8px 16px; border-bottom:1px solid var(--line); position:sticky; top:0; background:#fff; z-index:2; }
+	.bhdr h2 { font-size:18px; margin:0; }
+	.brow { display:flex; gap:10px; padding:7px 16px 7px 0; border-bottom:1px solid #f1f1f3; cursor:default; }
+	.brow.sel { background:var(--sel); }
+	.ubar { width:4px; border-radius:2px; flex:none; margin-left:6px; }
+	.chk { width:16px; height:16px; border:1.5px solid #aaa; border-radius:50%; flex:none; margin-top:1px; cursor:pointer; }
+	.chk.done { background:#888; border-color:#888; }
+	.bmain { flex:1; min-width:0; } .bdesc { font-size:13.5px; } .bmeta { font-size:11px; color:var(--mut); margin-top:2px; display:flex; gap:8px; flex-wrap:wrap; }
+	.bcard { margin:4px 12px 10px 26px; border:1px solid var(--line); border-radius:10px; padding:12px 14px; box-shadow:0 2px 8px rgba(0,0,0,.06); background:#fff; }
+	.bgrid { display:grid; grid-template-columns:repeat(4, 1fr); gap:0 12px; }
+	.bulkbar { position:sticky; bottom:12px; margin:0 auto; width:max-content; background:#1d1d1f; color:#fff; border-radius:10px; padding:6px 10px; display:flex; gap:6px; align-items:center; box-shadow:0 6px 18px rgba(0,0,0,.3); }
+	.bulkbar button, .bulkbar select { background:#333; color:#fff; border:none; border-radius:6px; padding:3px 8px; }
+
+	/* Variant C */
+	.scope { display:flex; gap:6px; align-items:center; padding:6px 12px; border-bottom:1px solid var(--line); background:#fafafb; flex:none; flex-wrap:wrap; }
+	.token { background:#e4ebf7; border-radius:12px; padding:2px 4px 2px 9px; font-size:12px; }
+	.token button { border:none; background:none; cursor:pointer; color:#557; }
+	.seg { display:inline-flex; border:1px solid var(--line); border-radius:7px; overflow:hidden; }
+	.seg button { border:none; background:#fff; padding:3px 11px; cursor:pointer; border-right:1px solid var(--line); }
+	.seg button:last-child { border-right:none; } .seg button.on { background:#5b5b63; color:#fff; }
+	.csplit { flex:1; display:flex; flex-direction:column; min-height:0; }
+	.ctop { flex:1.3; overflow:auto; min-height:0; }
+	.cbot { flex:1; border-top:1px solid #bbb; overflow:auto; padding:12px 16px; background:#fbfbfc; min-height:0; }
+	.cgrid { display:grid; grid-template-columns:2fr 1fr 1fr 1fr; gap:0 14px; }
+	.ccols { display:grid; grid-template-columns:1fr 1fr 1fr; gap:0 18px; }
+</style>
+
+<div id="app"></div>
+<div id="switcher"><button id="prev">‹</button><span id="vlabel"></span><button id="next">›</button></div>
+<div id="statebar"></div>
+
+<script>
+const VARIANTS = {
+	A: 'Three-pane: sidebar · table · inspector',
+	B: 'Sidebar · rich list, inline editor',
+	C: 'No sidebar: scope bar · table over detail pane',
+};
+const variant = (() => {
+	const v = new URLSearchParams(location.search).get('variant');
+	return VARIANTS[v] ? v : 'A';
+})();
+
+const UDAS = [
+	{ name:'estimate', label:'Estimate', type:'duration' },
+	{ name:'energy', label:'Energy', type:'string', values:['high','medium','low'] },
+];
+const today = new Date('2026-09-23');
+const d = (n) => { const x = new Date(today); x.setDate(x.getDate() + n); return x.toISOString().slice(0, 10); };
+let uuidN = 100;
+const mk = (o) => ({
+	uuid:'u' + (uuidN++), status:'pending', project:'', tags:[], priority:'', due:'', scheduled:'', wait:'',
+	until:'', depends:[], annotations:[], start:false, uda:{}, entry:d(-10), ...o,
+});
+const S = {
+	tasks: [
+		mk({ desc:'Renew passport', project:'Home.Admin', tags:['errand'], priority:'H', due:d(5), uda:{ estimate:'PT2H', energy:'low' }, annotations:[{ entry:d(-3), text:'Photos booked for Friday' }] }),
+		mk({ desc:'Book passport photos', project:'Home.Admin', tags:['errand','phone'], due:d(2) }),
+		mk({ desc:'Draft Q4 roadmap', project:'Work.Planning', tags:['writing'], priority:'H', due:d(1), start:true, uda:{ energy:'high' } }),
+		mk({ desc:'Collect team input for roadmap', project:'Work.Planning', tags:['meeting'], priority:'M' }),
+		mk({ desc:'Review roadmap with Sam', project:'Work.Planning', tags:['meeting'], scheduled:d(4) }),
+		mk({ desc:'Fix flaky sync test', project:'Work.Engineering', tags:['bug'], priority:'M', uda:{ estimate:'PT1H', energy:'medium' } }),
+		mk({ desc:'Upgrade CI runners to macOS 27', project:'Work.Engineering', tags:['infra'], wait:d(12), status:'waiting' }),
+		mk({ desc:'Call plumber about radiator', project:'Home', tags:['phone'], priority:'L' }),
+		mk({ desc:'Buy birthday present for Alex', project:'Home', tags:['errand'], due:d(9) }),
+		mk({ desc:'Read "A Philosophy of Software Design"', project:'Learning', tags:['reading'] }),
+		mk({ desc:'Water the plants', project:'Home', tags:[], due:d(-1) }),
+		mk({ desc:'Send invoice #214', project:'Work.Admin', tags:[], status:'completed', end:d(-2) }),
+		mk({ desc:'Cancel old gym membership', project:'Home.Admin', tags:['phone'], status:'completed', end:d(-5) }),
+		mk({ desc:'Try the new ramen place', project:'', tags:['fun'], status:'deleted', end:d(-7) }),
+	],
+	view:'pending', project:null, tag:null, search:'', sel:[], focus:null,
+	sort:{ key:'urgency', dir:-1 }, cols:{ estimate:false, energy:true },
+	newRow:false, modal:null, bannerOpen:true, popover:null,
+	context:{ name:'work', overrides:'rc.urgency.user.tag.meeting.coefficient=2', read:'project:Work', write:'project:Work +office' },
+};
+// Dependency chain: collect input → draft roadmap → review with Sam
+const T = (desc) => S.tasks.find((t) => t.desc.startsWith(desc));
+T('Draft Q4').depends = [T('Collect team').uuid];
+T('Review roadmap').depends = [T('Draft Q4').uuid];
+T('Renew passport').depends = [T('Book passport').uuid];
+
+// Working-set IDs: pending/waiting only, never renumbered while open; completed ones hide theirs.
+let wsNext = 1;
+for (const t of S.tasks) if (t.status === 'pending' || t.status === 'waiting') t.id = wsNext++;
+
+const byUuid = (u) => S.tasks.find((t) => t.uuid === u);
+const isOpen = (t) => t.status === 'pending' || t.status === 'waiting';
+const blockers = (t) => t.depends.map(byUuid).filter((x) => x && isOpen(x));
+const blocking = (t) => S.tasks.filter((x) => isOpen(x) && x.depends.includes(t.uuid));
+const days = (s) => s ? Math.round((new Date(s) - today) / 864e5) : null;
+function urgency(t) {
+	let u = { H:6, M:3.9, L:1.8 }[t.priority] || 0;
+	if (t.project) u += 1;
+	if (t.tags.length) u += Math.min(1, 0.8 + 0.1 * t.tags.length);
+	if (t.tags.includes('meeting') && S.context) u += 2; // context rc.* override applied
+	const dd = days(t.due);
+	if (dd !== null) u += dd <= -7 ? 12 : dd >= 14 ? 2.4 : 12 * (1 - (dd + 7) / 21 * 0.8);
+	if (t.start) u += 4;
+	if (blockers(t).length) u -= 5;
+	if (blocking(t).length) u += 8;
+	u += Math.min(2, days(t.entry) * -0.0055 * 2);
+	return Math.round(u * 100) / 100;
+}
+const fmtDate = (s) => {
+	if (!s) return '';
+	const n = days(s);
+	if (n === 0) return 'today'; if (n === 1) return 'tomorrow'; if (n === -1) return 'yesterday';
+	return n < 0 ? `${-n}d ago` : n < 7 ? `in ${n}d` : s;
+};
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
+const fold = (s) => s.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase();
+
+function visible() {
+	const q = fold(S.search);
+	let xs = S.tasks.filter((t) => t.status === S.view);
+	if (S.project) xs = xs.filter((t) => t.project === S.project || t.project.startsWith(S.project + '.'));
+	if (S.tag) xs = xs.filter((t) => t.tags.includes(S.tag));
+	if (q) xs = xs.filter((t) => fold(t.desc).includes(q) || t.annotations.some((a) => fold(a.text).includes(q)));
+	const k = S.sort.key;
+	const val = (t) => k === 'urgency' ? urgency(t) : k in t ? t[k] : t.uda[k] ?? '';
+	return xs.sort((a, b) => {
+		const va = val(a), vb = val(b);
+		if (va === vb) return 0;
+		if (va === '') return 1; if (vb === '') return -1;
+		return (va > vb ? 1 : -1) * S.sort.dir;
+	});
+}
+function projectTree() {
+	const all = new Set();
+	for (const t of S.tasks) if (t.project) t.project.split('.').forEach((_, i, p) => all.add(p.slice(0, i + 1).join('.')));
+	return [...all].sort().map((p) => ({
+		path:p, depth:p.split('.').length - 1, name:p.split('.').pop(),
+		n:S.tasks.filter((t) => t.status === S.view && (t.project === p || t.project.startsWith(p + '.'))).length,
+	}));
+}
+const allTags = () => [...new Set(S.tasks.flatMap((t) => t.tags))].sort();
+const countView = (v) => S.tasks.filter((t) => t.status === v).length;
+const selTasks = () => S.sel.map(byUuid).filter(Boolean);
+
+// ---------- actions ----------
+function set(patch) { Object.assign(S, patch); render(); }
+function select(uuid, e) {
+	if (e && (e.metaKey || e.ctrlKey)) S.sel = S.sel.includes(uuid) ? S.sel.filter((u) => u !== uuid) : [...S.sel, uuid];
+	else if (e && e.shiftKey && S.focus) {
+		const vs = visible().map((t) => t.uuid);
+		const [a, b] = [vs.indexOf(S.focus), vs.indexOf(uuid)].sort((x, y) => x - y);
+		S.sel = vs.slice(a, b + 1);
+	} else S.sel = [uuid];
+	S.focus = uuid; S.newRow = false; render();
+}
+function edit(uuid, key, value) {
+	const t = byUuid(uuid);
+	if (key.startsWith('uda.')) t.uda[key.slice(4)] = value; else t[key] = value;
+	if (key === 'wait') t.status = value && days(value) > 0 ? 'waiting' : 'pending';
+	render();
+}
+function finish(uuids, status) {
+	// Chain repair: for each finished task that sits mid-chain, offer to rewire dependents onto its blockers.
+	const repairs = [];
+	for (const u of uuids) {
+		const t = byUuid(u);
+		const up = blockers(t), down = blocking(t).filter((x) => !uuids.includes(x.uuid));
+		if (up.length && down.length) repairs.push({ t, up, down });
+	}
+	const apply = (repair) => {
+		for (const u of uuids) { const t = byUuid(u); t.status = status; t.end = d(0); t.start = false; }
+		if (repair) for (const r of repairs) for (const x of r.down) x.depends = [...new Set([...x.depends.filter((y) => y !== r.t.uuid), ...r.up.map((y) => y.uuid)])];
+		S.modal = null; S.sel = []; S.focus = null; render();
+	};
+	if (!repairs.length) return apply(false);
+	S.modal = { repairs, apply, verb:status === 'completed' ? 'Mark done' : 'Delete' };
+	render();
+}
+function markPending(uuids) { for (const u of uuids) { const t = byUuid(u); t.status = 'pending'; delete t.end; if (!t.id) t.id = wsNext++; } S.sel = []; render(); }
+function toggleStart(uuids) { for (const t of uuids.map(byUuid)) t.start = !t.start; render(); }
+function createTask(desc) {
+	if (!desc.trim()) return set({ newRow:false });
+	// Active context write: only project:x and +tag forms become create-time defaults.
+	const t = mk({ desc:desc.trim(), project:'Work', tags:['office'], entry:d(0) });
+	t.id = wsNext++; S.tasks.push(t);
+	S.view = 'pending'; S.newRow = false; S.sel = [t.uuid]; S.focus = t.uuid; S.inspectorFocus = true;
+	render();
+}
+function bulkProject(p) { for (const t of selTasks()) t.project = p; render(); }
+function bulkTag(tag, add) { for (const t of selTasks()) t.tags = add ? [...new Set([...t.tags, tag])] : t.tags.filter((x) => x !== tag); render(); }
+
+// ---------- shared pieces ----------
+function contextBanner() {
+	if (!S.bannerOpen) return '';
+	const c = S.context;
+	return `<div class="banner">⚑ Context <b>${c.name}</b> is active. Its rc overrides and <code>project:Work +office</code> defaults for new tasks apply. Its read filter <code>${c.read}</code> doesn't: all tasks show.
+		<span class="spacer"></span><button class="tb" data-a="banner">Dismiss</button></div>`;
+}
+function sidebar() {
+	const fixed = [['pending','Pending'],['waiting','Waiting'],['completed','Completed'],['deleted','Deleted']];
+	return `<nav class="sidebar">
+		${fixed.map(([v, l]) => `<div class="si ${S.view === v ? 'on' : ''}" data-a="view" data-v="${v}">${l}<span class="n">${countView(v)}</span></div>`).join('')}
+		<div class="sh">Projects</div>
+		<div class="si ${!S.project ? 'on' : ''}" data-a="proj" data-v="">All projects</div>
+		${projectTree().map((p) => `<div class="si ${S.project === p.path ? 'on' : ''}" style="padding-left:${8 + p.depth * 14}px" data-a="proj" data-v="${p.path}">${esc(p.name)}<span class="n">${p.n || ''}</span></div>`).join('')}
+		<div class="sh">Tags</div>
+		<div class="si ${!S.tag ? 'on' : ''}" data-a="tag" data-v="">All tags</div>
+		${allTags().map((g) => `<div class="si ${S.tag === g ? 'on' : ''}" data-a="tag" data-v="${g}">#${g}</div>`).join('')}
+	</nav>`;
+}
+function titleBar(extra = '') {
+	return `<div class="titlebar"><div class="lights"><i></i><i></i><i></i></div>
+		<div><div class="wtitle">Personal</div><div class="wsub">~/.task · taskrc ~/.taskrc</div></div>
+		<span class="spacer"></span>${extra}
+		<input class="search" id="search" placeholder="Search descriptions and annotations" value="${esc(S.search)}"></div>`;
+}
+function actionButtons() {
+	const one = S.sel.length > 0;
+	if (S.view === 'completed' || S.view === 'deleted') return `<button class="tb" data-a="pending" ${one ? '' : 'disabled'}>Mark Pending</button>`;
+	return `<button class="tb" data-a="new" title="⌘N">＋ New</button>
+		<button class="tb" data-a="start" ${one ? '' : 'disabled'} title="⌘S">▶︎ Start/Stop</button>
+		<button class="tb" data-a="done" ${one ? '' : 'disabled'} title="⌘↩">✓ Done</button>
+		<button class="tb" data-a="delete" ${one ? '' : 'disabled'} title="⌘⌫">Delete</button>`;
+}
+const COLS = () => [
+	['id','ID'],['urgency','Urg'],['desc','Description'],['project','Project'],['tags','Tags'],['due','Due'],['entry','Age'],
+	...UDAS.filter((u) => S.cols[u.name]).map((u) => [u.name, u.label]),
+];
+function cell(t, k) {
+	if (k === 'id') return t.id && isOpen(t) ? t.id : '';
+	if (k === 'urgency') return `<span class="urg">${urgency(t).toFixed(1)}</span>`;
+	if (k === 'desc') return `${t.start ? '<span class="active-dot">● </span>' : ''}${esc(t.desc)}${blockers(t).length ? ' <span class="blocked">blocked</span>' : ''}${t.annotations.length ? ` <span class="mut">✎${t.annotations.length}</span>` : ''}`;
+	if (k === 'tags') return t.tags.map((g) => `<span class="tag">${g}</span>`).join('');
+	if (k === 'due') return `<span class="${days(t.due) < 0 ? 'blocked' : ''}">${fmtDate(t.due)}</span>`;
+	if (k === 'entry') return `<span class="mut">${-days(t.entry)}d</span>`;
+	if (k in t) return esc(t[k]);
+	return esc(t.uda[k] ?? '');
+}
+function table() {
+	const cols = COLS(), vs = visible();
+	const arrow = (k) => S.sort.key === k ? (S.sort.dir < 0 ? ' ▾' : ' ▴') : '';
+	return `<table><thead><tr>${cols.map(([k, l]) => `<th data-a="sort" data-v="${k}">${l}${arrow(k)}</th>`).join('')}
+		<th style="width:30px"><button class="tb" data-a="cols" style="padding:0 6px">⋯</button></th></tr></thead><tbody>
+		${S.newRow ? `<tr class="newrow"><td></td><td></td><td colspan="${cols.length - 1}"><input id="newdesc" placeholder="New task description — Return to create, Esc to cancel"></td></tr>` : ''}
+		${vs.map((t) => `<tr class="row ${S.sel.includes(t.uuid) ? 'sel' : ''} ${S.focus === t.uuid ? 'focus' : ''}" data-a="row" data-v="${t.uuid}">
+			${cols.map(([k]) => `<td>${cell(t, k)}</td>`).join('')}<td></td></tr>`).join('')}
+		</tbody></table>${vs.length ? '' : '<div class="empty">No tasks</div>'}`;
+}
+function colsPopover() {
+	if (!S.popover) return '';
+	return `<div class="pop" style="top:${S.popover.y}px;left:${S.popover.x - 160}px;width:170px"><div class="mut" style="font-size:11px;margin-bottom:4px">UDA columns</div>
+		${UDAS.map((u) => `<label><input type="checkbox" data-a="col" data-v="${u.name}" ${S.cols[u.name] ? 'checked' : ''}> ${u.label}</label>`).join('')}</div>`;
+}
+function inp(t, key, label, type = 'text') {
+	const v = key.startsWith('uda.') ? t.uda[key.slice(4)] : t[key];
+	return `<div class="field"><label>${label}</label><input type="${type}" data-e="${key}" data-u="${t.uuid}" value="${esc(v)}"></div>`;
+}
+function udaField(t, u) {
+	if (u.values) return `<div class="field"><label>${u.label} <span class="mut">(UDA)</span></label><select data-e="uda.${u.name}" data-u="${t.uuid}">
+		<option value=""></option>${u.values.map((v) => `<option ${t.uda[u.name] === v ? 'selected' : ''}>${v}</option>`).join('')}</select></div>`;
+	return inp(t, 'uda.' + u.name, `${u.label} <span class="mut">(UDA, ${u.type})</span>`);
+}
+function fieldset(t) {
+	return {
+		desc:`<div class="field"><label>Description</label><textarea data-e="desc" data-u="${t.uuid}" id="inspdesc">${esc(t.desc)}</textarea></div>`,
+		project:inp(t, 'project', 'Project'),
+		tags:`<div class="field"><label>Tags (space-separated)</label><input data-e="tags" data-u="${t.uuid}" value="${esc(t.tags.join(' '))}"></div>`,
+		priority:`<div class="field"><label>Priority</label><select data-e="priority" data-u="${t.uuid}">${['','H','M','L'].map((p) => `<option ${t.priority === p ? 'selected' : ''} value="${p}">${p || 'None'}</option>`).join('')}</select></div>`,
+		due:inp(t, 'due', 'Due', 'date'), scheduled:inp(t, 'scheduled', 'Scheduled', 'date'),
+		wait:inp(t, 'wait', 'Wait', 'date'), until:inp(t, 'until', 'Until', 'date'),
+		udas:UDAS.map((u) => udaField(t, u)).join(''),
+		deps:`<ul class="lst">${t.depends.map(byUuid).filter(Boolean).map((x) => `<li><span>${x.id && isOpen(x) ? x.id + ' · ' : ''}${esc(x.desc)}</span><button class="x" data-a="undep" data-u="${t.uuid}" data-v="${x.uuid}">×</button></li>`).join('') || '<li class="mut">None</li>'}</ul>
+			<select data-a2="dep" data-u="${t.uuid}" style="width:100%;margin-top:4px"><option value="">Add “depends on”…</option>
+			${S.tasks.filter((x) => isOpen(x) && x.uuid !== t.uuid && !t.depends.includes(x.uuid)).map((x) => `<option value="${x.uuid}">${x.id} · ${esc(x.desc)}</option>`).join('')}</select>`,
+		blocking:`<ul class="lst">${blocking(t).map((x) => `<li class="ro">${x.id} · ${esc(x.desc)}</li>`).join('') || '<li class="mut">Nothing</li>'}</ul>`,
+		annos:`<ul class="lst">${t.annotations.map((a, i) => `<li><span><span class="mut">${a.entry}</span> ${esc(a.text)}</span><button class="x" data-a="unanno" data-u="${t.uuid}" data-v="${i}">×</button></li>`).join('') || '<li class="mut">None</li>'}</ul>
+			<input id="anno-${t.uuid}" data-a2="anno" data-u="${t.uuid}" placeholder="Add annotation, Return" style="width:100%;margin-top:4px;border:1px solid var(--line);border-radius:5px;padding:3px 6px">`,
+		meta:`<div class="mut" style="font-size:11px">${t.id && isOpen(t) ? `ID ${t.id} · ` : ''}${t.status} · entered ${t.entry}${t.start ? ' · <span class="active-dot">active</span>' : ''} · urgency ${urgency(t).toFixed(2)}<br>${t.uuid}</div>`,
+	};
+}
+function bulkForm(stack) {
+	const n = S.sel.length;
+	const closed = S.view === 'completed' || S.view === 'deleted';
+	return `<div style="display:flex;${stack ? 'flex-direction:column' : 'flex-wrap:wrap'};gap:8px;align-items:${stack ? 'stretch' : 'center'}">
+		<div style="font-weight:600">${n} tasks selected</div>
+		${closed ? `<button class="tb" data-a="pending">Mark Pending</button>` : `
+		<button class="tb" data-a="done">✓ Mark all done</button><button class="tb" data-a="delete">Delete all</button>
+		<select data-a2="bproj"><option value="">Set project…</option>${projectTree().map((p) => `<option>${p.path}</option>`).join('')}<option value="__none">(none)</option></select>
+		<select data-a2="btag+"><option value="">Add tag…</option>${allTags().map((g) => `<option>${g}</option>`).join('')}</select>
+		<select data-a2="btag-"><option value="">Remove tag…</option>${[...new Set(selTasks().flatMap((t) => t.tags))].sort().map((g) => `<option>${g}</option>`).join('')}</select>`}
+	</div>`;
+}
+function modal() {
+	if (!S.modal) return '';
+	const m = S.modal;
+	return `<div class="modalbg"><div class="modal"><h4>Repair the dependency chain?</h4>
+		${m.repairs.map((r) => `<p><b>${esc(r.t.desc)}</b> is blocked by ${r.up.map((x) => `“${esc(x.desc)}”`).join(', ')} and blocks ${r.down.map((x) => `“${esc(x.desc)}”`).join(', ')}.</p>
+			<p class="mut">Repairing makes ${r.down.map((x) => `“${esc(x.desc)}”`).join(', ')} depend on ${r.up.map((x) => `“${esc(x.desc)}”`).join(', ')} directly.</p>`).join('')}
+		<p class="mut" style="font-size:11px">Shown because dependency.confirmation is on. When it's off, the chain is repaired silently.</p>
+		<div class="btns"><button class="tb" data-a="mcancel">Cancel</button><button class="tb" data-a="mno">${m.verb}, don't repair</button><button class="tb on" data-a="myes">${m.verb} and repair</button></div></div></div>`;
+}
+
+// ---------- variant A: three-pane ----------
+function renderA() {
+	const one = S.sel.length === 1 ? byUuid(S.sel[0]) : null;
+	let insp = '<div class="empty">No selection</div>';
+	if (S.sel.length > 1) insp = bulkForm(true);
+	else if (one) {
+		const f = fieldset(one);
+		insp = `${f.desc}${f.project}${f.tags}${f.priority}
+			<div class="h3">Dates</div>${f.due}${f.scheduled}${f.wait}${f.until}
+			<div class="h3">Attributes</div>${f.udas}
+			<div class="h3">Depends on</div>${f.deps}
+			<div class="h3">Blocking</div>${f.blocking}
+			<div class="h3">Annotations</div>${f.annos}
+			<div class="h3"></div>${f.meta}`;
+	}
+	return `<div class="win">${titleBar(actionButtons())}${contextBanner()}
+		<div class="body">${sidebar()}
+			<main style="flex:1;overflow:auto;min-width:0">${table()}</main>
+			<aside style="width:290px;border-left:1px solid var(--line);overflow:auto;padding:12px 14px;flex:none;background:#fcfcfd">${insp}</aside>
+		</div></div>`;
+}
+
+// ---------- variant B: rich list with inline editor ----------
+function renderB() {
+	const vs = visible();
+	const maxU = Math.max(1, ...S.tasks.map(urgency));
+	const title = S.project || (S.tag ? '#' + S.tag : { pending:'Pending', waiting:'Waiting', completed:'Completed', deleted:'Deleted' }[S.view]);
+	const rows = vs.map((t) => {
+		const u = urgency(t);
+		const open = S.sel.length === 1 && S.sel[0] === t.uuid;
+		const meta = [
+			t.id && isOpen(t) ? `<span>${t.id}</span>` : '',
+			t.project ? `<span>${esc(t.project)}</span>` : '',
+			t.due ? `<span class="${days(t.due) < 0 ? 'blocked' : ''}">due ${fmtDate(t.due)}</span>` : '',
+			t.tags.map((g) => `<span class="tag">${g}</span>`).join(''),
+			...UDAS.filter((x) => t.uda[x.name]).map((x) => `<span>${x.label.toLowerCase()} ${esc(t.uda[x.name])}</span>`),
+			blockers(t).length ? `<span class="blocked">blocked by ${blockers(t).length}</span>` : '',
+			blocking(t).length ? `<span>blocks ${blocking(t).length}</span>` : '',
+			t.annotations.length ? `<span>✎ ${t.annotations.length}</span>` : '',
+		].join('');
+		let card = '';
+		if (open) {
+			const f = fieldset(t);
+			card = `<div class="bcard">${f.desc}<div class="bgrid">${f.project}${f.tags}${f.priority}<div></div>${f.due}${f.scheduled}${f.wait}${f.until}${f.udas}</div>
+				<div class="bgrid" style="grid-template-columns:1fr 1fr 1fr"><div><div class="h3">Depends on</div>${f.deps}</div><div><div class="h3">Blocking</div>${f.blocking}</div><div><div class="h3">Annotations</div>${f.annos}</div></div>
+				<div style="margin-top:10px">${f.meta}</div></div>`;
+		}
+		return `<div class="brow ${S.sel.includes(t.uuid) ? 'sel' : ''}" data-a="row" data-v="${t.uuid}">
+			<div class="ubar" style="background:hsl(${210 - 210 * Math.max(0, u) / maxU},70%,55%);opacity:${0.35 + 0.65 * Math.max(0, u) / maxU}" title="urgency ${u}"></div>
+			<div class="chk ${t.status === 'completed' ? 'done' : ''}" data-a="chk" data-v="${t.uuid}" title="Mark done"></div>
+			<div class="bmain"><div class="bdesc">${t.start ? '<span class="active-dot">● </span>' : ''}${esc(t.desc)}</div><div class="bmeta">${meta}</div></div>
+			<div class="mut urg" style="font-size:11px">${u.toFixed(1)}</div></div>${card}`;
+	}).join('');
+	return `<div class="win">${titleBar(actionButtons())}${contextBanner()}
+		<div class="body">${sidebar()}
+			<main class="bl">
+				<div class="bhdr"><h2>${esc(title)}</h2><span class="mut">${vs.length}</span><span class="spacer"></span>
+					<label class="mut">Sort <select data-a2="sortsel">${[['urgency','Urgency'],['due','Due'],['project','Project'],['desc','Description'],['entry','Entry'],...UDAS.map((u) => [u.name, u.label])].map(([k, l]) => `<option value="${k}" ${S.sort.key === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label></div>
+				${S.newRow ? `<div class="brow newrow" style="padding-left:30px"><input id="newdesc" style="flex:1;border:1px solid var(--acc);border-radius:5px;padding:4px 8px" placeholder="New task — Return to create, Esc to cancel"></div>` : ''}
+				${rows || '<div class="empty">No tasks</div>'}
+				${S.sel.length > 1 ? `<div class="bulkbar">${bulkForm(false)}</div>` : ''}
+			</main></div></div>`;
+}
+
+// ---------- variant C: scope bar, table over detail ----------
+function renderC() {
+	const one = S.sel.length === 1 ? byUuid(S.sel[0]) : null;
+	const views = [['pending','Pending'],['waiting','Waiting'],['completed','Completed'],['deleted','Deleted']];
+	const tokens = [
+		S.project ? `<span class="token">project: ${esc(S.project)} <button data-a="proj" data-v="">×</button></span>` : '',
+		S.tag ? `<span class="token">#${esc(S.tag)} <button data-a="tag" data-v="">×</button></span>` : '',
+	].join('');
+	let detail = '<div class="empty">Select a task to see its details</div>';
+	if (S.sel.length > 1) detail = bulkForm(false);
+	else if (one) {
+		const f = fieldset(one);
+		detail = `<div class="cgrid"><div>${f.desc}</div>${f.project}${f.tags}${f.priority}</div>
+			<div class="cgrid" style="grid-template-columns:repeat(6,1fr)">${f.due}${f.scheduled}${f.wait}${f.until}${f.udas}</div>
+			<div class="ccols"><div><div class="h3">Depends on</div>${f.deps}<div class="h3">Blocking</div>${f.blocking}</div>
+				<div><div class="h3">Annotations</div>${f.annos}</div><div><div class="h3">Info</div>${f.meta}</div></div>`;
+	}
+	return `<div class="win">${titleBar(actionButtons())}${contextBanner()}
+		<div class="scope"><div class="seg">${views.map(([v, l]) => `<button class="${S.view === v ? 'on' : ''}" data-a="view" data-v="${v}">${l} ${countView(v)}</button>`).join('')}</div>
+			<select data-a2="cproj"><option value="">Project…</option>${projectTree().map((p) => `<option value="${p.path}" ${S.project === p.path ? 'selected' : ''}>${'  '.repeat(p.depth)}${p.path} (${p.n})</option>`).join('')}</select>
+			<select data-a2="ctag"><option value="">Tag…</option>${allTags().map((g) => `<option ${S.tag === g ? 'selected' : ''}>${g}</option>`).join('')}</select>
+			${tokens}</div>
+		<div class="csplit"><div class="ctop">${table()}</div><div class="cbot">${detail}</div></div></div>`;
+}
+
+// ---------- plumbing ----------
+function render() {
+	const ae = document.activeElement;
+	const keep = ae && ae.id ? { id:ae.id, s:ae.selectionStart, e:ae.selectionEnd } : null;
+	document.getElementById('app').innerHTML = ({ A:renderA, B:renderB, C:renderC }[variant])() + colsPopover() + modal();
+	if (S.newRow) document.getElementById('newdesc')?.focus();
+	else if (S.inspectorFocus) { S.inspectorFocus = false; const el = document.getElementById('inspdesc'); el?.focus(); el?.select(); }
+	else if (keep) { const el = document.getElementById(keep.id); if (el) { el.focus(); try { el.setSelectionRange(keep.s, keep.e); } catch {} } }
+	document.getElementById('statebar').textContent =
+		`view=${S.view} project=${S.project ?? '∅'} tag=${S.tag ?? '∅'} search="${S.search}" sort=${S.sort.key}${S.sort.dir < 0 ? '↓' : '↑'} sel=${S.sel.length} visible=${visible().length}`;
+}
+document.addEventListener('click', (e) => {
+	const el = e.target.closest('[data-a]');
+	if (S.popover && !e.target.closest('.pop') && el?.dataset.a !== 'cols') { S.popover = null; if (!el) return render(); }
+	if (!el) return;
+	const { a, v, u } = el.dataset;
+	switch (a) {
+		case 'banner': return set({ bannerOpen:false });
+		case 'chk': e.stopPropagation(); return finish([v], 'completed');
+		case 'col': S.cols[v] = el.checked; return render();
+		case 'cols': { const r = el.getBoundingClientRect(); return set({ popover:S.popover ? null : { x:r.right, y:r.bottom + 4 } }); }
+		case 'delete': return finish(S.sel, 'deleted');
+		case 'done': return finish(S.sel, 'completed');
+		case 'mcancel': return set({ modal:null });
+		case 'mno': return S.modal.apply(false);
+		case 'myes': return S.modal.apply(true);
+		case 'new': return set({ newRow:true, view:'pending', sel:[] });
+		case 'pending': return markPending(S.sel);
+		case 'proj': return set({ project:v || null, sel:[] });
+		case 'row': if (e.target.closest('.bcard, input, select, textarea')) return; return select(v, e);
+		case 'sort': return set({ sort:{ key:v, dir:S.sort.key === v ? -S.sort.dir : (v === 'urgency' ? -1 : 1) } });
+		case 'start': return toggleStart(S.sel);
+		case 'tag': return set({ tag:v || null, sel:[] });
+		case 'unanno': byUuid(u).annotations.splice(+v, 1); return render();
+		case 'undep': { const t = byUuid(u); t.depends = t.depends.filter((x) => x !== v); return render(); }
+		case 'view': return set({ view:v, sel:[] });
+	}
+});
+document.addEventListener('change', (e) => {
+	const el = e.target, { e:key, u, a2 } = el.dataset;
+	if (key) {
+		if (key === 'tags') return edit(u, 'tags', el.value.split(/\s+/).filter(Boolean));
+		return edit(u, key, el.value);
+	}
+	switch (a2) {
+		case 'bproj': return el.value && bulkProject(el.value === '__none' ? '' : el.value);
+		case 'btag+': return el.value && bulkTag(el.value, true);
+		case 'btag-': return el.value && bulkTag(el.value, false);
+		case 'cproj': return set({ project:el.value || null, sel:[] });
+		case 'ctag': return set({ tag:el.value || null, sel:[] });
+		case 'dep': if (el.value) { byUuid(u).depends.push(el.value); render(); } return;
+		case 'sortsel': return set({ sort:{ key:el.value, dir:el.value === 'urgency' ? -1 : 1 } });
+	}
+});
+document.addEventListener('input', (e) => { if (e.target.id === 'search') set({ search:e.target.value, sel:[] }); });
+document.addEventListener('keydown', (e) => {
+	const t = e.target;
+	if (t.id === 'newdesc') { if (e.key === 'Enter') createTask(t.value); if (e.key === 'Escape') set({ newRow:false }); return; }
+	if (t.dataset?.a2 === 'anno' && e.key === 'Enter' && t.value.trim()) { byUuid(t.dataset.u).annotations.push({ entry:d(0), text:t.value.trim() }); t.value = ''; return render(); }
+	if (e.metaKey && e.key === 'n') { e.preventDefault(); return set({ newRow:true, view:'pending', sel:[] }); }
+	if (e.metaKey && e.key === 'f') { e.preventDefault(); return document.getElementById('search').focus(); }
+	const typing = t.matches('input, textarea, select, [contenteditable]');
+	if (typing) { if (e.key === 'Escape') t.blur(); return; }
+	if (e.metaKey && e.key === 'Enter' && S.sel.length) return finish(S.sel, 'completed');
+	if (e.metaKey && e.key === 'Backspace' && S.sel.length) return finish(S.sel, 'deleted');
+	if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !e.metaKey) {
+		e.preventDefault();
+		const vs = visible().map((x) => x.uuid);
+		const i = Math.max(-1, vs.indexOf(S.focus)) + (e.key === 'ArrowDown' ? 1 : -1);
+		if (vs[i]) select(vs[i], e.shiftKey ? { shiftKey:true } : null);
+		return;
+	}
+	if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+		const ks = Object.keys(VARIANTS), i = ks.indexOf(variant);
+		go(ks[(i + (e.key === 'ArrowRight' ? 1 : -1) + ks.length) % ks.length]);
+	}
+});
+function go(v) { const q = new URLSearchParams(location.search); q.set('variant', v); location.search = q; }
+document.getElementById('prev').onclick = () => { const ks = Object.keys(VARIANTS); go(ks[(ks.indexOf(variant) + ks.length - 1) % ks.length]); };
+document.getElementById('next').onclick = () => { const ks = Object.keys(VARIANTS); go(ks[(ks.indexOf(variant) + 1) % ks.length]); };
+document.getElementById('vlabel').textContent = `${variant} (${VARIANTS[variant]})`;
+render();
+</script>
