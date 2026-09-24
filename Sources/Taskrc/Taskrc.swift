@@ -18,17 +18,18 @@ public struct Taskrc: Equatable, Sendable {
 	public init(
 		path: String,
 		environment: Environment,
-		readFile: (_ path: String) throws(ReadError) -> File,
+		readFile: @escaping (_ path: String) throws(ReadError) -> File,
 	) {
-		// Only the results leave: the parser holds `readFile`, which mustn't outlive this call.
-		let (entries, problems) = withoutActuallyEscaping(readFile) { readFile in
-			var parser = Parser(environment: environment, readFile: readFile)
-			parser.parse(taskwarriorDefaults, file: nil)
-			parser.load(path, requested: path, unsetVariables: [], from: nil, depth: 1)
-			return (parser.entries.contextual(), parser.problems)
+		var parser = Parser(environment: environment, readFile: readFile)
+		parser.parse(taskwarriorDefaults, file: nil)
+		do throws(ReadError) {
+			try parser.load(path, from: nil, depth: 1)
+		} catch {
+			parser.problems.append(Problem(error.kind(path: path, unsetVariables: []), at: nil))
 		}
+		let entries = parser.entries.contextual()
 		contextWrite = ContextWrite(entries)
-		self.problems = problems + entries.problems()
+		problems = parser.problems + entries.problems()
 		values = entries.mapValues(\.value)
 	}
 }
@@ -131,10 +132,10 @@ extension Taskrc.ContextWrite {
 			// Quotes mean the CLI would lex this differently from a split on whitespace.
 			if modification.contains(where: { "\"'".contains($0) }) {
 				skipped.append(modification)
-			} else if modification.hasPrefix("project:"), modification.count > "project:".count {
-				project = String(modification.dropFirst("project:".count))
-			} else if modification.hasPrefix("+"), modification.count > 1 {
-				tags.append(String(modification.dropFirst()))
+			} else if let match = modification.wholeMatch(of: /project:(.+)/) {
+				project = String(match.1)
+			} else if let match = modification.wholeMatch(of: /\+(.+)/) {
+				tags.append(String(match.1))
 			} else {
 				skipped.append(modification)
 			}
@@ -167,16 +168,7 @@ extension [String: Entry] {
 				Taskrc.Problem(.invalidWeekstart(weekstart.value), at: weekstart.location),
 			)
 		}
-		// A UDA is any name between `uda.` and a further `.`.
-		let udas = Set(
-			keys.compactMap { key -> String? in
-				guard key.hasPrefix("uda.") else {
-					return nil
-				}
-				let name = key.dropFirst("uda.".count)
-				return name.firstIndex(of: ".").map { String(name[..<$0]) }
-			},
-		)
+		let udas = Set(keys.compactMap { $0.firstMatch(of: /^uda\.([^.]*)\./).map { String($0.1) } })
 		for uda in udas.sorted() {
 			guard
 				let type = self["uda.\(uda).type"],

@@ -104,9 +104,7 @@ ensure-generated: engine
 # Each fixture's `expected.rc` is what `task _show` prints for its `taskrc`,
 # which `TaskrcTests` compares the parser against. The environment is fixed to
 # the one the tests expand with, and `task` runs from an empty directory so no
-# include resolves against the CWD, which the app ignores. The filtered keys
-# come from the bundled theme and holiday files the app skips, or are ones the
-# CLI overrides at runtime.
+# include resolves against the CWD, which the app ignores.
 # Record the golden Taskrc fixtures from real `task` 3.5
 fixtures:
 	#!/usr/bin/env bash
@@ -126,7 +124,7 @@ fixtures:
 			cd "$scratch"
 			env -i HOME=/home/fixture USER=fixture FIXTURE=value \
 				TASKDATA="$scratch/data" TASKRC="$fixture/taskrc" "$task" _show
-		) | grep -Ev '^(color|data\.location=|detection=|holiday\.|rule\.)' > "$fixture/expected.rc"
+		) > "$fixture/expected.rc"
 	done
 
 # Edit the Tuist manifests in Xcode

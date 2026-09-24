@@ -32,10 +32,12 @@ struct TaskrcTests {
 			)
 		}
 
-		// The keys `just fixtures` filters out of `expected.rc`.
+		// Set by the bundled theme and holiday files the app skips, or overridden by the CLI at runtime.
+		let isComparable = { (key: String) in
+			!key.contains(/^(color|data\.location$|detection$|holiday\.|rule\.)/)
+		}
 		#expect(
-			taskrc.values.filter { !$0.key.contains(/^(color|data\.location$|detection$|holiday\.|rule\.)/) }
-				== expected,
+			taskrc.values.filter { isComparable($0.key) } == expected.filter { isComparable($0.key) },
 		)
 	}
 

@@ -4,6 +4,20 @@ private let maximumDepth = 10
 /// libshared's `trim` set.
 private let whitespace: Set<Unicode.Scalar> = [" ", "\t", "\n", "\u{0C}", "\r"]
 
+/// The directory `Configuration::parse` resolves includes against, with its trailing `/`.
+private func directory(of path: String) -> String {
+	guard let slash = path.lastIndex(of: "/") else {
+		return ""
+	}
+	return String(path[...slash])
+}
+
+/// A theme or holiday file, the kinds TW ships in its share directory.
+private func isBundled(_ path: String) -> Bool {
+	let name = path.split(separator: "/").last ?? ""
+	return name.hasSuffix(".theme") || (name.hasPrefix("holidays.") && name.hasSuffix(".rc"))
+}
+
 struct Entry {
 	/// Nil for TW's defaults.
 	var location: Taskrc.Location?
@@ -15,6 +29,15 @@ extension Unicode.Scalar {
 	fileprivate var isVariableNameCharacter: Bool {
 		("a" ... "z").contains(self) || ("A" ... "Z").contains(self) || ("0" ... "9").contains(self)
 			|| self == "_"
+	}
+}
+
+extension Taskrc.ReadError {
+	func kind(path: String, unsetVariables: [String]) -> Taskrc.Problem.Kind {
+		switch self {
+		case .notFound: .notFound(path: path, unsetVariables: unsetVariables)
+		case .unreadable: .unreadable(path: path, unsetVariables: unsetVariables)
+		}
 	}
 }
 
@@ -69,62 +92,41 @@ struct Parser {
 			}
 			let expansion = expand(line[include.upperBound...].trimmed)
 			let path = expansion.value
+			let isRelative = !path.hasPrefix("/")
 			// TW tries a relative path against the CWD first, which means nothing to a GUI app. The
 			// defaults have no directory, which leaves only the share directory.
-			let resolved = path.hasPrefix("/") ? path : file.map { directory(of: $0.realPath) + path }
-			load(
-				resolved,
-				requested: path,
-				unsetVariables: expansion.unsetVariables,
-				from: location,
-				depth: depth + 1,
-			)
+			let resolved = isRelative ? file.map { directory(of: $0.realPath) + path } : path
+			do throws(Taskrc.ReadError) {
+				guard let resolved else {
+					throw .notFound
+				}
+				try load(resolved, from: location, depth: depth + 1)
+			} catch .notFound where isRelative && isBundled(path) {
+				// It could only resolve through TW's share directory, whose themes and holiday files set
+				// nothing that changes tasks.
+			} catch {
+				problems.append(
+					Taskrc.Problem(
+						error.kind(path: resolved ?? path, unsetVariables: expansion.unsetVariables),
+						at: location,
+					),
+				)
+			}
 		}
 	}
 
-	/// Reads the file at `path` and parses it. `requested` is the path as the include line wrote it,
-	/// after expansion, and `path` is nil where it can't resolve to a file the app can read.
+	/// Reads the file at `path` and parses it, throwing when it can't be read.
 	mutating func load(
-		_ path: String?,
-		requested: String,
-		unsetVariables: [String],
+		_ path: String,
 		from location: Taskrc.Location?,
 		depth: Int,
-	) {
+	) throws(Taskrc.ReadError) {
 		guard depth <= maximumDepth else {
-			problems.append(
-				Taskrc.Problem(.includeNestedTooDeeply(path: path ?? requested), at: location),
-			)
+			problems.append(Taskrc.Problem(.includeNestedTooDeeply(path: path), at: location))
 			return
 		}
-		let result = path.map { path in
-			Result { () throws(Taskrc.ReadError) in try readFile(path) }
-		}
-		switch result ?? .failure(.notFound) {
-		case .failure(.notFound) where !requested.hasPrefix("/") && isBundled(requested):
-			// It could only resolve through TW's share directory, whose themes and holiday files set
-			// nothing that changes tasks.
-			return
-
-		case .failure(.notFound):
-			problems.append(
-				Taskrc.Problem(
-					.notFound(path: path ?? requested, unsetVariables: unsetVariables),
-					at: location,
-				),
-			)
-
-		case .failure(.unreadable):
-			problems.append(
-				Taskrc.Problem(
-					.unreadable(path: path ?? requested, unsetVariables: unsetVariables),
-					at: location,
-				),
-			)
-
-		case let .success(file):
-			parse(file.contents, file: (path ?? requested, file.realPath), depth: depth)
-		}
+		let file = try readFile(path)
+		parse(file.contents, file: (path, file.realPath), depth: depth)
 	}
 
 	/// `Path::expand`: a leading `~` or `~user`, then every `$NAME`, an unset one becoming empty.
@@ -218,19 +220,5 @@ struct Parser {
 			}
 		}
 		return String(output)
-	}
-
-	/// The directory `Configuration::parse` resolves includes against, with its trailing `/`.
-	private func directory(of path: String) -> String {
-		guard let slash = path.lastIndex(of: "/") else {
-			return ""
-		}
-		return String(path[...slash])
-	}
-
-	/// A theme or holiday file, the kinds TW ships in its share directory.
-	private func isBundled(_ path: String) -> Bool {
-		let name = path.split(separator: "/").last ?? ""
-		return name.hasSuffix(".theme") || (name.hasPrefix("holidays.") && name.hasSuffix(".rc"))
 	}
 }
