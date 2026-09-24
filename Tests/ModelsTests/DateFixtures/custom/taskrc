@@ -1,0 +1,4 @@
+dateformat=m/d/Y
+uda.review.type=date
+uda.span.type=duration
+weekstart=Monday

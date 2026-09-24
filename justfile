@@ -111,7 +111,7 @@ ensure-generated: engine
 # what `task` reports at `now`: `export.json`, and the UUIDs it counts as
 # blocked, blocking and templates. TW stamps tasks with the time, so every
 # recording differs.
-# Record the golden Taskrc and Models fixtures from real `task` 3.5
+# Record the golden Taskrc, Models and date input fixtures from real `task` 3.5
 fixtures:
 	#!/usr/bin/env bash
 	set -euo pipefail
@@ -166,6 +166,39 @@ fixtures:
 		task +BLOCKED _uuids | sort > "$fixture/blocked"
 		task +BLOCKING _uuids | sort > "$fixture/blocking"
 		task status:recurring or +TEMPLATE _uuids | sort > "$fixture/templates"
+	done
+
+	# Each line of `DateFixtures/inputs` is one `attribute:value` argument, added to a fresh Replica
+	# after fixed `scheduled`, `review` and `span` values for it to reference. `expected` records,
+	# for each of the fixture's `zones`, the second the add ran in and what TW stored, or nothing
+	# where it refused the input. An add that straddles a second is retried, so relative inputs
+	# resolve against the recorded second.
+	dates="$PWD/Tests/ModelsTests/DateFixtures"
+	for fixture in "$dates"/*/; do
+		replica="$taskdata/dates"
+		: > "$fixture/expected"
+		while IFS= read -r zone; do
+			while IFS= read -r input; do
+				attribute="${input%%:*}"
+				for _ in {1..5}; do
+					rm -rf "$replica"
+					before="$(date +%s)"
+					stored=""
+					if (
+						cd "$scratch"
+						env -i HOME=/home/fixture TZ="$zone" TASKDATA="$replica" \
+							TASKRC="$fixture/taskrc" "$task" rc.confirmation=0 rc.hooks=0 \
+							rc.verbose=nothing add probe scheduled:1790845200 review:1791000000 \
+							span:P2D "$input"
+					) > /dev/null 2>&1; then
+						stored="$(sqlite3 "$replica/taskchampion.sqlite3" \
+							"SELECT json_extract(data, '\$.$attribute') FROM tasks")"
+					fi
+					[ "$(date +%s)" = "$before" ] && break
+				done
+				printf '%s\t%s\t%s\t%s\n' "$zone" "$before" "$input" "$stored" >> "$fixture/expected"
+			done < "$dates/inputs"
+		done < "$fixture/zones"
 	done
 
 # Edit the Tuist manifests in Xcode
