@@ -5,8 +5,8 @@ public import Foundation
 @DependencyClient
 public struct BookmarkClient: Sendable {
 	public var create: @Sendable (_ url: URL) throws -> Data
-	/// The bookmarked URL. Wrap its use in `startAccessingSecurityScopedResource()` and a
-	/// matching stop.
+	/// The bookmarked URL. Whatever reads it holds its security scope, as
+	/// `ReplicaClient.tasks` does.
 	public var resolve: @Sendable (_ bookmark: Data) throws -> URL
 }
 

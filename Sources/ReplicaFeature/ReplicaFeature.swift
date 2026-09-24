@@ -48,12 +48,6 @@ public struct ReplicaFeature {
 			case .fetchRequested:
 				return .run { [bookmark = state.bookmark, bookmarkClient, replicaClient] send in
 					let directory = try bookmarkClient.resolve(bookmark)
-					let isAccessing = directory.startAccessingSecurityScopedResource()
-					defer {
-						if isAccessing {
-							directory.stopAccessingSecurityScopedResource()
-						}
-					}
 					await send(.directoryResolved(directory))
 					for try await tasks in replicaClient.tasks(directory) {
 						await send(.tasksLoaded(tasks))
