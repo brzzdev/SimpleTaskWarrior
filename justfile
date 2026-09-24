@@ -37,10 +37,12 @@ default:
 generate:
 	tuist generate --no-open
 
-# Generate only if the workspace is missing (clones, fresh checkouts)
+# Generate when the workspace is missing or older than the manifest. The touch
+# stamps the workspace, since Tuist leaves unchanged files untouched and its
+# mtime alone would not record that a generate ran.
 [private]
 ensure-generated:
-	[ -d {{ workspace }} ] || tuist generate --no-open
+	[ {{ workspace }} -nt Project.swift ] || { tuist generate --no-open && touch {{ workspace }}; }
 
 # Edit the Tuist manifests in Xcode
 edit:
@@ -70,6 +72,16 @@ run: build
 	if [ ! -d "$app" ]; then
 		echo "no app at $app — \`just build\` should have produced it" >&2
 		exit 1
+	fi
+
+	# `open` only activates a copy that is already running, so quit the previous
+	# dev build first. Matching its full path spares an installed release copy.
+	binary="$PWD/$app/Contents/MacOS/{{ scheme }}"
+	if pkill -f "$binary"; then
+		for _ in {1..50}; do
+			pgrep -f "$binary" >/dev/null || break
+			sleep 0.1
+		done
 	fi
 
 	open "$app"
