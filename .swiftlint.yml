@@ -1,0 +1,14 @@
+# The shared ruleset. `just lint` passes this file to SwiftLint explicitly, which
+# is what makes a failed fetch of the parent fatal rather than a warning it lints
+# straight past — see the comment on the `lint` recipe.
+parent_config: https://raw.githubusercontent.com/brzzdev/Configs/main/Configs/swiftlint.yml
+
+# Local overrides, inlined: a referenced local config that goes missing is
+# ignored by SwiftLint with a warning and a zero exit.
+
+deployment_target:
+  macOS_deployment_target: 27.0
+
+# The parent excludes `**/.build`; this adds Tuist's generated sources.
+excluded:
+  - Derived

@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - "*"
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test
+    # GitHub-hosted, since the repo is public: macOS 27 with Xcode 27, which the
+    # deployment target needs. The image is a preview until GitHub makes it GA.
+    runs-on: xcode-27
+    # A backstop for a wedged xcodebuild rather than a budget for a slow build,
+    # so a hang does not run to GitHub's 6-hour default.
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install tools
+        run: brew bundle
+
+      # Mint builds SwiftLint and SwiftFormat from source, which costs minutes on
+      # every cold run. The Mintfile pins both, so it is the whole cache key.
+      - name: Cache Mint packages
+        uses: actions/cache@v6
+        with:
+          path: ~/.mint
+          key: mint-${{ runner.os }}-${{ hashFiles('Mintfile') }}
+
+      - name: Install pinned Mint packages
+        run: mint bootstrap
+
+      - name: Skip macro fingerprint validation
+        run: defaults write com.apple.dt.Xcode IDESkipMacroFingerprintValidation -bool YES
+
+      # Lint runs before the build, not after it. `if: '!cancelled()'` on a later
+      # step does not survive a *job* timeout, since GitHub cancels the whole job
+      # and no later step starts. Linting first costs seconds and always reports;
+      # the condition moves onto the test step so a lint failure still lets the
+      # tests run and neither signal masks the other.
+      - name: Lint
+        run: just lint
+
+      - name: Build and test
+        if: '!cancelled()'
+        run: just test

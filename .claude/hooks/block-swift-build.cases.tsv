@@ -1,0 +1,95 @@
+# Fixtures for block-swift-build.test.sh: <expected>\t<command>
+#
+# Every line is a Bash tool `command` string the PreToolUse hook must either
+# deny or allow. The deny cases are the ways a raw compiler build/test reaches
+# a shell; the allow cases are the near-misses that must not be swept up.
+deny	swift build
+deny	swift test
+deny	swift	test
+deny	swift build -c release
+deny	cd /tmp && swift build
+deny	foo && swift test | tee log
+deny	nice -n 5 swift build; echo done
+deny	(swift build)
+deny	a | swift test
+deny	env SWIFTPM_ENABLE_PLUGINS=1 swift test
+deny	env A=1 B=2 xcrun swift build
+deny	SWIFTPM_X=1 swift build
+deny	xcrun swift build
+deny	time swift test --parallel
+deny	time -p swift build
+deny	sudo -u me swift test
+deny	caffeinate -i swift build
+deny	/usr/bin/swift build
+deny	./swift build
+deny	foo; /opt/homebrew/bin/swift test
+deny	bash -c "swift build"
+deny	sh -c 'swift test'
+deny	bash -lc "swift build"
+deny	/bin/zsh -ic "swift test"
+deny	ssh host bash -c "swift build"
+deny	bash -O extglob -c "swift build"
+deny	bash -o posix -c "swift test"
+deny	bash --init-file /dev/null -c "swift build"
+deny	bash +O extglob -c "swift build"
+deny	bash +o posix -c "swift test"
+deny	bash -O extglob +o posix -c "swift build"
+deny	bash -s <<< "swift build"
+deny	bash <<< "swift test"
+deny	echo "swift build" | bash
+deny	echo "swift test" | /bin/sh
+deny	$SHELL -c "swift build"
+deny	${SHELL} -c "swift test"
+deny	zsh -c "swift build"
+deny	csh -c "swift build"
+deny	tcsh -c "swift test"
+deny	/bin/csh -c "swift build"
+deny	/bin/tcsh -c "swift test"
+deny	fish -c "swift build"
+deny	ksh -c "swift test"
+deny	dash -c "swift build"
+deny	eval "swift build"
+deny	exec bash -c "swift test"
+deny	nohup bash -c "swift build" &
+deny	bash -ec "swift build"
+deny	bash --norc --noprofile -c "swift test"
+deny	sh -exc "swift test"
+deny	command bash -c "swift build"
+deny	xargs -I{} swift build
+deny	$(swift build)
+deny	`swift build`
+deny	if true; then swift build; fi
+deny	for i in 1; do swift test; done
+deny	swift  build
+deny	timeout 60 swift build
+deny	arch -arm64 swift build
+allow	just build
+allow	just test
+allow	swift package resolve
+allow	swift package update
+allow	swift --version
+allow	swiftlint --strict
+allow	swift-format --version
+allow	swiftly install
+allow	tuist generate
+allow	mint run swiftformat .
+allow	grep -r swift build.log
+allow	echo builds swift
+allow	git commit -m "fix swift build breakage"
+allow	git commit -m 'swift test flake'
+allow	echo "swift test"
+allow	echo "sh -c"
+allow	bash -c "just build"
+allow	bash script.sh
+allow	bash -x script.sh
+allow	bash -O extglob script.sh
+allow	bash +O extglob script.sh
+allow	just build && just test
+allow	rg "swift build" docs/
+allow	sed -i '' 's/swift build/just build/' README.md
+allow	bash .claude/hooks/block-swift-build.test.sh
+allow	xcodebuild -scheme SimpleTaskWarrior build
+allow	git push && git log --oneline -1
+allow	git commit -m "swap swift build for just build" && git push
+allow	git push origin HEAD
+allow	npm publish

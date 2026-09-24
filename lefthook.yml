@@ -1,0 +1,5 @@
+# Install the hooks with `lefthook install` (run for you by `just tools`).
+pre-commit:
+  jobs:
+    - name: swiftformat
+      run: just format-staged

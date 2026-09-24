@@ -1,5 +1,8 @@
 # SimpleTaskWarrior
 
+- Build and test through the `just` recipes (`just build`, `just test`)
+- Make project changes in `Project.swift`; Tuist generates the Xcode project from it
+
 ## Agent skills
 
 ### Issue tracker

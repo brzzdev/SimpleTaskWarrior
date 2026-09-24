@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(swift build:*)",
+      "Bash(swift test:*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/block-swift-build.sh\""
+          }
+        ]
+      }
+    ]
+  }
+}

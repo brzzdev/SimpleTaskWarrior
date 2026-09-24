@@ -1,0 +1,2 @@
+# Project-specific overrides only — base ruleset is fetched at format-time from
+# brzzdev/Configs (see the `format` recipe in the justfile).
