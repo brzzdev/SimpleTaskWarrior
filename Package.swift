@@ -135,6 +135,10 @@ let package = Package(
 				"Taskrc",
 				"TestSupport",
 			],
+			resources: [
+				// Recorded by `just fixtures`.
+				.copy("Fixtures"),
+			],
 		),
 	],
 )

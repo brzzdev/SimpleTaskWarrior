@@ -1,0 +1,8 @@
+context=work
+context.work.read=+work
+context.work.write=project:Work +work
+context.work.rc.urgency.project.coefficient=50
+context.work.rc.due=3
+# Only under the context, so it overrides nothing.
+context.work.rc.only.in.context=1
+context.home.rc.due=1

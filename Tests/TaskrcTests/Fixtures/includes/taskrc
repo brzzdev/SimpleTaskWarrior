@@ -1,0 +1,8 @@
+# Includes are read inline, where they appear.
+order=taskrc
+include sub/first.rc
+after=taskrc
+# Everything after the first `include` is the path.
+xxinclude sub/quirk.rc
+# Bundled with TW, and skipped by the app.
+include dark-256.theme

@@ -1,0 +1,15 @@
+# A comment runs from the first # to the end of the line, even inside a value.
+nag=has # hash
+  spaced.key   =   spaced value 	 
+equals=b=c
+later=first
+later=second
+# An empty value still overrides the default.
+urgency.due.coefficient=
+escapes=tab\there \u00e9 \q \\ \/ \"
+short.escape=a\u12
+nonhex.escape=a\u004gb
+zero.escape=a\u0000b
+trailing.backslash=a\
+weekstart=MON
+crlf=value

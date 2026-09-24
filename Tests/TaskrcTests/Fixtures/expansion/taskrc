@@ -1,0 +1,13 @@
+tilde=~
+tilde.path=~/tasks
+tilde.user=~root/tasks
+tilde.unknown.user=~nosuchfixtureuser/tasks
+tilde.inside=a~b
+home=$HOME/x
+user=$USER
+set=$FIXTURE-$FIXTURE_2x
+unset=[$UNSET_FIXTURE]
+dollar=a$
+dollar.brace=${FIXTURE}
+dollar.digit=$1
+escaped.dollar=\$FIXTURE
