@@ -7,9 +7,6 @@ struct Pig {
 	let bytes: [UInt8]
 	var cursor: Int
 
-	/// What `save` stored for `restore`.
-	private var saved = 0
-
 	var isAtEnd: Bool {
 		byte(at: cursor) == 0
 	}
@@ -17,6 +14,11 @@ struct Pig {
 	/// The remaining text.
 	var remainder: ArraySlice<UInt8> {
 		bytes[min(cursor, bytes.count)...]
+	}
+
+	/// Whether the next character ends a word: neither a letter nor a digit.
+	var isAtWordEnd: Bool {
+		!isLatinAlpha(peek()) && !isLatinDigit(peek())
 	}
 
 	init(_ bytes: [UInt8], cursor: Int = 0) {
@@ -50,21 +52,18 @@ struct Pig {
 		return (Unicode.Scalar(value) ?? Unicode.Scalar(lead), index + length)
 	}
 
-	/// The byte at `index` as a signed `char`, or 0 past the end, where C++ reads the terminator.
 	func byte(at index: Int) -> Int {
-		index < bytes.count ? Int(Int8(bitPattern: bytes[index])) : 0
+		signedByte(in: bytes, at: index)
 	}
 
 	func peek() -> Int {
 		byte(at: cursor)
 	}
 
-	mutating func save() {
-		saved = cursor
-	}
-
-	mutating func restore() {
-		cursor = saved
+	/// Whether the text continues with the whole word `literal`.
+	func startsWithWord(_ literal: String) -> Bool {
+		var pig = self
+		return pig.skipLiteral(literal) && pig.isAtWordEnd
 	}
 
 	mutating func skip(_ character: Unicode.Scalar) -> Bool {
@@ -97,34 +96,32 @@ struct Pig {
 	}
 
 	mutating func skipLiteral(_ literal: String) -> Bool {
-		let literal = Array(literal.utf8)
-		guard bytes[min(cursor, bytes.count)...].starts(with: literal) else {
+		guard remainder.starts(with: literal.utf8) else {
 			return false
 		}
-		cursor += literal.count
+		cursor += literal.utf8.count
 		return true
 	}
 
-	/// Skips the longest prefix of `reference` the text starts with, returning it, or nil when it
-	/// starts with none of it. `ignoringCase` lowercases the text, not `reference`.
-	mutating func skipPartial(_ reference: String, ignoringCase: Bool = false) -> String? {
-		let reference = Array(reference.utf8)
+	/// Skips the longest prefix of `reference` the text starts with, returning its length, which is
+	/// 0 when it starts with none of it. `ignoringCase` lowercases the text, not `reference`.
+	mutating func skipPartial(_ reference: String, ignoringCase: Bool = false) -> Int {
 		var length = 0
-		while length < reference.count, cursor + length < bytes.count {
+		for expected in reference.utf8 {
+			guard cursor + length < bytes.count else {
+				break
+			}
 			var byte = bytes[cursor + length]
 			if ignoringCase, (UInt8(ascii: "A") ... UInt8(ascii: "Z")).contains(byte) {
 				byte += 32
 			}
-			guard byte == reference[length] else {
+			guard byte == expected else {
 				break
 			}
 			length += 1
 		}
-		guard length > 0 else {
-			return nil
-		}
-		defer { cursor += length }
-		return String(decoding: bytes[cursor ..< cursor + length], as: UTF8.self)
+		cursor += length
+		return length
 	}
 
 	/// The text up to `end` or the end of the input, which is empty when `end` comes first, or nil
@@ -198,16 +195,24 @@ struct Pig {
 		defer { cursor = index }
 		return strtod(String(decoding: bytes[cursor ..< index], as: UTF8.self), nil)
 	}
-
-	/// The first of `options` the text starts with.
-	mutating func getOneOf(_ options: [String]) -> String? {
-		options.first { skipLiteral($0) }
-	}
 }
 
 /// A character's value, to compare with `peek`.
 func ascii(_ character: Unicode.Scalar) -> Int {
 	Int(character.value)
+}
+
+/// The byte at `index` as a signed `char`, or 0 past the end, where C++ reads the terminator.
+func signedByte(in bytes: [UInt8], at index: Int) -> Int {
+	index < bytes.count ? Int(Int8(bitPattern: bytes[index])) : 0
+}
+
+/// C's conversion of a double to an integer, which saturates on arm64 and leaves NaN at 0.
+func saturating<Integer: FixedWidthInteger>(_ value: Double) -> Integer {
+	guard !value.isNaN else {
+		return 0
+	}
+	return value >= Double(Integer.max) ? .max : value <= Double(Integer.min) ? .min : Integer(value)
 }
 
 func isLatinAlpha(_ character: Int) -> Bool {

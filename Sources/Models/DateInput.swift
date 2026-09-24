@@ -52,7 +52,7 @@ public struct DateInput: Sendable {
 	}
 
 	private func expression(at now: Date) -> DateExpression {
-		DateExpression(clock: Clock(now: now, timeZone: timeZone), format: format, settings: settings)
+		DateExpression(clock: WallClock(now: now, timeZone: timeZone), format: format, settings: settings)
 	}
 }
 

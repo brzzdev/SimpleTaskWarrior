@@ -172,7 +172,7 @@ fixtures:
 	# after fixed `scheduled`, `review` and `span` values for it to reference. `expected` records,
 	# for each of the fixture's `zones`, the second the add ran in and what TW stored, or nothing
 	# where it refused the input. An add that straddles a second is retried, so relative inputs
-	# resolve against the recorded second.
+	# resolve against the recorded second, or the recording fails.
 	dates="$PWD/Tests/ModelsTests/DateFixtures"
 	for fixture in "$dates"/*/; do
 		replica="$taskdata/dates"
@@ -180,7 +180,7 @@ fixtures:
 		while IFS= read -r zone; do
 			while IFS= read -r input; do
 				attribute="${input%%:*}"
-				for _ in {1..5}; do
+				for attempt in {1..5}; do
 					rm -rf "$replica"
 					before="$(date +%s)"
 					stored=""
@@ -195,6 +195,10 @@ fixtures:
 							"SELECT json_extract(data, '\$.$attribute') FROM tasks")"
 					fi
 					[ "$(date +%s)" = "$before" ] && break
+					if [ "$attempt" = 5 ]; then
+						echo "every add of $input in $zone straddled a second" >&2
+						exit 1
+					fi
 				done
 				printf '%s\t%s\t%s\t%s\n' "$zone" "$before" "$input" "$stored" >> "$fixture/expected"
 			done < "$dates/inputs"

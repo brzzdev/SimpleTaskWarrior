@@ -22,7 +22,7 @@ enum Variant {
 /// Evaluates one date or duration input the way `ColumnTypeDate::modify` and
 /// `ColumnTypeDuration::modify` do.
 struct DateExpression {
-	let clock: Clock
+	let clock: WallClock
 	let format: String
 	let settings: Datetime.Settings
 
@@ -234,8 +234,8 @@ struct DateExpression {
 				}
 
 			case let .duration(text):
-				let duration = DurationLiteral.parse(text)
-				values.append(.duration(duration?.end == text.count ? duration?.seconds ?? 0 : 0))
+				let duration = DurationLiteral.parse(text).flatMap { $0.end == text.count ? $0.seconds : nil }
+				values.append(.duration(duration ?? 0))
 
 			case let .identifier(name):
 				try values.append(value(of: name, references: references))
@@ -456,35 +456,32 @@ private func divide(_ left: Variant, _ right: Variant) throws(ExpressionError) -
 	}
 }
 
-/// `string` `count` times. Where TW would loop without end on a negative count, or build text too
-/// long to be a date, this fails the evaluation instead.
+/// The longest text `repeated` builds, a memory bound TW doesn't have.
+private let maximumRepeatedLength = 4_096
+
+/// `string` `count` times. Where TW would loop without end on a negative count, or build text past
+/// `maximumRepeatedLength`, this fails the evaluation instead.
 private func repeated(_ string: [UInt8], count: Int) throws(ExpressionError) -> [UInt8] {
-	guard count >= 0, count.multipliedReportingOverflow(by: string.count).partialValue <= 4_096 else {
+	let length = count.multipliedReportingOverflow(by: string.count)
+	guard count >= 0, !length.overflow, length.partialValue <= maximumRepeatedLength else {
 		throw .evaluationFailed
 	}
 	return Array(repeatElement(string, count: count).joined())
 }
 
-/// C++'s `(int)` of a double, which saturates on arm64.
+/// C++'s `(int)` of a double.
 private func int32(_ value: Double) -> Int {
-	Int(Int32(clamping: value.isNaN ? 0 : value))
+	Int(saturating(value) as Int32)
 }
 
 /// C++'s `(time_t)(unsigned)(int)` of a double: a negative result wraps to a large positive one.
 private func unsignedInt32(_ value: Double) -> Int {
-	Int(UInt32(bitPattern: Int32(clamping: value.isNaN ? 0 : value)))
+	Int(UInt32(bitPattern: saturating(value)))
 }
 
 /// `(time_t)(unsigned)(int)` of an integer, keeping its low 32 bits.
 private func unsignedInt32(_ value: Int) -> Int {
 	Int(UInt32(truncatingIfNeeded: value))
-}
-
-extension Int32 {
-	/// Truncates toward zero, saturating as arm64's conversion does.
-	fileprivate init(clamping value: Double) {
-		self = value >= Double(Self.max) ? .max : value <= Double(Self.min) ? .min : Self(value)
-	}
 }
 
 extension BrokenDownTime {
@@ -541,6 +538,15 @@ private enum Token: Equatable {
 /// `Eval::infixParse`'s recursive descent, kept for the one thing it changes: which `-` and `+`
 /// are prefixes.
 private struct InfixParser {
+	private static let logical: Set = ["and", "or", "xor"]
+	private static let regex: Set = ["!~", "~"]
+	private static let equality: Set = ["!=", "!==", "=", "=="]
+	private static let comparative: Set = ["<", "<=", ">", ">="]
+	private static let arithmetic: Set = ["+", "-"]
+	private static let geometric: Set = ["%", "*", "/"]
+	private static let tag: Set = ["_hastag_", "_notag_"]
+	private static let exponent: Set = ["^"]
+
 	var tokens: [Token]
 
 	private var index = 0
@@ -550,31 +556,31 @@ private struct InfixParser {
 	}
 
 	mutating func parseLogical() -> Bool {
-		parseBinary(["and", "or", "xor"]) { $0.parseRegex() }
+		parseBinary(Self.logical) { $0.parseRegex() }
 	}
 
 	private mutating func parseRegex() -> Bool {
-		parseBinary(["!~", "~"]) { $0.parseEquality() }
+		parseBinary(Self.regex) { $0.parseEquality() }
 	}
 
 	private mutating func parseEquality() -> Bool {
-		parseBinary(["!=", "!==", "=", "=="]) { $0.parseComparative() }
+		parseBinary(Self.equality) { $0.parseComparative() }
 	}
 
 	private mutating func parseComparative() -> Bool {
-		parseBinary(["<", "<=", ">", ">="]) { $0.parseArithmetic() }
+		parseBinary(Self.comparative) { $0.parseArithmetic() }
 	}
 
 	private mutating func parseArithmetic() -> Bool {
-		parseBinary(["+", "-"]) { $0.parseGeometric() }
+		parseBinary(Self.arithmetic) { $0.parseGeometric() }
 	}
 
 	private mutating func parseGeometric() -> Bool {
-		parseBinary(["%", "*", "/"]) { $0.parseTag() }
+		parseBinary(Self.geometric) { $0.parseTag() }
 	}
 
 	private mutating func parseTag() -> Bool {
-		parseBinary(["_hastag_", "_notag_"]) { $0.parseUnary() }
+		parseBinary(Self.tag) { $0.parseUnary() }
 	}
 
 	private mutating func parseUnary() -> Bool {
@@ -595,7 +601,7 @@ private struct InfixParser {
 				break
 			}
 		}
-		return parseBinary(["^"]) { $0.parsePrimitive() }
+		return parseBinary(Self.exponent) { $0.parsePrimitive() }
 	}
 
 	private mutating func parsePrimitive() -> Bool {
@@ -643,14 +649,18 @@ private struct Lexer {
 	let text: [UInt8]
 	var cursor = 0
 
+	private var remainder: ArraySlice<UInt8> {
+		text[min(cursor, text.count)...]
+	}
+
 	func byte(at index: Int) -> Int {
-		index < text.count ? Int(Int8(bitPattern: text[index])) : 0
+		signedByte(in: text, at: index)
 	}
 
 	/// The token at the cursor, trying the kinds in `Lexer::token`'s order. A name TW would lex as
 	/// a DOM reference is lexed as an identifier, which it looks up the same way.
 	mutating func next(
-		clock: Clock,
+		clock: WallClock,
 		format: String,
 		settings: Datetime.Settings,
 	) throws(ExpressionError) -> Token {
@@ -707,22 +717,15 @@ private struct Lexer {
 
 	/// `Lexer::isOperator`, returning the operator and moving past it.
 	mutating func readOperator() -> String? {
-		let remainder = text[min(cursor, text.count)...]
-		for literal in ["_hastag_", "_notag_", "_neg_", "_pos_"]
-			where remainder.starts(with: literal.utf8)
-		{
+		if let literal = ["_hastag_", "_notag_", "_neg_", "_pos_"].first(where: { matches($0) }) {
 			cursor += literal.utf8.count
 			return literal
 		}
 		let (c1, c2, c3) = (byte(at: cursor + 1), byte(at: cursor + 2), byte(at: cursor + 3))
-		let isTriple = text.count - cursor >= 3 && (
-			(matches("and") && isBoundary(c2, c3)) || (matches("xor") && isBoundary(c2, c3))
-				|| matches("!==")
-		)
-		let isDouble = text.count - cursor >= 2 && (
-			["!=", "!~", "&&", "<=", "==", ">=", "||"].contains { matches($0) }
-				|| (matches("or") && isBoundary(c1, c2))
-		)
+		let isTriple = (matches("and") && isBoundary(c2, c3)) || (matches("xor") && isBoundary(c2, c3))
+			|| matches("!==")
+		let isDouble = ["!=", "!~", "&&", "<=", "==", ">=", "||"].contains(where: { matches($0) })
+			|| (matches("or") && isBoundary(c1, c2))
 		let length = isTriple ? 3 : isDouble ? 2 : isSingleCharacterOperator(byte(at: cursor)) ? 1 : 0
 		guard length > 0 else {
 			return nil
@@ -738,7 +741,7 @@ private struct Lexer {
 	}
 
 	private func matches(_ literal: String) -> Bool {
-		text[min(cursor, text.count)...].starts(with: literal.utf8)
+		remainder.starts(with: literal.utf8)
 	}
 
 	/// `Lexer::isURL`: `http://` or `https://`, in any case, up to whitespace.
@@ -850,7 +853,7 @@ private struct Lexer {
 
 	/// `Lexer::isHexNumber`: `0x` and at least one hex digit.
 	private func hexEnd() -> Int? {
-		guard text.count - cursor >= 3, text[cursor...].starts(with: "0x".utf8) else {
+		guard matches("0x") else {
 			return nil
 		}
 		var end = cursor + 2

@@ -93,7 +93,7 @@ enum DurationLiteral {
 				seconds = seconds &+ sign &* length &* (pig.getDesignated(designator) ?? 0)
 			}
 		}
-		guard pig.cursor - checkpoint >= 3, !isLatinAlpha(pig.peek()), !isLatinDigit(pig.peek()) else {
+		guard pig.cursor - checkpoint >= 3, pig.isAtWordEnd else {
 			pig.cursor = checkpoint
 			return nil
 		}
@@ -108,7 +108,7 @@ enum DurationLiteral {
 			return nil
 		}
 		let weeks = pig.getDesignated("W") ?? 0
-		guard pig.cursor - checkpoint >= 3, !isLatinAlpha(pig.peek()), !isLatinDigit(pig.peek()) else {
+		guard pig.cursor - checkpoint >= 3, pig.isAtWordEnd else {
 			pig.cursor = checkpoint
 			return nil
 		}
@@ -118,24 +118,18 @@ enum DurationLiteral {
 	/// A standalone unit such as `weekly`, or a number and a unit, such as `1.5h` or `2 weeks`.
 	private static func parseUnits(_ pig: inout Pig) -> Int? {
 		let checkpoint = pig.cursor
-		let names = units.map(\.name)
-		if let name = pig.getOneOf(names) {
-			if !isLatinAlpha(pig.peek()), !isLatinDigit(pig.peek()) {
-				if let unit = units.first(where: { $0.name == name && $0.isStandalone }) {
-					return unit.seconds
-				}
+		if let unit = units.first(where: { pig.skipLiteral($0.name) }) {
+			if pig.isAtWordEnd, unit.isStandalone {
+				return unit.seconds
 			}
 		} else if let number = pig.getDecimal() {
 			_ = pig.skipWhitespace()
 			// A `d` quantity over 10000 would read the start of a UUID as a duration.
 			if
-				let name = pig.getOneOf(names), !(name == "d" && number > 10_000),
-				!isLatinAlpha(pig.peek()), !isLatinDigit(pig.peek()),
-				let unit = units.first(where: { $0.name == name })
+				let unit = units.first(where: { pig.skipLiteral($0.name) }),
+				!(unit.name == "d" && number > 10_000), pig.isAtWordEnd
 			{
-				// Saturating, as arm64 converts, where C++ leaves an overflow undefined.
-				let seconds = number * Double(unit.seconds)
-				return seconds >= Double(Int.max) ? .max : seconds <= Double(Int.min) ? .min : Int(seconds)
+				return saturating(number * Double(unit.seconds))
 			}
 		}
 		pig.cursor = checkpoint

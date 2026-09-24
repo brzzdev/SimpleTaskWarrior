@@ -26,7 +26,7 @@ private let monthNames = [
 ]
 
 /// `struct tm`, with the year in full and the month and weekday 0-based as `tm` has them. Fields
-/// may run out of range before `Clock.epoch` normalises them, as `mktime` does.
+/// may run out of range before `WallClock.epoch` normalises them, as `mktime` does.
 struct BrokenDownTime {
 	var year: Int
 	var month: Int
@@ -39,7 +39,7 @@ struct BrokenDownTime {
 }
 
 /// `localtime`, `gmtime`, `mktime` and `timegm` over one time zone, with `time()` fixed at `now`.
-struct Clock {
+struct WallClock {
 	private static let utcCalendar = {
 		var calendar = Calendar(identifier: .gregorian)
 		calendar.timeZone = .gmt
@@ -115,9 +115,14 @@ struct Datetime {
 		var isISOEnabled: Bool
 		/// `weekstart`: 0 for Sunday or 1 for Monday.
 		var weekstart: Int
+
+		/// The digits an ISO week date's weekday may be: 1–7 from Monday, else 0–6 from Sunday.
+		var weekdays: ClosedRange<Int> {
+			weekstart == 1 ? 1 ... 7 : 0 ... 6
+		}
 	}
 
-	let clock: Clock
+	let clock: WallClock
 	let settings: Settings
 
 	/// The parsed date, once `parse` succeeds.
@@ -133,7 +138,7 @@ struct Datetime {
 	private var weekday: Int
 	private var year = 0
 
-	init(clock: Clock, settings: Settings) {
+	init(clock: WallClock, settings: Settings) {
 		self.clock = clock
 		self.settings = settings
 		weekday = settings.weekstart
@@ -635,8 +640,7 @@ struct Datetime {
 	/// 1–7 when the week starts on Monday, else 0–6.
 	private func parseWeekday(_ pig: inout Pig) -> Int? {
 		let checkpoint = pig.cursor
-		let range = settings.weekstart ... (settings.weekstart == 1 ? 7 : 6)
-		if let weekday = pig.getDigit(), range.contains(weekday) {
+		if let weekday = pig.getDigit(), settings.weekdays.contains(weekday) {
 			return weekday
 		}
 		pig.cursor = checkpoint
@@ -669,13 +673,8 @@ struct Datetime {
 	private mutating func parseRelativeDay(_ pig: inout Pig) -> Bool {
 		for (name, days) in [("yesterday", -1), ("today", 0), ("tomorrow", 1)] {
 			let checkpoint = pig.cursor
-			if let token = pig.skipPartial(name), token.utf8.count >= 3, pig.isAtWordEnd {
-				date = clock.local { time in
-					time.day += days
-					time.hour = 0
-					time.minute = 0
-					time.second = 0
-				}
+			if pig.skipPartial(name) >= 3, pig.isAtWordEnd {
+				date = clock.local { $0.startOfDay(adding: days) }
 				return true
 			}
 			pig.cursor = checkpoint
@@ -705,10 +704,7 @@ struct Datetime {
 					if number <= time.day {
 						time.month += 1
 					}
-					time.day = number
-					time.hour = 0
-					time.minute = 0
-					time.second = 0
+					time.startOfDay(adding: number - time.day)
 				}
 				return true
 			}
@@ -723,14 +719,11 @@ struct Datetime {
 		// Sunday twice, as 0 and 7, as the original loops.
 		for day in 0 ... 7 {
 			if
-				let token = pig.skipPartial(dayNames[day % 7], ignoringCase: true),
-				token.utf8.count >= 3, pig.isAtWordEnd, !pig.isAtPairSeparator
+				pig.skipPartial(dayNames[day % 7], ignoringCase: true) >= 3, pig.isAtWordEnd,
+				!pig.isAtPairSeparator
 			{
 				date = clock.local { time in
-					time.day += day - time.weekday + (time.weekday >= day ? 7 : 0)
-					time.hour = 0
-					time.minute = 0
-					time.second = 0
+					time.startOfDay(adding: day - time.weekday + (time.weekday >= day ? 7 : 0))
 				}
 				return true
 			}
@@ -744,18 +737,14 @@ struct Datetime {
 		let checkpoint = pig.cursor
 		for (month, name) in monthNames.enumerated() {
 			if
-				let token = pig.skipPartial(name, ignoringCase: true), token.utf8.count >= 3,
-				pig.isAtWordEnd, !pig.isAtPairSeparator
+				pig.skipPartial(name, ignoringCase: true) >= 3, pig.isAtWordEnd,
+				!pig.isAtPairSeparator
 			{
 				date = clock.local { time in
 					if time.month >= month {
 						time.year += 1
 					}
-					time.month = month
-					time.day = 1
-					time.hour = 0
-					time.minute = 0
-					time.second = 0
+					time.startOfMonth(adding: month - time.month)
 				}
 				return true
 			}
@@ -768,15 +757,12 @@ struct Datetime {
 	/// `later` stays skipped when `someday` is tried, as it does in the original.
 	private mutating func parseLater(_ pig: inout Pig) -> Bool {
 		let checkpoint = pig.cursor
-		let later = pig.skipPartial("later").map { $0.utf8.count >= 3 } ?? false
-		if later || (pig.skipPartial("someday").map { $0.utf8.count >= 4 } ?? false), pig.isAtWordEnd {
+		let later = pig.skipPartial("later") >= 3
+		if later || pig.skipPartial("someday") >= 4, pig.isAtWordEnd {
 			date = clock.local { time in
 				time.year = 9_999
 				time.month = 11
-				time.day = 30
-				time.hour = 0
-				time.minute = 0
-				time.second = 0
+				time.startOfDay(adding: 30 - time.day)
 			}
 			return true
 		}
@@ -868,7 +854,6 @@ struct Datetime {
 
 	/// Range checks on what the ISO and formatted parsers read.
 	private func validate() -> Bool {
-		let weekdays = settings.weekstart == 1 ? 1 ... 7 : 0 ... 6
 		if year != 0, !(1_900 ... 9_999).contains(year) {
 			return false
 		}
@@ -878,7 +863,7 @@ struct Datetime {
 		if week != 0, !(1 ... 53).contains(week) {
 			return false
 		}
-		if !weekdays.contains(weekday) {
+		if !settings.weekdays.contains(weekday) {
 			return false
 		}
 		if julian != 0, !(1 ... daysInYear(year)).contains(julian) {
@@ -997,21 +982,21 @@ private let periodBoundaries: [(name: String, adjust: @Sendable (inout BrokenDow
 	("sopm", { $0.startOfMonth(adding: -1) }),
 	("som", { $0.startOfMonth(adding: 0) }),
 	("sonm", { $0.startOfMonth(adding: 1) }),
-	("eopm", { $0.startOfMonth(adding: 0, secondBefore: true) }),
-	("eom", { $0.startOfMonth(adding: 1, secondBefore: true) }),
-	("eonm", { $0.startOfMonth(adding: 2, secondBefore: true) }),
+	("eopm", { $0.endOfMonth(adding: -1) }),
+	("eom", { $0.endOfMonth(adding: 0) }),
+	("eonm", { $0.endOfMonth(adding: 1) }),
 	("sopq", { $0.startOfMonth(adding: -$0.month % 3 - 3) }),
 	("soq", { $0.startOfMonth(adding: -$0.month % 3) }),
 	("sonq", { $0.startOfMonth(adding: 3 - $0.month % 3) }),
-	("eopq", { $0.startOfMonth(adding: -$0.month % 3, secondBefore: true) }),
-	("eoq", { $0.startOfMonth(adding: 3 - $0.month % 3, secondBefore: true) }),
-	("eonq", { $0.startOfMonth(adding: 6 - $0.month % 3, secondBefore: true) }),
+	("eopq", { $0.endOfMonth(adding: -$0.month % 3 - 1) }),
+	("eoq", { $0.endOfMonth(adding: 2 - $0.month % 3) }),
+	("eonq", { $0.endOfMonth(adding: 5 - $0.month % 3) }),
 	("sopy", { $0.startOfMonth(adding: -$0.month - 12) }),
 	("soy", { $0.startOfMonth(adding: -$0.month) }),
 	("sony", { $0.startOfMonth(adding: 12 - $0.month) }),
-	("eopy", { $0.startOfMonth(adding: -$0.month, secondBefore: true) }),
-	("eoy", { $0.startOfMonth(adding: 12 - $0.month, secondBefore: true) }),
-	("eony", { $0.startOfMonth(adding: 24 - $0.month, secondBefore: true) }),
+	("eopy", { $0.endOfMonth(adding: -$0.month - 1) }),
+	("eoy", { $0.endOfMonth(adding: 11 - $0.month) }),
+	("eony", { $0.endOfMonth(adding: 23 - $0.month) }),
 ]
 
 extension BrokenDownTime {
@@ -1034,31 +1019,23 @@ extension BrokenDownTime {
 		second = -1
 	}
 
-	/// Midnight on the 1st of the month `months` from this one, or the second before it.
-	fileprivate mutating func startOfMonth(adding months: Int, secondBefore: Bool = false) {
+	/// Midnight on the 1st of the month `months` from this one.
+	fileprivate mutating func startOfMonth(adding months: Int) {
 		month += months
 		startOfDay(adding: 1 - day)
-		if secondBefore {
-			second = -1
-		}
+	}
+
+	/// 23:59:59 on the last day of the month `months` from this one.
+	fileprivate mutating func endOfMonth(adding months: Int) {
+		startOfMonth(adding: months + 1)
+		second = -1
 	}
 }
 
 extension Pig {
-	/// Whether the next character ends a word: neither a letter nor a digit.
-	fileprivate var isAtWordEnd: Bool {
-		!isLatinAlpha(peek()) && !isLatinDigit(peek())
-	}
-
 	/// Whether the next character would make the word an attribute name, as in `monday:x`.
 	fileprivate var isAtPairSeparator: Bool {
 		peek() == ascii(":") || peek() == ascii("=")
-	}
-
-	/// Whether the text continues with the whole word `literal`.
-	fileprivate func startsWithWord(_ literal: String) -> Bool {
-		var pig = self
-		return pig.skipLiteral(literal) && pig.isAtWordEnd
 	}
 
 	/// Digits as the formatted parser reads a variable-width field: a leading 0 reads the next
