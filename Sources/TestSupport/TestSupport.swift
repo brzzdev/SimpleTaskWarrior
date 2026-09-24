@@ -6,7 +6,7 @@ extension Taskrc {
 	/// Parses the Taskrc at `url` from disk, in the environment `just fixtures` records in.
 	public init(fixture url: URL) {
 		self.init(path: url.path(percentEncoded: false), environment: .fixture) {
-			path throws(Self.ReadError) in
+			path, _ throws(Self.ReadError) in
 			let url = URL(filePath: path)
 			// Decoded by hand, since `String(contentsOf:encoding:)` drops a BOM the parser must handle.
 			guard let data = try? Data(contentsOf: url) else {

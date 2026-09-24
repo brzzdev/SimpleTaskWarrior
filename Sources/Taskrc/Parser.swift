@@ -110,19 +110,32 @@ struct Parser {
 	var entries: [String: Entry] = [:]
 	let environment: Taskrc.Environment
 	var problems: [Taskrc.Problem] = []
-	let readFile: (_ path: String) throws(Taskrc.ReadError) -> Taskrc.File
+	let readFile: (_ path: String, _ include: Taskrc.Include?) throws(Taskrc.ReadError) -> Taskrc.File
 
-	/// Reads the file at `path` and parses it, throwing when it can't be read.
+	/// Starts from TW's compiled-in defaults.
+	init(
+		environment: Taskrc.Environment,
+		readFile: @escaping (_ path: String, _ include: Taskrc.Include?) throws(Taskrc.ReadError)
+			-> Taskrc.File,
+	) {
+		self.environment = environment
+		self.readFile = readFile
+		parse(taskwarriorDefaults, file: nil)
+	}
+
+	/// Reads the file at `path`, which `include` names, and parses it, throwing when it can't be
+	/// read.
 	mutating func load(
 		_ path: String,
-		from location: Taskrc.Location?,
+		for include: Taskrc.Include?,
+		at location: Taskrc.Location?,
 		depth: Int,
 	) throws(Taskrc.ReadError) {
 		guard depth <= maximumDepth else {
 			problems.append(Taskrc.Problem(.includeNestedTooDeeply(path: path), at: location))
 			return
 		}
-		let file = try readFile(path)
+		let file = try readFile(path, include)
 		// libshared's `File::read` drops a UTF-8 BOM from the start of every file it reads.
 		let contents = file.contents.unicodeScalars.first == "\u{FEFF}"
 			? String(file.contents.unicodeScalars.dropFirst())
@@ -159,6 +172,7 @@ struct Parser {
 				continue
 			}
 			let expansion = expand(line[include.upperBound...].trimmed)
+			let includeLine = file.map { Taskrc.Include(file: $0.path, line: String(line)) }
 			let path = expansion.value
 			let isRelative = !path.hasPrefix("/")
 			// TW tries a relative path against the CWD first, which means nothing to a GUI app. The
@@ -168,7 +182,7 @@ struct Parser {
 				guard let resolved else {
 					throw .notFound
 				}
-				try load(resolved, from: location, depth: depth + 1)
+				try load(resolved, for: includeLine, at: location, depth: depth + 1)
 			} catch .notFound where isRelative && bundledFiles.contains(path) {
 				// Only TW's share directory is left to resolve it.
 			} catch {
@@ -176,6 +190,7 @@ struct Parser {
 					Taskrc.Problem(
 						error.kind(path: resolved ?? path, unsetVariables: expansion.unsetVariables),
 						at: location,
+						include: includeLine,
 					),
 				)
 			}

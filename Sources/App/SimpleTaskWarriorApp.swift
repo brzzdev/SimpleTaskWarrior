@@ -28,6 +28,8 @@ public struct SimpleTaskWarriorApp: App {
 		.commands {
 			CommandGroup(replacing: .newItem) {
 				OpenReplicaButton()
+				Divider()
+				TaskrcButtons()
 			}
 		}
 	}
@@ -49,6 +51,27 @@ private struct OpenReplicaButton: View {
 	}
 }
 
+private struct TaskrcButtons: View {
+	@FocusedValue(\.replicaStore) private var store
+
+	var body: some View {
+		Button("Choose Taskrc…") {
+			store?.send(.chooseTaskrcButtonTapped)
+		}
+		.keyboardShortcut("o", modifiers: [.command, .option])
+		.disabled(store == nil)
+		Button("Use Taskwarrior Defaults") {
+			store?.send(.useTaskwarriorDefaultsButtonTapped)
+		}
+		.disabled(store?.hasTaskrc != true)
+	}
+}
+
+extension FocusedValues {
+	/// The store of the Replica window in front, which the menu bar's commands act on.
+	@Entry var replicaStore: StoreOf<ReplicaFeature>?
+}
+
 private struct ReplicaWindow: View {
 	@State private var store: StoreOf<ReplicaFeature>
 
@@ -62,6 +85,7 @@ private struct ReplicaWindow: View {
 
 	var body: some View {
 		ReplicaView(store: store)
+			.focusedSceneValue(\.replicaStore, store)
 	}
 }
 
