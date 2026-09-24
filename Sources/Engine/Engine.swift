@@ -575,6 +575,11 @@ public protocol EngineHandleProtocol: AnyObject, Sendable {
     
     /**
      * Reverts `operations` if they are still TaskChampion's newest undo operations.
+     *
+     * After a failure, whether the reversal landed is judged by re-reading the log, which is only a
+     * best guess: a CLI write in between reads as applied, and a re-read that fails too (say, the
+     * CLI still holding the lock) is reported as the original error though the reversal may have
+     * committed. Refresh after any outcome but `NotApplied`.
      */
     func commitReversedOperations(operations: [UndoOperation]) throws  -> UndoOutcome
     
@@ -584,7 +589,7 @@ public protocol EngineHandleProtocol: AnyObject, Sendable {
     func dataVersion() throws  -> Int64
     
     /**
-     * The operations since the newest undo point, which starts them.
+     * The operations since the newest Undo point, which starts them.
      */
     func getUndoOperations() throws  -> [UndoOperation]
     
@@ -684,6 +689,11 @@ open func apply(operations: [PlannedOperation], expectations: [Expectation])thro
     
     /**
      * Reverts `operations` if they are still TaskChampion's newest undo operations.
+     *
+     * After a failure, whether the reversal landed is judged by re-reading the log, which is only a
+     * best guess: a CLI write in between reads as applied, and a re-read that fails too (say, the
+     * CLI still holding the lock) is reported as the original error though the reversal may have
+     * committed. Refresh after any outcome but `NotApplied`.
      */
 open func commitReversedOperations(operations: [UndoOperation])throws  -> UndoOutcome  {
     return try  FfiConverterTypeUndoOutcome_lift(try rustCallWithError(FfiConverterTypeEngineError_lift) {
@@ -708,7 +718,7 @@ open func dataVersion()throws  -> Int64  {
 }
     
     /**
-     * The operations since the newest undo point, which starts them.
+     * The operations since the newest Undo point, which starts them.
      */
 open func getUndoOperations()throws  -> [UndoOperation]  {
     return try  FfiConverterSequenceTypeUndoOperation.lift(try rustCallWithError(FfiConverterTypeEngineError_lift) {
@@ -1373,9 +1383,9 @@ public enum UndoOperation: Equatable, Hashable {
     )
     case delete(uuid: String, oldTask: [String: String]
     )
+    case undoPoint
     case update(uuid: String, property: String, oldValue: String?, value: String?, timestampNanoseconds: Int64
     )
-    case undoPoint
 
 
 
@@ -1403,10 +1413,10 @@ public struct FfiConverterTypeUndoOperation: FfiConverterRustBuffer {
         case 2: return .delete(uuid: try FfiConverterString.read(from: &buf), oldTask: try FfiConverterDictionaryStringString.read(from: &buf)
         )
         
-        case 3: return .update(uuid: try FfiConverterString.read(from: &buf), property: try FfiConverterString.read(from: &buf), oldValue: try FfiConverterOptionString.read(from: &buf), value: try FfiConverterOptionString.read(from: &buf), timestampNanoseconds: try FfiConverterInt64.read(from: &buf)
-        )
+        case 3: return .undoPoint
         
-        case 4: return .undoPoint
+        case 4: return .update(uuid: try FfiConverterString.read(from: &buf), property: try FfiConverterString.read(from: &buf), oldValue: try FfiConverterOptionString.read(from: &buf), value: try FfiConverterOptionString.read(from: &buf), timestampNanoseconds: try FfiConverterInt64.read(from: &buf)
+        )
         
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -1427,18 +1437,18 @@ public struct FfiConverterTypeUndoOperation: FfiConverterRustBuffer {
             FfiConverterDictionaryStringString.write(oldTask, into: &buf)
             
         
-        case let .update(uuid,property,oldValue,value,timestampNanoseconds):
+        case .undoPoint:
             writeInt(&buf, Int32(3))
+        
+        
+        case let .update(uuid,property,oldValue,value,timestampNanoseconds):
+            writeInt(&buf, Int32(4))
             FfiConverterString.write(uuid, into: &buf)
             FfiConverterString.write(property, into: &buf)
             FfiConverterOptionString.write(oldValue, into: &buf)
             FfiConverterOptionString.write(value, into: &buf)
             FfiConverterInt64.write(timestampNanoseconds, into: &buf)
             
-        
-        case .undoPoint:
-            writeInt(&buf, Int32(4))
-        
         }
     }
 }
@@ -1464,15 +1474,15 @@ public func FfiConverterTypeUndoOperation_lower(_ value: UndoOperation) -> RustB
 public enum UndoOutcome: Equatable, Hashable {
     
     /**
-     * The operations were no longer TaskChampion's newest undo point, so nothing changed.
-     */
-    case notApplied
-    /**
      * The reversal committed, so the snapshot needs refreshing. `error` is a failure that followed
      * it, while TaskChampion rebuilt the working set.
      */
     case applied(error: String?
     )
+    /**
+     * The operations were no longer TaskChampion's newest Undo point, so nothing changed.
+     */
+    case notApplied
 
 
 
@@ -1494,10 +1504,10 @@ public struct FfiConverterTypeUndoOutcome: FfiConverterRustBuffer {
         let variant: Int32 = try readInt(&buf)
         switch variant {
         
-        case 1: return .notApplied
-        
-        case 2: return .applied(error: try FfiConverterOptionString.read(from: &buf)
+        case 1: return .applied(error: try FfiConverterOptionString.read(from: &buf)
         )
+        
+        case 2: return .notApplied
         
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -1507,14 +1517,14 @@ public struct FfiConverterTypeUndoOutcome: FfiConverterRustBuffer {
         switch value {
         
         
-        case .notApplied:
-            writeInt(&buf, Int32(1))
-        
-        
         case let .applied(error):
-            writeInt(&buf, Int32(2))
+            writeInt(&buf, Int32(1))
             FfiConverterOptionString.write(error, into: &buf)
             
+        
+        case .notApplied:
+            writeInt(&buf, Int32(2))
+        
         }
     }
 }
@@ -1753,13 +1763,13 @@ private let initializationResult: InitializationResult = {
     if (uniffi_engine_checksum_method_enginehandle_apply() != 53698) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_engine_checksum_method_enginehandle_commit_reversed_operations() != 43696) {
+    if (uniffi_engine_checksum_method_enginehandle_commit_reversed_operations() != 38733) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_engine_checksum_method_enginehandle_data_version() != 28298) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_engine_checksum_method_enginehandle_get_undo_operations() != 41200) {
+    if (uniffi_engine_checksum_method_enginehandle_get_undo_operations() != 37065) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_engine_checksum_method_enginehandle_snapshot() != 63241) {

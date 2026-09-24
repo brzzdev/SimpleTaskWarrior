@@ -26,6 +26,11 @@ let package = Package(
 			dependencies: [
 				"EngineFFI",
 			],
+			// Only this of the shared settings below: a UniFFI bump that brings warnings should
+			// fail the build, not erode it quietly.
+			swiftSettings: [
+				.treatAllWarnings(as: .error),
+			],
 			linkerSettings: [
 				// The engine links the system SQLite rather than bundling its own.
 				.linkedLibrary("sqlite3"),
@@ -119,8 +124,7 @@ let package = Package(
 	],
 )
 
-// Not the engine's generated bindings: they break under `InternalImportsByDefault`, and
-// they aren't ours to change, so their warnings can't be made errors either.
+// Not the engine's generated bindings, which break under `InternalImportsByDefault`.
 for target in package.targets where target.type != .binary && target.name != "Engine" {
 	target.swiftSettings = target.swiftSettings ?? []
 	target.swiftSettings?.append(contentsOf: [

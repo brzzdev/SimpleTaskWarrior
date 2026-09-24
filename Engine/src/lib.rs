@@ -17,12 +17,15 @@ uniffi::setup_scaffolding!();
 
 const DATABASE_FILE: &str = "taskchampion.sqlite3";
 
+/// How many times a snapshot is retried while the CLI keeps committing under it.
+const SNAPSHOT_ATTEMPTS: usize = 5;
+
 /// The schema major version TaskChampion 3.1 reads. TaskChampion refuses a newer major itself, but
 /// with an untyped error; gating first lets the app say why.
 const SUPPORTED_SCHEMA_MAJOR: u32 = 0;
 
-/// How many times a snapshot is retried while the CLI keeps committing under it.
-const SNAPSHOT_ATTEMPTS: usize = 5;
+/// What TaskChampion reads a missing `version` table or row as: a schema from before it versioned.
+const UNVERSIONED_SCHEMA: (u32, u32) = (0, 0);
 
 #[derive(Debug, uniffi::Error)]
 pub enum EngineError {
@@ -146,6 +149,7 @@ pub enum UndoOperation {
 		uuid: String,
 		old_task: HashMap<String, String>,
 	},
+	UndoPoint,
 	Update {
 		uuid: String,
 		property: String,
@@ -153,7 +157,6 @@ pub enum UndoOperation {
 		value: Option<String>,
 		timestamp_nanoseconds: i64,
 	},
-	UndoPoint,
 }
 
 impl TryFrom<Operation> for UndoOperation {
@@ -168,6 +171,7 @@ impl TryFrom<Operation> for UndoOperation {
 				uuid: uuid.to_string(),
 				old_task,
 			},
+			Operation::UndoPoint => UndoOperation::UndoPoint,
 			Operation::Update {
 				uuid,
 				property,
@@ -183,7 +187,6 @@ impl TryFrom<Operation> for UndoOperation {
 					.timestamp_nanos_opt()
 					.ok_or_else(|| failed(format!("timestamp {timestamp} is out of range")))?,
 			},
-			Operation::UndoPoint => UndoOperation::UndoPoint,
 		})
 	}
 }
@@ -200,6 +203,7 @@ impl TryFrom<UndoOperation> for Operation {
 				uuid: parse_uuid(&uuid)?,
 				old_task,
 			},
+			UndoOperation::UndoPoint => Operation::UndoPoint,
 			UndoOperation::Update {
 				uuid,
 				property,
@@ -213,18 +217,17 @@ impl TryFrom<UndoOperation> for Operation {
 				value,
 				timestamp: DateTime::from_timestamp_nanos(timestamp_nanoseconds),
 			},
-			UndoOperation::UndoPoint => Operation::UndoPoint,
 		})
 	}
 }
 
 #[derive(uniffi::Enum)]
 pub enum UndoOutcome {
-	/// The operations were no longer TaskChampion's newest undo point, so nothing changed.
-	NotApplied,
 	/// The reversal committed, so the snapshot needs refreshing. `error` is a failure that followed
 	/// it, while TaskChampion rebuilt the working set.
 	Applied { error: Option<String> },
+	/// The operations were no longer TaskChampion's newest Undo point, so nothing changed.
+	NotApplied,
 }
 
 /// `SqliteStorage` runs its own thread and runtime; this one only awaits its channels.
@@ -246,17 +249,15 @@ fn data_version(connection: &Connection) -> Result<i64, EngineError> {
 }
 
 fn schema_version(connection: &Connection) -> Result<(u32, u32), EngineError> {
-	// TaskChampion reads a missing `version` table or row as 0.0, from before it versioned the
-	// schema.
 	if !connection.table_exists(None, "version")? {
-		return Ok((0, 0));
+		return Ok(UNVERSIONED_SCHEMA);
 	}
 	let version = connection
 		.query_row("SELECT major, minor FROM version", [], |row| {
 			Ok((row.get(0)?, row.get(1)?))
 		})
 		.optional()?;
-	Ok(version.unwrap_or((0, 0)))
+	Ok(version.unwrap_or(UNVERSIONED_SCHEMA))
 }
 
 /// A task's current data, read from the Replica once per `apply`.
@@ -354,37 +355,42 @@ impl EngineHandle {
 			if !conflicts.is_empty() {
 				return Ok(ApplyOutcome::Conflict { uuids: conflicts });
 			}
-			// A lone undo point would still land in the shared log, where `task undo` sees it.
+			// A lone Undo point would still land in the shared log, where `task undo` sees it.
 			if operations.is_empty() {
 				return Ok(ApplyOutcome::Committed);
 			}
 
-			let mut committed = vec![Operation::UndoPoint];
+			let mut batch = vec![Operation::UndoPoint];
 			for operation in operations {
 				match operation {
 					PlannedOperation::Create { uuid } => {
 						let uuid = parse_uuid(&uuid)?;
-						tasks.insert(uuid, Some(TaskData::create(uuid, &mut committed)));
+						tasks.insert(uuid, Some(TaskData::create(uuid, &mut batch)));
 					}
 					PlannedOperation::SetStatus { uuid, status } => {
 						let value = Some(status.stored_value().to_string());
-						update(replica, &mut tasks, &uuid, "status", value, &mut committed).await?;
+						update(replica, &mut tasks, &uuid, "status", value, &mut batch).await?;
 					}
 					PlannedOperation::SetValue {
 						uuid,
 						property,
 						value,
 					} => {
-						update(replica, &mut tasks, &uuid, &property, value, &mut committed).await?;
+						update(replica, &mut tasks, &uuid, &property, value, &mut batch).await?;
 					}
 				}
 			}
-			replica.commit_operations(committed).await?;
+			replica.commit_operations(batch).await?;
 			Ok(ApplyOutcome::Committed)
 		})
 	}
 
 	/// Reverts `operations` if they are still TaskChampion's newest undo operations.
+	///
+	/// After a failure, whether the reversal landed is judged by re-reading the log, which is only a
+	/// best guess: a CLI write in between reads as applied, and a re-read that fails too (say, the
+	/// CLI still holding the lock) is reported as the original error though the reversal may have
+	/// committed. Refresh after any outcome but `NotApplied`.
 	pub fn commit_reversed_operations(
 		&self,
 		operations: Vec<UndoOperation>,
@@ -416,7 +422,7 @@ impl EngineHandle {
 		data_version(&self.watcher.lock().unwrap())
 	}
 
-	/// The operations since the newest undo point, which starts them.
+	/// The operations since the newest Undo point, which starts them.
 	pub fn get_undo_operations(&self) -> Result<Vec<UndoOperation>, EngineError> {
 		let mut replica = self.replica.lock().unwrap();
 		let operations = runtime().block_on(replica.get_undo_operations())?;
