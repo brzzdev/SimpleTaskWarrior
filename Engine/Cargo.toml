@@ -1,0 +1,22 @@
+[package]
+name = "engine"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["lib", "staticlib"]
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "uniffi-bindgen.rs"
+
+[dependencies]
+# Must match the `rusqlite` taskchampion pins: `links = "sqlite3"` allows one `libsqlite3-sys`.
+# No `bundled`, so the process links the system libsqlite3 and holds one SQLite.
+rusqlite = "0.39"
+# The minor Homebrew's Taskwarrior links, so the app and the CLI share a schema.
+taskchampion = { version = "~3.1.0", default-features = false, features = ["storage-sqlite"] }
+tokio = { version = "1", features = ["rt"] }
+# Exact, so the bindgen binary and the runtime it generates against never drift.
+uniffi = { version = "=0.32.2", features = ["cli"] }

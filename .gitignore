@@ -21,3 +21,7 @@ DerivedData/
 
 # SwiftLint remote config cache
 .swiftlint/RemoteConfigCache
+
+# Rust engine: cargo output and the assembled xcframework — see `just engine`
+Engine/build/
+Engine/target/

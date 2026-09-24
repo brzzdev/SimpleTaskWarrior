@@ -1,0 +1,6 @@
+[toolchain]
+channel = "1.98.1"
+# llvm-tools for its `llvm-nm`: Xcode's `nm` can't read every object this LLVM emits.
+components = ["llvm-tools"]
+profile = "minimal"
+targets = ["aarch64-apple-darwin"]
