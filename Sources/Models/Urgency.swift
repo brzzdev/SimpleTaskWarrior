@@ -8,13 +8,20 @@ public struct DependencyScan: Equatable, Sendable {
 	public var blocked: Set<Task.ID> = []
 	public var blocking: Set<Task.ID> = []
 
+	/// The open tasks that depend on each task, which `urgency.inherit` reads.
+	var dependents: [Task.ID: [Task.ID]] = [:]
+
 	public init(_ tasks: some Collection<Task>) {
 		let statuses = Dictionary(
 			tasks.map { ($0.id, $0.status) },
 			uniquingKeysWith: { first, _ in first },
 		)
 		for task in tasks where task.status.isOpen {
-			for dependency in task.dependencies where statuses[dependency]?.isOpen == true {
+			for dependency in task.dependencies {
+				dependents[dependency, default: []].append(task.id)
+				guard statuses[dependency]?.isOpen == true else {
+					continue
+				}
 				blocked.insert(task.id)
 				blocking.insert(dependency)
 			}
@@ -44,25 +51,23 @@ public struct UrgencyCoefficients: Equatable, Sendable {
 	var waiting: Double
 
 	public init(_ taskrc: Taskrc) {
-		let coefficient = { (key: String) in taskrc[key].map(real) ?? 0 }
-		active = coefficient("urgency.active.coefficient")
-		age = coefficient("urgency.age.coefficient")
-		ageMax = coefficient("urgency.age.max")
-		annotations = coefficient("urgency.annotations.coefficient")
-		blocked = coefficient("urgency.blocked.coefficient")
-		blocking = coefficient("urgency.blocking.coefficient")
-		due = coefficient("urgency.due.coefficient")
-		// `Configuration::getInteger`.
-		imminentDays = taskrc["due"].map { strtol($0, nil, 10) } ?? 0
-		inherits = taskrc["urgency.inherit"].map(boolean) ?? false
-		project = coefficient("urgency.project.coefficient")
-		scheduled = coefficient("urgency.scheduled.coefficient")
-		tags = coefficient("urgency.tags.coefficient")
+		active = taskrc.real("urgency.active.coefficient")
+		age = taskrc.real("urgency.age.coefficient")
+		ageMax = taskrc.real("urgency.age.max")
+		annotations = taskrc.real("urgency.annotations.coefficient")
+		blocked = taskrc.real("urgency.blocked.coefficient")
+		blocking = taskrc.real("urgency.blocking.coefficient")
+		due = taskrc.real("urgency.due.coefficient")
+		imminentDays = taskrc.integer("due")
+		inherits = taskrc.boolean("urgency.inherit")
+		project = taskrc.real("urgency.project.coefficient")
+		scheduled = taskrc.real("urgency.scheduled.coefficient")
+		tags = taskrc.real("urgency.tags.coefficient")
 		// TW finds these among the keys the Taskrc sets, not the ones only the Context does.
-		user = taskrc.values
-			.sorted { $0.key < $1.key }
-			.compactMap { UserCoefficient(key: $0.key, value: real($0.value)) }
-		waiting = coefficient("urgency.waiting.coefficient")
+		user = taskrc.values.keys.sorted().compactMap { key in
+			UserCoefficient(key: key, value: taskrc.real(key))
+		}
+		waiting = taskrc.real("urgency.waiting.coefficient")
 	}
 
 	/// Every task's Urgency at `now`, as `task export` reports it. The date terms and synthetic tags
@@ -73,21 +78,14 @@ public struct UrgencyCoefficients: Equatable, Sendable {
 		at now: Date,
 		in timeZone: TimeZone,
 	) -> [Task.ID: Double] {
-		var calendar = Calendar(identifier: .gregorian)
-		calendar.timeZone = timeZone
 		let scorer = Scorer(
-			calendar: calendar,
 			coefficients: self,
 			// TW reads the clock in whole seconds.
 			now: Date(timeIntervalSince1970: now.timeIntervalSince1970.rounded(.down)),
 			scan: DependencyScan(tasks),
+			timeZone: timeZone,
 		)
-		var dependents: [Task.ID: [Task]] = [:]
-		for task in tasks where task.status.isOpen {
-			for dependency in task.dependencies {
-				dependents[dependency, default: []].append(task)
-			}
-		}
+		let tasksByID = Dictionary(tasks.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
 
 		var urgencies: [Task.ID: Double] = [:]
 		var visiting: Set<Task.ID> = []
@@ -99,9 +97,9 @@ public struct UrgencyCoefficients: Equatable, Sendable {
 			// TW recurses without a guard and never finishes on a cycle, so here a task in one skips
 			// the tasks that lead back to it.
 			if inherits, scorer.scan.blocking.contains(task.id), visiting.insert(task.id).inserted {
-				let inherited = (dependents[task.id] ?? [])
-					.filter { !visiting.contains($0.id) }
-					.map(urgency(of:))
+				let inherited = (scorer.scan.dependents[task.id] ?? [])
+					.filter { !visiting.contains($0) }
+					.compactMap { tasksByID[$0].map(urgency(of:)) }
 					.max()
 				urgency = max(urgency, inherited ?? -.greatestFiniteMagnitude) + 0.01
 				visiting.remove(task.id)
@@ -166,12 +164,46 @@ private struct Scorer {
 	/// Gregorian, in the time zone the dates are read in.
 	let calendar: Calendar
 	let coefficients: UrgencyCoefficients
+	/// Where a date stops counting as `+DUE`, or nil when every date ahead does.
+	let imminent: Date?
 	let now: Date
+	/// The week, month, quarter and year `now` falls in.
+	let periods: [Calendar.Component: DateInterval]
 	let scan: DependencyScan
+	/// The day `now` falls on, and the days either side.
+	let today: Date
+	let tomorrow: Date?
+	let yesterday: Date?
 
-	/// The day `now` falls on.
-	var today: Date {
-		calendar.startOfDay(for: now)
+	init(coefficients: UrgencyCoefficients, now: Date, scan: DependencyScan, timeZone: TimeZone) {
+		var calendar = Calendar(identifier: .gregorian)
+		calendar.timeZone = timeZone
+		// Weeks run Monday to Sunday, whatever `weekstart` says.
+		calendar.firstWeekday = 2
+		let today = calendar.startOfDay(for: now)
+		self.calendar = calendar
+		self.coefficients = coefficients
+		imminent = coefficients.imminentDays == 0
+			? nil
+			: today.addingTimeInterval(TimeInterval(coefficients.imminentDays * secondsPerDay))
+		self.now = now
+		var periods: [Calendar.Component: DateInterval] = [:]
+		for period in [Calendar.Component.month, .weekOfYear, .year] {
+			periods[period] = calendar.dateInterval(of: period, for: now)
+		}
+		var quarter = calendar.dateComponents([.month, .year], from: now)
+		quarter.month = quarter.month.map { $0 - ($0 - 1) % 3 }
+		if
+			let start = calendar.date(from: quarter),
+			let end = calendar.date(byAdding: .month, value: 3, to: start)
+		{
+			periods[.quarter] = DateInterval(start: start, end: end)
+		}
+		self.periods = periods
+		self.scan = scan
+		self.today = today
+		tomorrow = calendar.date(byAdding: .day, value: 1, to: today)
+		yesterday = calendar.date(byAdding: .day, value: -1, to: today)
 	}
 
 	func urgency(of task: Task) -> Double {
@@ -187,9 +219,10 @@ private struct Scorer {
 			(scan.blocking.contains(task.id) ? 1 : 0, coefficients.blocking),
 			(ageTerm(task), coefficients.age),
 		]
-		var urgency = terms
-			.filter { abs($0.coefficient) > 1e-6 }
-			.reduce(0) { $0 + $1.term * $1.coefficient }
+		var urgency = 0.0
+		for (term, coefficient) in terms where abs(coefficient) > 1e-6 {
+			urgency += term * coefficient
+		}
 		for coefficient in coefficients.user where matches(task, coefficient.match) {
 			urgency += coefficient.value
 		}
@@ -248,7 +281,7 @@ private struct Scorer {
 			task.hasAttribute(name)
 
 		case let .udaValue(name, value):
-			task.attribute(name) == value
+			task.hasAttribute(name, equalTo: value)
 		}
 	}
 
@@ -261,39 +294,68 @@ private struct Scorer {
 		let isOpen = task.status.isOpen
 		switch tag {
 		case "ACTIVE": return task.start != nil
+
 		case "ANNOTATED": return !task.annotations.isEmpty
+
 		case "BLOCKED": return scan.blocked.contains(task.id)
+
 		case "BLOCKING": return scan.blocking.contains(task.id)
+
 		case "CHILD", "INSTANCE": return task.parent != nil || task.template != nil
+
 		case "COMPLETED": return task.status == .completed
+
 		case "DELETED": return task.status == .deleted
+
 		case "DUE": return isOpen && [.afterToday, .earlierToday, .laterToday].contains(dueState(task))
+
 		case "DUETODAY", "TODAY": return isOpen && [.earlierToday, .laterToday].contains(dueState(task))
+
 		case "MONTH": return isOpen && isDue(task, within: .month)
+
 		case "ORPHAN": return !task.orphans.isEmpty
+
 		case "OVERDUE":
 			return isOpen && task.status != .recurring
 				&& [.beforeToday, .earlierToday].contains(dueState(task))
-		case "PARENT", "TEMPLATE": return task.mask != nil || task.last != nil
+
+		case "PARENT", "TEMPLATE": return task.hasTemplateTag
+
 		case "PENDING": return task.status == .pending && !isWaiting(task)
+
 		case "PRIORITY": return task.hasAttribute("priority")
+
 		case "PROJECT": return task.project != nil
+
 		case "QUARTER": return isOpen && isDue(task, within: .quarter)
+
 		case "READY":
 			return task.status == .pending && !isWaiting(task) && !scan.blocked.contains(task.id)
 				&& task.scheduled.map { now > $0 } != false
+
 		case "SCHEDULED": return task.scheduled != nil
+
 		case "TAGGED": return !task.tags.isEmpty
-		case "TOMORROW": return isOpen && isDue(task, daysFromToday: 1)
+
+		case "TOMORROW": return isOpen && isDue(task, on: tomorrow)
+
 		case "UDA": return !task.udas.isEmpty
+
 		case "UNBLOCKED": return !scan.blocked.contains(task.id)
+
 		case "UNTIL": return task.until != nil
+
 		case "WAITING": return isWaiting(task)
+
 		case "WEEK": return isOpen && isDue(task, within: .weekOfYear)
+
 		case "YEAR": return isOpen && isDue(task, within: .year)
-		case "YESTERDAY": return isOpen && isDue(task, daysFromToday: -1)
+
+		case "YESTERDAY": return isOpen && isDue(task, on: yesterday)
+
 		// `LATEST` means the task the running command added, and the app runs none.
 		case "LATEST": return false
+
 		default: return task.tags.contains(tag)
 		}
 	}
@@ -309,39 +371,22 @@ private struct Scorer {
 		if calendar.isDate(due, inSameDayAs: now) {
 			return due < now ? .earlierToday : .laterToday
 		}
-		guard coefficients.imminentDays != 0 else {
+		guard let imminent else {
 			return .afterToday
 		}
-		let imminent = today.addingTimeInterval(TimeInterval(coefficients.imminentDays * secondsPerDay))
 		return due < imminent ? .afterToday : .notDue
 	}
 
-	private func isDue(_ task: Task, daysFromToday days: Int) -> Bool {
-		guard let due = task.due, let day = calendar.date(byAdding: .day, value: days, to: today) else {
+	private func isDue(_ task: Task, on day: Date?) -> Bool {
+		guard let due = task.due, let day else {
 			return false
 		}
 		return calendar.isDate(due, inSameDayAs: day)
 	}
 
-	/// Whether the task is due in the week, month, quarter or year `now` falls in. Weeks run Monday
-	/// to Sunday, whatever `weekstart` says.
+	/// Whether the task is due in the week, month, quarter or year `now` falls in.
 	private func isDue(_ task: Task, within period: Calendar.Component) -> Bool {
-		guard let due = task.due else {
-			return false
-		}
-		var calendar = calendar
-		calendar.firstWeekday = 2
-		let interval: DateInterval?
-		if period == .quarter {
-			var components = calendar.dateComponents([.month, .year], from: now)
-			components.month = components.month.map { $0 - ($0 - 1) % 3 }
-			interval = calendar.date(from: components).flatMap { start in
-				calendar.date(byAdding: .month, value: 3, to: start).map { DateInterval(start: start, end: $0) }
-			}
-		} else {
-			interval = calendar.dateInterval(of: period, for: now)
-		}
-		guard let interval else {
+		guard let due = task.due, let interval = periods[period] else {
 			return false
 		}
 		return interval.start <= due && due < interval.end
@@ -371,37 +416,16 @@ extension Status {
 }
 
 extension Task {
-	/// The raw value TW's `get` reads for a UDA or orphan.
-	fileprivate func attribute(_ name: String) -> String? {
-		if let orphan = orphans[name] {
-			return orphan
+	/// TW's `get(name) == value` for a UDA or orphan, with a UDA's value read as its type.
+	fileprivate func hasAttribute(_ name: String, equalTo value: String) -> Bool {
+		guard let uda = udas[name] else {
+			return orphans[name] == value
 		}
-		switch udas[name] {
-		case let .date(date): return String(Int(date.timeIntervalSince1970))
-
-		case let .duration(value), let .string(value): return value
-
-		// As TW stores a number: without a fraction when it's whole.
-		case let .numeric(value): return value.rounded() == value ? String(Int(value)) : String(value)
-
-		case let .uuid(uuid): return uuid.uuidString.lowercased()
-
-		case nil: return nil
-		}
+		return uda == UDAValue(value, as: uda.type)
 	}
 
 	/// TW's `has` for a UDA or orphan, where `priority` is only ever one of those.
 	fileprivate func hasAttribute(_ name: String) -> Bool {
 		udas[name] != nil || orphans[name] != nil
 	}
-}
-
-/// `Configuration::getBoolean`.
-private func boolean(_ value: String) -> Bool {
-	["1", "on", "true", "y", "yes"].contains(value.lowercased())
-}
-
-/// `Configuration::getReal`, which reads a leading number with `strtod` and ignores the rest.
-private func real(_ value: String) -> Double {
-	strtod(value, nil)
 }

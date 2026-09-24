@@ -6,7 +6,9 @@ import TestSupport
 
 /// Checked against what `task` 3.5 reports for the Replicas `just fixtures` records.
 struct ModelsTests {
-	@Test(arguments: ["inherit", "urgency"])
+	static let fixtures = ["inherit", "urgency"]
+
+	@Test(arguments: fixtures)
 	func blockedRuleMatchesTask(fixture: String) throws {
 		let fixture = try Fixture(fixture)
 
@@ -16,10 +18,12 @@ struct ModelsTests {
 		#expect(try scan.blocking == fixture.uuids("blocking"))
 	}
 
-	@Test(arguments: ["inherit", "urgency"])
+	@Test(arguments: fixtures)
 	func decodingMatchesTaskExport(fixture: String) throws {
 		let fixture = try Fixture(fixture)
-		let tasks = Dictionary(uniqueKeysWithValues: fixture.tasks.map { ($0.id, $0) })
+		let tasks = Dictionary(
+			uniqueKeysWithValues: fixture.tasks.map { ($0.id.uuidString.lowercased(), $0) },
+		)
 
 		for var exported in try fixture.export() {
 			exported["urgency"] = nil
@@ -27,24 +31,25 @@ struct ModelsTests {
 				Issue.record("an exported task has no UUID")
 				continue
 			}
-			let task = try #require(tasks[UUID(uuidString: uuid) ?? UUID()])
+			let task = try #require(tasks[uuid])
 			#expect(ExportValue.fields(of: task) == exported)
 		}
 	}
 
-	@Test(arguments: ["inherit", "urgency"])
+	@Test(arguments: fixtures)
 	func templatesMatchTask(fixture: String) throws {
 		let fixture = try Fixture(fixture)
 
 		#expect(try Set(fixture.tasks.filter(\.isTemplate).map(\.id)) == fixture.uuids("templates"))
 	}
 
-	@Test(arguments: ["inherit", "urgency"])
+	@Test(arguments: fixtures)
 	func urgencyMatchesTaskExport(fixture: String) throws {
 		let fixture = try Fixture(fixture)
 
 		let urgencies = UrgencyCoefficients(fixture.taskrc)
 			.urgencies(of: fixture.tasks, at: fixture.now, in: .gmt)
+			.reduce(into: [:]) { $0[$1.key.uuidString.lowercased()] = $1.value }
 
 		for exported in try fixture.export() {
 			guard
@@ -55,7 +60,7 @@ struct ModelsTests {
 				Issue.record("an exported task has no UUID, description or Urgency")
 				continue
 			}
-			let urgency = try #require(urgencies[UUID(uuidString: uuid) ?? UUID()])
+			let urgency = try #require(urgencies[uuid])
 			// `export` prints 6 significant digits.
 			#expect(abs(urgency - expected) <= 1e-5 * max(1, abs(expected)), "\(description)")
 		}
