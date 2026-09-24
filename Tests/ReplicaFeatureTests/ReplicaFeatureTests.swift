@@ -12,6 +12,119 @@ import TestSupport
 @MainActor
 struct ReplicaFeatureTests {
 	@Test
+	func grantAccessAsksForTheIncludeAtThePathItResolvedTo() async {
+		let include = Taskrc.Include(file: taskrcFile.path(), line: "include $DOTFILES/work.rc")
+		let problem = Taskrc.Problem(
+			.unreadable(path: "/work.rc", unsetVariables: ["DOTFILES"]),
+			at: Taskrc.Location(file: taskrcFile.path(), line: 3),
+			include: include,
+		)
+		let granted = URL(filePath: "/Users/paul/dotfiles/work.rc")
+		let grants = LockIsolated<[Taskrc.Include: URL]>([:])
+		let store = TestStore(initialState: ReplicaFeature.State(bookmark: Data())) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.bookmarkClient.grants = { grants.value }
+			$0.bookmarkClient.saveGrant = { file, include in
+				grants.withValue { $0[include] = file }
+			}
+			$0.taskrcClient.load = { _, grants in
+				.finished(
+					yielding: TaskrcClient.Loaded(
+						problem: grants[include] == nil ? problem : nil,
+						taskrc: .defaults,
+						url: taskrcFile,
+					),
+				)
+			}
+		}
+
+		await store.send(.directoryResolved(replicaDirectory)) {
+			$0.directory = replicaDirectory
+		}
+		await store.receive(\.taskrcLoaded) {
+			$0.taskrc = TaskrcClient.Loaded(problem: problem, taskrc: .defaults, url: taskrcFile)
+		}
+
+		await store.send(.grantAccessButtonTapped) {
+			$0.fileImporter = .grant(include, file: URL(filePath: "/work.rc"))
+		}
+		await store.send(.fileChosen(granted, for: .grant(include, file: URL(filePath: "/work.rc")))) {
+			$0.fileImporter = nil
+		}
+		await store.receive(\.taskrcLoaded) {
+			$0.taskrc?.problem = nil
+		}
+		#expect(grants.value == [include: granted])
+	}
+
+	@Test
+	func grantAccessIsOfferedOnlyWhereAGrantCanReachTheFile() {
+		let include = Taskrc.Include(file: taskrcFile.path(), line: "include $DOTFILES/work.rc")
+		let at = Taskrc.Location(file: taskrcFile.path(), line: 3)
+		var state = ReplicaFeature.State(bookmark: Data())
+		let remedy = { (kind: Taskrc.Problem.Kind, include: Taskrc.Include?) in
+			state.taskrc = TaskrcClient.Loaded(
+				problem: Taskrc.Problem(kind, at: include == nil ? nil : at, include: include),
+				taskrc: .defaults,
+				url: taskrcFile,
+			)
+			return state.taskrcRemedy
+		}
+		let unset = Taskrc.Problem.Kind.notFound(path: "/work.rc", unsetVariables: ["DOTFILES"])
+
+		#expect(remedy(unset, include) == .grant(include, file: URL(filePath: "/work.rc")))
+		#expect(remedy(.notFound(path: "/work.rc", unsetVariables: []), include) == nil)
+		#expect(remedy(.notFound(path: taskrcFile.path(), unsetVariables: []), nil) == .taskrc)
+		#expect(remedy(.malformedLine("oops"), nil) == nil)
+	}
+
+	@Test
+	func hintOffersATaskrcOnceAndTheMenuAttachesAndDetachesIt() async {
+		let pairedTaskrc = LockIsolated<URL?>(nil)
+		let store = TestStore(initialState: ReplicaFeature.State(bookmark: Data())) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.bookmarkClient.grants = { [:] }
+			$0.bookmarkClient.saveTaskrc = { taskrc, replica in
+				#expect(replica == replicaDirectory)
+				pairedTaskrc.setValue(taskrc)
+			}
+			$0.bookmarkClient.taskrc = { _ in pairedTaskrc.value }
+			$0.taskrcClient.load = { taskrc, _ in
+				.finished(yielding: TaskrcClient.Loaded(taskrc: .defaults, url: taskrc()))
+			}
+		}
+
+		await store.send(.directoryResolved(replicaDirectory)) {
+			$0.directory = replicaDirectory
+		}
+		await store.receive(\.taskrcLoaded) {
+			$0.$hasShownTaskrcHint.withLock { $0 = true }
+			$0.isTaskrcHintPresented = true
+			$0.taskrc = TaskrcClient.Loaded(taskrc: .defaults, url: nil)
+		}
+
+		await store.send(.chooseTaskrcButtonTapped) {
+			$0.fileImporter = .taskrc
+		}
+		await store.send(.fileChosen(taskrcFile, for: .taskrc)) {
+			$0.fileImporter = nil
+			$0.isTaskrcHintPresented = false
+		}
+		await store.receive(\.taskrcLoaded) {
+			$0.taskrc?.url = taskrcFile
+		}
+
+		// Back on TW's defaults, the hint has already been shown.
+		await store.send(.useTaskwarriorDefaultsButtonTapped)
+		await store.receive(\.taskrcLoaded) {
+			$0.taskrc?.url = nil
+		}
+		#expect(pairedTaskrc.value == nil)
+	}
+
+	@Test
 	func listsPendingTasksAndDropsSelectedTasksThatLeave() async {
 		let directory = URL(filePath: "/Users/paul/.task")
 		let (tasks, continuation) = AsyncThrowingStream<[Models.Task], any Error>.makeStream()
@@ -64,98 +177,6 @@ struct ReplicaFeatureTests {
 
 		continuation.finish()
 		await task.finish()
-	}
-
-	@Test
-	func hintOffersATaskrcOnceAndTheMenuAttachesAndDetachesIt() async {
-		let pairedTaskrc = LockIsolated<URL?>(nil)
-		let store = TestStore(initialState: ReplicaFeature.State(bookmark: Data())) {
-			ReplicaFeature()
-		} withDependencies: {
-			$0.bookmarkClient.grants = { [:] }
-			$0.bookmarkClient.saveTaskrc = { taskrc, replica in
-				#expect(replica == replicaDirectory)
-				pairedTaskrc.setValue(taskrc)
-			}
-			$0.bookmarkClient.taskrc = { _ in pairedTaskrc.value }
-			$0.taskrcClient.load = { taskrc, _ in
-				.finished(yielding: TaskrcClient.Loaded(taskrc: .defaults, url: taskrc()))
-			}
-		}
-
-		await store.send(.directoryResolved(replicaDirectory)) {
-			$0.directory = replicaDirectory
-		}
-		await store.receive(\.taskrcLoaded) {
-			$0.$hasShownTaskrcHint.withLock { $0 = true }
-			$0.isTaskrcHintPresented = true
-			$0.taskrc = TaskrcClient.Loaded(taskrc: .defaults, url: nil)
-		}
-
-		await store.send(.chooseTaskrcButtonTapped) {
-			$0.fileImporter = .taskrc
-		}
-		await store.send(.fileChosen(taskrcFile, for: .taskrc)) {
-			$0.fileImporter = nil
-			$0.isTaskrcHintPresented = false
-		}
-		await store.receive(\.taskrcLoaded) {
-			$0.taskrc?.url = taskrcFile
-		}
-
-		// Back on TW's defaults, the hint has already been shown.
-		await store.send(.useTaskwarriorDefaultsButtonTapped)
-		await store.receive(\.taskrcLoaded) {
-			$0.taskrc?.url = nil
-		}
-		#expect(pairedTaskrc.value == nil)
-	}
-
-	@Test
-	func grantAccessAsksForTheIncludeAtThePathItResolvedTo() async {
-		let include = Taskrc.Include(file: taskrcFile.path(), line: "include $DOTFILES/work.rc")
-		let problem = Taskrc.Problem(
-			.unreadable(path: "/work.rc", unsetVariables: ["DOTFILES"]),
-			at: Taskrc.Location(file: taskrcFile.path(), line: 3),
-			include: include,
-		)
-		let granted = URL(filePath: "/Users/paul/dotfiles/work.rc")
-		let grants = LockIsolated<[Taskrc.Include: URL]>([:])
-		let store = TestStore(initialState: ReplicaFeature.State(bookmark: Data())) {
-			ReplicaFeature()
-		} withDependencies: {
-			$0.bookmarkClient.grants = { grants.value }
-			$0.bookmarkClient.saveGrant = { file, include in
-				grants.withValue { $0[include] = file }
-			}
-			$0.taskrcClient.load = { _, grants in
-				.finished(
-					yielding: TaskrcClient.Loaded(
-						problem: grants[include] == nil ? problem : nil,
-						taskrc: .defaults,
-						url: taskrcFile,
-					),
-				)
-			}
-		}
-
-		await store.send(.directoryResolved(replicaDirectory)) {
-			$0.directory = replicaDirectory
-		}
-		await store.receive(\.taskrcLoaded) {
-			$0.taskrc = TaskrcClient.Loaded(problem: problem, taskrc: .defaults, url: taskrcFile)
-		}
-
-		await store.send(.grantAccessButtonTapped) {
-			$0.fileImporter = .grant(include, file: URL(filePath: "/work.rc"))
-		}
-		await store.send(.fileChosen(granted, for: .grant(include, file: URL(filePath: "/work.rc")))) {
-			$0.fileImporter = nil
-		}
-		await store.receive(\.taskrcLoaded) {
-			$0.taskrc?.problem = nil
-		}
-		#expect(grants.value == [include: granted])
 	}
 
 	@Test

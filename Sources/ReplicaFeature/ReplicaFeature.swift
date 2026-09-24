@@ -27,6 +27,14 @@ public struct ReplicaFeature {
 		var taskrc: TaskrcClient.Loaded?
 		var tasks: IdentifiedArrayOf<Models.Task> = []
 
+		/// Whether Grant Access… can fix the Taskrc's problem.
+		public var canGrantAccess: Bool {
+			if case .grant = taskrcRemedy {
+				return true
+			}
+			return false
+		}
+
 		/// Whether the window has a Taskrc, rather than running on TW's defaults.
 		public var hasTaskrc: Bool {
 			taskrc?.url != nil
@@ -50,8 +58,15 @@ public struct ReplicaFeature {
 				return nil
 			}
 			switch problem.kind {
-			case let .notFound(path, _), let .unreadable(path, _):
-				return problem.include.map { .grant($0, file: URL(filePath: path)) } ?? .taskrc
+			case let .notFound(path, variables), let .unreadable(path, variables):
+				guard let include = problem.include else {
+					return .taskrc
+				}
+				// A grant can't make a missing file exist, only reach one an unset variable moved.
+				if case .notFound = problem.kind, variables.isEmpty {
+					return nil
+				}
+				return .grant(include, file: URL(filePath: path))
 
 			default:
 				return nil
@@ -175,6 +190,13 @@ public struct ReplicaFeature {
 	/// load already running.
 	private func loadTaskrc(pairedWith directory: URL) -> Effect<Action> {
 		.run { [bookmarkClient, taskrcClient] send in
+			// So an include in the Replica folder reads without a grant of its own.
+			let isAccessing = directory.startAccessingSecurityScopedResource()
+			defer {
+				if isAccessing {
+					directory.stopAccessingSecurityScopedResource()
+				}
+			}
 			let taskrcs = taskrcClient.load({ bookmarkClient.taskrc(directory) }, bookmarkClient.grants())
 			for await taskrc in taskrcs {
 				await send(.taskrcLoaded(taskrc))
@@ -334,7 +356,7 @@ private func description(of problem: Taskrc.Problem) -> String {
 	let error =
 		switch problem.kind {
 		case let .includeNestedTooDeeply(path):
-			"\(path) is included more than 10 levels deep."
+			"\(path) is included more than \(Taskrc.maximumIncludeDepth) levels deep."
 
 		case let .invalidUDAType(uda, type):
 			"UDA \(uda) has type \(type), which Taskwarrior doesn't know."
@@ -343,16 +365,16 @@ private func description(of problem: Taskrc.Problem) -> String {
 			"weekstart is \(day), which isn't Sunday or Monday."
 
 		case let .malformedLine(line):
-			"“\(line)” isn't a setting or an include."
+			"“\(line)” isn't a key=value line or an include."
 
 		case let .notFound(path, variables):
-			"\(path) doesn't exist." + unset(variables)
+			"\(path) doesn't exist." + unsetVariablesNote(variables)
 
 		case let .unreadable(path, variables):
-			"SimpleTaskWarrior needs access to \(path)." + unset(variables)
+			"SimpleTaskWarrior needs access to \(path)." + unsetVariablesNote(variables)
 
 		case let .unsetVariables(variables, key):
-			"\(key) is missing variables." + unset(variables)
+			"\(key) is missing variables." + unsetVariablesNote(variables)
 		}
 	let location = problem.location.map { "\($0.file), line \($0.line): " } ?? ""
 	let stale =
@@ -364,7 +386,7 @@ private func description(of problem: Taskrc.Problem) -> String {
 }
 
 /// Names `variables`, which expanded to nothing.
-private func unset(_ variables: [String]) -> String {
+private func unsetVariablesNote(_ variables: [String]) -> String {
 	guard !variables.isEmpty else {
 		return ""
 	}

@@ -60,6 +60,10 @@ private struct TaskrcButtons: View {
 		}
 		.keyboardShortcut("o", modifiers: [.command, .option])
 		.disabled(store == nil)
+		Button("Grant Access…") {
+			store?.send(.grantAccessButtonTapped)
+		}
+		.disabled(store?.canGrantAccess != true)
 		Button("Use Taskwarrior Defaults") {
 			store?.send(.useTaskwarriorDefaultsButtonTapped)
 		}

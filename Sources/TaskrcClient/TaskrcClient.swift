@@ -39,6 +39,10 @@ extension TaskrcClient {
 /// parse once.
 private let debounce = Duration.milliseconds(250)
 
+/// How often the Taskrc is parsed again while a file it names is missing or unreadable, since
+/// there's no file to watch until one appears.
+private let missingFilePoll = Duration.seconds(2)
+
 extension TaskrcClient: DependencyKey {
 	public static let liveValue = Self(
 		load: { taskrc, grants in
@@ -51,6 +55,7 @@ extension TaskrcClient: DependencyKey {
 						}
 					}
 					var lastGood = Taskrc.defaults
+					var lastLoaded: Loaded?
 					while !_Concurrency.Task.isCancelled {
 						guard let url = taskrc() else {
 							continuation.yield(Loaded(taskrc: .defaults, url: nil))
@@ -76,13 +81,20 @@ extension TaskrcClient: DependencyKey {
 						if fatal == nil {
 							lastGood = parsed
 						}
-						continuation.yield(
-							Loaded(problem: fatal ?? parsed.problems.first, taskrc: lastGood, url: url),
-						)
-
-						for await _ in changes(to: read) {
-							break
+						let loaded = Loaded(problem: fatal ?? parsed.problems.first, taskrc: lastGood, url: url)
+						// Polling parses an unchanged Taskrc again, which the window needn't hear about.
+						if loaded != lastLoaded {
+							continuation.yield(loaded)
+							lastLoaded = loaded
 						}
+
+						let isMissingFiles = parsed.problems.contains { problem in
+							switch problem.kind {
+							case .notFound, .unreadable: true
+							default: false
+							}
+						}
+						await firstChange(to: read, orAfter: isMissingFiles ? missingFilePoll : nil)
 						try? await _Concurrency.Task.sleep(for: debounce)
 					}
 					continuation.finish()
@@ -99,6 +111,24 @@ extension DependencyValues {
 	public var taskrcClient: TaskrcClient {
 		get { self[TaskrcClient.self] }
 		set { self[TaskrcClient.self] = newValue }
+	}
+}
+
+/// Returns once any of `files` changes, or after `timeout` when there is one.
+private func firstChange(to files: [URL], orAfter timeout: Duration?) async {
+	await withTaskGroup { group in
+		group.addTask {
+			for await _ in changes(to: files) {
+				return
+			}
+		}
+		if let timeout {
+			group.addTask {
+				try? await _Concurrency.Task.sleep(for: timeout)
+			}
+		}
+		await group.next()
+		group.cancelAll()
 	}
 }
 

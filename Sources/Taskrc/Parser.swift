@@ -61,9 +61,6 @@ private func directory(of path: String) -> String {
 	return String(path[...slash])
 }
 
-/// TW refuses a file nested deeper than this, counting the Taskrc as 1.
-private let maximumDepth = 10
-
 /// libshared's `trim` set.
 private let whitespace: Set<Unicode.Scalar> = [" ", "\t", "\n", "\u{0C}", "\r"]
 
@@ -131,7 +128,7 @@ struct Parser {
 		at location: Taskrc.Location?,
 		depth: Int,
 	) throws(Taskrc.ReadError) {
-		guard depth <= maximumDepth else {
+		guard depth <= Taskrc.maximumIncludeDepth else {
 			problems.append(Taskrc.Problem(.includeNestedTooDeeply(path: path), at: location))
 			return
 		}

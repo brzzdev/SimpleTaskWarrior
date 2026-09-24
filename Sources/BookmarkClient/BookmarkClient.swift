@@ -72,33 +72,6 @@ extension DependencyValues {
 	}
 }
 
-/// The bookmarks the app keeps.
-private struct Stored: Codable, Equatable {
-	var grants: [Taskrc.Include: Data] = [:]
-	/// Taskrc bookmarks by the path of the Replica they're paired with.
-	var taskrcs: [String: Data] = [:]
-}
-
-private let storedKey = "bookmarks"
-
-private let stored = Mutex(
-	UserDefaults.standard
-		.data(forKey: storedKey)
-		.flatMap { try? JSONDecoder().decode(Stored.self, from: $0) } ?? Stored(),
-)
-
-/// Runs `body` on the kept bookmarks, then saves them to the user defaults if it changed them.
-private func update<Result>(_ body: (inout Stored) -> Result) -> Result {
-	stored.withLock { stored in
-		let old = stored
-		let result = body(&stored)
-		if stored != old {
-			UserDefaults.standard.set(try? JSONEncoder().encode(stored), forKey: storedKey)
-		}
-		return result
-	}
-}
-
 /// A security-scoped bookmark on `url`, which it can make only inside the scope of a URL from a
 /// file panel or another bookmark.
 private func makeBookmark(_ url: URL) throws -> Data {
@@ -125,6 +98,33 @@ private func resolved(_ bookmark: Data) throws -> (url: URL, isStale: Bool) {
 		bookmarkDataIsStale: &isStale,
 	)
 	return (url, isStale)
+}
+
+/// The bookmarks the app keeps.
+private struct Stored: Codable, Equatable {
+	var grants: [Taskrc.Include: Data] = [:]
+	/// Taskrc bookmarks by the path of the Replica they're paired with.
+	var taskrcs: [String: Data] = [:]
+}
+
+private let stored = Mutex(
+	UserDefaults.standard
+		.data(forKey: storedKey)
+		.flatMap { try? JSONDecoder().decode(Stored.self, from: $0) } ?? Stored(),
+)
+
+private let storedKey = "bookmarks"
+
+/// Runs `body` on the kept bookmarks, then saves them to the user defaults if it changed them.
+private func update<Result>(_ body: (inout Stored) -> Result) -> Result {
+	stored.withLock { stored in
+		let old = stored
+		let result = body(&stored)
+		if stored != old {
+			UserDefaults.standard.set(try? JSONEncoder().encode(stored), forKey: storedKey)
+		}
+		return result
+	}
 }
 
 /// The URL `bookmark` resolves to, passing `resave` a fresh bookmark when it's stale.

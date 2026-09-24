@@ -7,6 +7,9 @@ public import Foundation
 ///
 /// Where TW stops at the first error, this reports every problem and keeps the rest of the file.
 public struct Taskrc: Equatable, Sendable {
+	/// TW refuses a file nested deeper than this, counting the Taskrc as 1.
+	public static let maximumIncludeDepth = 10
+
 	/// TW's compiled-in defaults alone, which the CLI runs on without a Taskrc.
 	public static let defaults = Self(
 		parser: Parser(environment: .live) { _, _ throws(ReadError) in throw .notFound },
