@@ -9,9 +9,8 @@ public import Models
 public struct ReplicaClient: Sendable {
 	/// Opens the Replica in `directory` for one window, yielding its tasks at once and again
 	/// whenever anything, the CLI included, commits to it. The Replica closes when iteration ends.
-	public var tasks: @Sendable (_ directory: URL) -> AsyncThrowingStream<[Models.Task], any Error> = {
-		_ in .finished()
-	}
+	public var tasks: @Sendable (_ directory: URL)
+		-> AsyncThrowingStream<[Models.Task], any Error> = { _ in .finished() }
 
 	/// Opens the Replica in `directory` and closes it again, so Open Replica… can refuse a folder
 	/// before a window exists.
@@ -134,9 +133,9 @@ actor Replica {
 		)
 		let tasks = snapshot.tasks.compactMap { task in
 			Models.Task(
+				properties: task.properties,
 				uuid: task.uuid,
 				workingSetID: workingSetIDs[task.uuid],
-				properties: task.properties,
 			)
 		}
 		continuation.yield(tasks)

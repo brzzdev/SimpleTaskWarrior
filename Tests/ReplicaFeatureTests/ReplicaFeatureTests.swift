@@ -18,8 +18,18 @@ struct ReplicaFeatureTests {
 			$0.bookmarkClient.resolve = { _ in directory }
 			$0.replicaClient.tasks = { _ in tasks }
 		}
-		var milk = Models.Task(description: "Buy milk", id: UUID(0), status: .pending, workingSetID: 1)
-		let dog = Models.Task(description: "Walk the dog", id: UUID(1), status: .pending, workingSetID: 2)
+		var milk = Models.Task(
+			description: "Buy milk",
+			id: UUID(0),
+			status: .pending,
+			workingSetID: 1,
+		)
+		let dog = Models.Task(
+			description: "Walk the dog",
+			id: UUID(1),
+			status: .pending,
+			workingSetID: 2,
+		)
 		let taxes = Models.Task(
 			description: "File taxes",
 			id: UUID(2),
@@ -27,7 +37,7 @@ struct ReplicaFeatureTests {
 			workingSetID: nil,
 		)
 
-		let task = await store.send(.task)
+		let task = await store.send(.fetchRequested)
 		await store.receive(\.directoryResolved) {
 			$0.directory = directory
 		}

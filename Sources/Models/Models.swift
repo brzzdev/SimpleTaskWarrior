@@ -20,7 +20,7 @@ public struct Task: Equatable, Identifiable, Sendable {
 extension Task {
 	/// Decodes a task from the properties TaskChampion stores, or nil when its UUID or status is
 	/// one this app doesn't read.
-	public init?(uuid: String, workingSetID: Int?, properties: [String: String]) {
+	public init?(properties: [String: String], uuid: String, workingSetID: Int?) {
 		guard
 			let id = UUID(uuidString: uuid),
 			let status = properties["status"].flatMap(Status.init(rawValue:))

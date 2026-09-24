@@ -26,8 +26,8 @@ public struct ReplicaFeature {
 	public enum Action: BindableAction {
 		case binding(BindingAction<State>)
 		case directoryResolved(URL)
+		case fetchRequested
 		case openFailed(String)
-		case task
 		case tasksLoaded([Models.Task])
 	}
 
@@ -45,11 +45,7 @@ public struct ReplicaFeature {
 				state.directory = directory
 				return .none
 
-			case let .openFailed(failure):
-				state.failure = failure
-				return .none
-
-			case .task:
+			case .fetchRequested:
 				return .run { [bookmark = state.bookmark, bookmarkClient, replicaClient] send in
 					let directory = try bookmarkClient.resolve(bookmark)
 					let isAccessing = directory.startAccessingSecurityScopedResource()
@@ -65,6 +61,10 @@ public struct ReplicaFeature {
 				} catch: { error, send in
 					await send(.openFailed(error.localizedDescription))
 				}
+
+			case let .openFailed(failure):
+				state.failure = failure
+				return .none
 
 			case let .tasksLoaded(tasks):
 				state.tasks = IdentifiedArray(
@@ -111,6 +111,6 @@ public struct ReplicaView: View {
 		}
 		.navigationTitle(store.directory?.lastPathComponent ?? "")
 		.navigationSubtitle(store.directory?.path(percentEncoded: false) ?? "")
-		.task { await store.send(.task).finish() }
+		.task { await store.send(.fetchRequested).finish() }
 	}
 }

@@ -25,11 +25,12 @@ final class ReplicaClientTests {
 	}
 
 	@Test
-	func tasksReadsTheReplica() async throws {
+	func tasksReadsAgainWhenTheCLICommits() async throws {
 		let cli = try createReplica()
-		let uuid = try addPendingTask("Buy milk", with: cli)
-
 		var tasks = replicaClient.tasks(directory).makeAsyncIterator()
+		#expect(try await tasks.next()?.isEmpty == true)
+
+		let uuid = try addPendingTask("Buy milk", with: cli)
 
 		#expect(
 			try await tasks.next() == [
@@ -39,12 +40,11 @@ final class ReplicaClientTests {
 	}
 
 	@Test
-	func tasksReadsAgainWhenTheCLICommits() async throws {
+	func tasksReadsTheReplica() async throws {
 		let cli = try createReplica()
-		var tasks = replicaClient.tasks(directory).makeAsyncIterator()
-		#expect(try await tasks.next()?.isEmpty == true)
-
 		let uuid = try addPendingTask("Buy milk", with: cli)
+
+		var tasks = replicaClient.tasks(directory).makeAsyncIterator()
 
 		#expect(
 			try await tasks.next() == [
@@ -68,7 +68,10 @@ final class ReplicaClientTests {
 		try #require(
 			sqlite3_exec(
 				database,
-				"CREATE TABLE version (major INTEGER, minor INTEGER); INSERT INTO version VALUES (1, 0);",
+				"""
+				CREATE TABLE version (major INTEGER, minor INTEGER);
+				INSERT INTO version VALUES (1, 0);
+				""",
 				nil,
 				nil,
 				nil,
@@ -78,13 +81,6 @@ final class ReplicaClientTests {
 		await #expect(throws: ReplicaError.unsupportedSchema) {
 			try await self.replicaClient.validate(self.directory)
 		}
-	}
-
-	/// The engine opens a Replica but never creates one, so this starts from an empty database
-	/// file, which TaskChampion gives its schema.
-	private func createReplica() throws -> EngineHandle {
-		try #require(FileManager.default.createFile(atPath: databasePath, contents: nil))
-		return try EngineHandle.open(directory: directory.path(percentEncoded: false))
 	}
 
 	private func addPendingTask(_ description: String, with cli: EngineHandle) throws -> UUID {
@@ -99,5 +95,12 @@ final class ReplicaClientTests {
 		)
 		try #require(outcome == .committed)
 		return uuid
+	}
+
+	/// The engine opens a Replica but never creates one, so this starts from an empty database
+	/// file, which TaskChampion gives its schema.
+	private func createReplica() throws -> EngineHandle {
+		try #require(FileManager.default.createFile(atPath: databasePath, contents: nil))
+		return try EngineHandle.open(directory: directory.path(percentEncoded: false))
 	}
 }
