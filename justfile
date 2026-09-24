@@ -34,9 +34,9 @@ default:
 	@just --list
 
 # Regenerates the bindings in `Sources/Engine` and assembles
-# `Engine/build/EngineFFI.xcframework`. Cargo runs every time, since a no-op
-# costs about a second. Xcode.app has no build phase for this (cargo in a script
-# phase fights the user-script sandbox), so run it after pulling engine changes.
+# `Engine/build/EngineFFI.xcframework`. Xcode.app has no build phase for this
+# (cargo in a script phase fights the user-script sandbox), so run it after
+# pulling engine changes.
 # Build the Rust engine, its Swift bindings and the xcframework
 engine:
 	#!/usr/bin/env bash
@@ -48,7 +48,7 @@ engine:
 	export PATH="/opt/homebrew/opt/rustup/bin:$PATH"
 	cd Engine
 	target=aarch64-apple-darwin
-	cargo build --locked --release --target "$target"
+	cargo build --locked --release --target "$target" --package engine
 	library="target/$target/release/libengine.a"
 
 	# Two SQLite copies in one process can drop each other's POSIX locks and
@@ -58,15 +58,14 @@ engine:
 	# Xcode's `nm` does on the objects this toolchain's newer LLVM emits.
 	nm="$(rustc --print sysroot)/lib/rustlib/$target/bin/llvm-nm"
 	symbols="$("$nm" --quiet -g --defined-only "$library")"
-	bundled="$(grep -c ' _sqlite3_' <<<"$symbols" || true)"
-	if [ "$bundled" != 0 ]; then
-		echo "libengine.a defines $bundled sqlite3_ symbols: something enabled rusqlite's \`bundled\` feature." >&2
+	if grep -q ' _sqlite3_' <<<"$symbols"; then
+		echo "libengine.a defines sqlite3_ symbols: something enabled rusqlite's \`bundled\` feature." >&2
 		exit 1
 	fi
 
 	generated=build/generated
 	rm -rf "$generated"
-	cargo run --locked --quiet --release --target "$target" --bin uniffi-bindgen -- \
+	cargo run --locked --quiet --release --target "$target" --package uniffi-bindgen -- \
 		generate --library "$library" --language swift --out-dir "$generated"
 	# Copied only when changed, so an unchanged binding keeps its mtime and
 	# doesn't recompile the target.
@@ -97,9 +96,10 @@ generate: engine
 # It depends on `engine`, and so does everything that builds through it
 # (`build`, `test`, `release`): the package's binary target points into
 # `Engine/build/`, and the bindings must match the library they call.
+# `--no-deps` because `engine` has already run.
 [private]
 ensure-generated: engine
-	[ -d {{ workspace }} ] && [ -z "$(find .package.resolved Project.swift AppHost -newer {{ workspace }})" ] || just generate
+	[ -d {{ workspace }} ] && [ -z "$(find .package.resolved Project.swift AppHost -newer {{ workspace }})" ] || just --no-deps generate
 
 # Edit the Tuist manifests in Xcode
 edit:

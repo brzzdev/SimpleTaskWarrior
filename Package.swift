@@ -119,7 +119,8 @@ let package = Package(
 	],
 )
 
-// Not the engine's generated bindings, which break under `InternalImportsByDefault`.
+// Not the engine's generated bindings: they break under `InternalImportsByDefault`, and
+// they aren't ours to change, so their warnings can't be made errors either.
 for target in package.targets where target.type != .binary && target.name != "Engine" {
 	target.swiftSettings = target.swiftSettings ?? []
 	target.swiftSettings?.append(contentsOf: [

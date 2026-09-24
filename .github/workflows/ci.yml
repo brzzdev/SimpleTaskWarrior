@@ -58,19 +58,23 @@ jobs:
         if: '!cancelled()'
         run: echo "RUSTUP_HOME=$HOME/.rustup-engine" >> "$GITHUB_ENV"
 
-      # Of CARGO_HOME, only the downloaded crates: `registry/` and `git/`, never
+      # Of CARGO_HOME, only the downloaded crates: the registry's index and
+      # archives (not `src/`, which cargo unpacks from them) and `git/`, never
       # `.global-cache`, which is cargo's own SQLite bookkeeping. `target/` makes
-      # a run without dependency changes rebuild only the engine crate.
+      # a run without dependency changes rebuild only the engine crate, and the
+      # restore key keeps most of it when the lockfile changes.
       - name: Cache Rust toolchain and crates
         if: '!cancelled()'
         uses: actions/cache@v6
         with:
           path: |
             ~/.rustup-engine
-            ~/.cargo/registry
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
             ~/.cargo/git
             Engine/target
           key: rust-${{ runner.os }}-${{ hashFiles('Engine/rust-toolchain.toml', 'Engine/Cargo.lock') }}
+          restore-keys: rust-${{ runner.os }}-
 
       - name: Build engine
         if: '!cancelled()'

@@ -248,12 +248,7 @@ fn data_version(connection: &Connection) -> Result<i64, EngineError> {
 fn schema_version(connection: &Connection) -> Result<(u32, u32), EngineError> {
 	// TaskChampion reads a missing `version` table or row as 0.0, from before it versioned the
 	// schema.
-	let has_table: bool = connection.query_row(
-		"SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'version')",
-		[],
-		|row| row.get(0),
-	)?;
-	if !has_table {
+	if !connection.table_exists(None, "version")? {
 		return Ok((0, 0));
 	}
 	let version = connection
@@ -345,10 +340,13 @@ impl EngineHandle {
 			let mut tasks = HashMap::new();
 			let mut conflicts: Vec<String> = Vec::new();
 			for expectation in &expectations {
+				if conflicts.contains(&expectation.uuid) {
+					continue;
+				}
 				let uuid = parse_uuid(&expectation.uuid)?;
 				let task = task_data(replica, &mut tasks, uuid).await?;
 				let current = task.as_ref().and_then(|task| task.get(&expectation.property));
-				if current == expectation.value.as_deref() || conflicts.contains(&expectation.uuid) {
+				if current == expectation.value.as_deref() {
 					continue;
 				}
 				conflicts.push(expectation.uuid.clone());
