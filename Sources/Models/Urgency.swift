@@ -120,7 +120,6 @@ extension UrgencyCoefficients {
 				default: match = .tag(argument)
 				}
 			} else if let name = key.prefixMatch(of: /urgency\.uda\.(.*?)\.coefficient/)?.1 {
-				// TW splits at the first dot and keeps an empty value.
 				let parts = name.split(separator: ".", maxSplits: 1, omittingEmptySubsequences: false)
 				match = parts.count == 2
 					? .udaValue(String(parts[0]), String(parts[1]))
@@ -386,8 +385,9 @@ private let epsilon = 1e-6
 private let secondsPerDay = 86_400
 
 extension Task {
-	/// TW's `get`: the stored text of any attribute, built-ins included. TaskChampion keys a task by
-	/// its UUID rather than storing it, so TW adds `uuid` itself.
+	/// TW's `has` and `get` in one: the stored text of any attribute, built-ins included, or nil where
+	/// `get` returns "". TaskChampion keys a task by its UUID rather than storing it, so TW adds
+	/// `uuid` itself.
 	fileprivate func attribute(_ name: String) -> String? {
 		name == "uuid" ? id.uuidString.lowercased() : properties[name]
 	}
