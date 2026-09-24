@@ -10,9 +10,12 @@ public struct Taskrc: Equatable, Sendable {
 	/// The active Context's write modifications, which new tasks take as defaults.
 	public var contextWrite: ContextWrite
 	public var problems: [Problem]
-	/// Every key the defaults and the Taskrc set, each read as TW reads it: through the active
-	/// Context's `context.<name>.rc.<key>` where that exists. Matches `task _show`.
+	/// Every key the defaults and the Taskrc set, each read through the active Context: what TW
+	/// enumerates, as `task _show` prints it. Read a single key by name with the subscript.
 	public var values: [String: String]
+
+	/// Keys set only as `context.<active>.rc.<key>`, which TW reads by name but never enumerates.
+	private var contextOnlyValues: [String: String]
 
 	/// Parses the Taskrc at `path`, an absolute path, reading it and its includes with `readFile`.
 	public init(
@@ -27,10 +30,17 @@ public struct Taskrc: Equatable, Sendable {
 		} catch {
 			parser.problems.append(Problem(error.kind(path: path, unsetVariables: []), at: nil))
 		}
-		let entries = parser.entries.contextual()
-		contextWrite = ContextWrite(entries)
-		problems = parser.problems + entries.problems()
-		values = entries.mapValues(\.value)
+		let configuration = Configuration(entries: parser.entries)
+		contextOnlyValues = configuration.contextOnlyValues()
+		contextWrite = ContextWrite(configuration)
+		problems = parser.problems + configuration.problems()
+		values = configuration.values()
+	}
+
+	/// The value TW reads for `key` by name, as `Configuration::get` does, which finds a key the
+	/// active Context sets even when the Taskrc doesn't.
+	public subscript(key: String) -> String? {
+		contextOnlyValues[key] ?? values[key]
 	}
 }
 
@@ -49,7 +59,7 @@ extension Taskrc {
 		}
 	}
 
-	/// Expands `~` and `$NAME` in values and include paths.
+	/// What `~` and `$NAME` in values and include paths expand to.
 	public struct Environment: Sendable {
 		/// The home directory for `~user`, or nil when there's no such user.
 		public var homeDirectory: @Sendable (_ user: String) -> String?
@@ -113,18 +123,18 @@ extension Taskrc {
 		}
 	}
 
-	public enum ReadError: Error, Equatable {
+	public enum ReadError: Error {
 		case notFound
 		case unreadable
 	}
 }
 
 extension Taskrc.ContextWrite {
-	init(_ entries: [String: Entry]) {
+	fileprivate init(_ configuration: Configuration) {
 		self.init()
 		guard
-			let context = entries["context"]?.value,
-			let write = entries["context.\(context).write"]?.value
+			let context = configuration.entry("context")?.value,
+			let write = configuration.entry("context.\(context).write")?.value
 		else {
 			return
 		}
@@ -143,37 +153,61 @@ extension Taskrc.ContextWrite {
 	}
 }
 
-extension [String: Entry] {
-	/// Each key read as `Configuration::get` reads it: from `context.<active>.rc.<key>` where that
-	/// exists. A key set only under a Context is left out, as `task _show` leaves it out.
-	fileprivate func contextual() -> Self {
-		guard let context = self["context"]?.value else {
-			return self
+/// The UDA types TW accepts, where an empty type means no UDA.
+private let udaTypes: Set = ["", "date", "duration", "numeric", "string", "uuid"]
+
+/// The days `weekstart` may name.
+private let weekstartDays = ["monday", "sunday"]
+
+/// The parsed keys, read as libshared's `Configuration` reads them.
+private struct Configuration {
+	var entries: [String: Entry]
+
+	/// Keys set only under the active Context, by the name TW reads them with.
+	func contextOnlyValues() -> [String: String] {
+		guard let context = entries["context"]?.value else {
+			return [:]
 		}
-		return Dictionary(
-			uniqueKeysWithValues: map { key, entry in
-				guard !key.hasPrefix("context.") else {
-					return (key, entry)
-				}
-				return (key, self["context.\(context).rc.\(key)"] ?? entry)
-			},
-		)
+		let prefix = "context.\(context).rc."
+		return entries.reduce(into: [:]) { values, element in
+			guard element.key.hasPrefix(prefix) else {
+				return
+			}
+			let key = String(element.key.dropFirst(prefix.count))
+			// `get` reads a `context.` key as it is, so an override of one never applies.
+			guard entries[key] == nil, !key.hasPrefix("context.") else {
+				return
+			}
+			values[key] = element.value.value
+		}
+	}
+
+	/// `Configuration::get`: `context.<active>.rc.<key>` where that exists, else `key`.
+	func entry(_ key: String) -> Entry? {
+		guard
+			!key.hasPrefix("context."),
+			let context = entries["context"]?.value,
+			let override = entries["context.\(context).rc.\(key)"]
+		else {
+			return entries[key]
+		}
+		return override
 	}
 
 	/// The values TW refuses once the Taskrc has parsed.
-	fileprivate func problems() -> [Taskrc.Problem] {
+	func problems() -> [Taskrc.Problem] {
 		var problems: [Taskrc.Problem] = []
-		if let weekstart = self["weekstart"], !isWeekstart(weekstart.value) {
+		if let weekstart = entry("weekstart"), !isWeekstart(weekstart.value) {
 			problems.append(
 				Taskrc.Problem(.invalidWeekstart(weekstart.value), at: weekstart.location),
 			)
 		}
-		let udas = Set(keys.compactMap { $0.firstMatch(of: /^uda\.([^.]*)\./).map { String($0.1) } })
+		// TW finds UDAs among the keys the Taskrc sets, then reads each type through the Context.
+		let udas = Set(
+			entries.keys.compactMap { $0.firstMatch(of: /^uda\.([^.]*)\./).map { String($0.1) } },
+		)
 		for uda in udas.sorted() {
-			guard
-				let type = self["uda.\(uda).type"],
-				!["", "date", "duration", "numeric", "string", "uuid"].contains(type.value)
-			else {
+			guard let type = entry("uda.\(uda).type"), !udaTypes.contains(type.value) else {
 				continue
 			}
 			problems.append(
@@ -183,11 +217,18 @@ extension [String: Entry] {
 		return problems
 	}
 
+	/// Every key the Taskrc sets, read through the Context.
+	func values() -> [String: String] {
+		entries.keys.reduce(into: [:]) { values, key in
+			values[key] = entry(key)?.value
+		}
+	}
+
 	/// `Datetime::dayOfWeek` finding Sunday or Monday: the whole name or 3+ letters of it, in any
 	/// case.
 	private func isWeekstart(_ value: String) -> Bool {
 		let value = value.lowercased()
-		return ["monday", "sunday"].contains { day in
+		return weekstartDays.contains { day in
 			day == value || (value.count >= 3 && day.hasPrefix(value))
 		}
 	}

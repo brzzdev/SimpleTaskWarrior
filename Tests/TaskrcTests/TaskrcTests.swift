@@ -9,36 +9,17 @@ struct TaskrcTests {
 		variables: ["FIXTURE": "value", "HOME": "/home/fixture", "USER": "fixture"],
 	)
 
-	@Test(arguments: ["context", "defaults", "expansion", "includes", "syntax"])
-	func valuesMatchTaskShow(fixture: String) throws {
-		let directory = try #require(Bundle.module.url(forResource: "Fixtures", withExtension: nil))
-			.appending(path: fixture)
-		let expected = try String(contentsOf: directory.appending(path: "expected.rc"), encoding: .utf8)
-			.split(separator: "\n")
-			.map { $0.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false) }
-			.reduce(into: [String: String]()) { $0[String($1[0])] = String($1[1]) }
+	@Test
+	func contextOnlyKeyIsReadByNameButNotEnumerated() {
+		let taskrc = parse([
+			"/rc/taskrc": """
+				context=work
+				context.work.rc.default.project=Work
+				""",
+		])
 
-		let taskrc = Taskrc(
-			path: directory.appending(path: "taskrc").path(percentEncoded: false),
-			environment: environment,
-		) { path throws(Taskrc.ReadError) in
-			let url = URL(filePath: path)
-			guard let contents = try? String(contentsOf: url, encoding: .utf8) else {
-				throw .notFound
-			}
-			return Taskrc.File(
-				contents: contents,
-				realPath: url.resolvingSymlinksInPath().path(percentEncoded: false),
-			)
-		}
-
-		// Set by the bundled theme and holiday files the app skips, or overridden by the CLI at runtime.
-		let isComparable = { (key: String) in
-			!key.contains(/^(color|data\.location$|detection$|holiday\.|rule\.)/)
-		}
-		#expect(
-			taskrc.values.filter { isComparable($0.key) } == expected.filter { isComparable($0.key) },
-		)
+		#expect(taskrc["default.project"] == "Work")
+		#expect(taskrc.values["default.project"] == nil)
 	}
 
 	@Test
@@ -57,20 +38,6 @@ struct TaskrcTests {
 				tags: ["urgent", "next"],
 			),
 		)
-	}
-
-	@Test
-	func includeResolvesAgainstTheIncludingFilesRealPath() {
-		let taskrc = parse(
-			[
-				"/dotfiles/extra.rc": "extra=yes",
-				"/rc/taskrc": "include extra.rc",
-			],
-			realPaths: ["/rc/taskrc": "/dotfiles/taskrc"],
-		)
-
-		#expect(taskrc.problems.isEmpty)
-		#expect(taskrc.values["extra"] == "yes")
 	}
 
 	@Test
@@ -105,14 +72,28 @@ struct TaskrcTests {
 	}
 
 	@Test
-	func includeSkipsOnlyARelativeThemeOrHolidayFileThatIsntBesideIt() {
+	func includeResolvesAgainstTheIncludingFilesRealPath() {
+		let taskrc = parse(
+			[
+				"/dotfiles/extra.rc": "extra=yes",
+				"/rc/taskrc": "include extra.rc",
+			],
+			realPaths: ["/rc/taskrc": "/dotfiles/taskrc"],
+		)
+
+		#expect(taskrc.problems.isEmpty)
+		#expect(taskrc.values["extra"] == "yes")
+	}
+
+	@Test
+	func includeSkipsOnlyAFileTaskwarriorBundles() {
 		let taskrc = parse([
 			"/rc/mine.theme": "color.mine=red",
 			"/rc/taskrc": """
 				include dark-256.theme
 				include holidays.en-GB.rc
 				include mine.theme
-				include missing.rc
+				include dakr-256.theme
 				""",
 		])
 
@@ -120,7 +101,7 @@ struct TaskrcTests {
 		#expect(
 			taskrc.problems == [
 				Taskrc.Problem(
-					.notFound(path: "/rc/missing.rc", unsetVariables: []),
+					.notFound(path: "/rc/dakr-256.theme", unsetVariables: []),
 					at: Taskrc.Location(file: "/rc/taskrc", line: 4),
 				),
 			],
@@ -221,6 +202,38 @@ struct TaskrcTests {
 					at: Taskrc.Location(file: "/rc/taskrc", line: 5),
 				),
 			],
+		)
+	}
+
+	@Test(arguments: ["context", "defaults", "expansion", "includes", "syntax"])
+	func valuesMatchTaskShow(fixture: String) throws {
+		let directory = try #require(Bundle.module.url(forResource: "Fixtures", withExtension: nil))
+			.appending(path: fixture)
+		let expected = try String(contentsOf: directory.appending(path: "expected.rc"), encoding: .utf8)
+			.split(separator: "\n")
+			.map { $0.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false) }
+			.reduce(into: [String: String]()) { $0[String($1[0])] = String($1[1]) }
+
+		let taskrc = Taskrc(
+			path: directory.appending(path: "taskrc").path(percentEncoded: false),
+			environment: environment,
+		) { path throws(Taskrc.ReadError) in
+			let url = URL(filePath: path)
+			guard let contents = try? String(contentsOf: url, encoding: .utf8) else {
+				throw .notFound
+			}
+			return Taskrc.File(
+				contents: contents,
+				realPath: url.resolvingSymlinksInPath().path(percentEncoded: false),
+			)
+		}
+
+		// Set by the bundled theme and holiday files the app skips, or overridden by the CLI at runtime.
+		let isComparable = { (key: String) in
+			!key.contains(/^(color|data\.location$|detection$|holiday\.|rule\.)/)
+		}
+		#expect(
+			taskrc.values.filter { isComparable($0.key) } == expected.filter { isComparable($0.key) },
 		)
 	}
 

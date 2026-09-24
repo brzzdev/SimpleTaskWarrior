@@ -1,8 +1,57 @@
-/// TW refuses a file nested deeper than this, counting the Taskrc as 1.
-private let maximumDepth = 10
-
-/// libshared's `trim` set.
-private let whitespace: Set<Unicode.Scalar> = [" ", "\t", "\n", "\u{0C}", "\r"]
+/// The theme and holiday files TW 3.5 installs in its share directory, the last place it looks for
+/// a relative include. The sandbox can't look there, and they set nothing that changes tasks.
+private let bundledFiles: Set = [
+	"bubblegum-256.theme",
+	"dark-16.theme",
+	"dark-256.theme",
+	"dark-blue-256.theme",
+	"dark-gray-256.theme",
+	"dark-gray-blue-256.theme",
+	"dark-green-256.theme",
+	"dark-red-256.theme",
+	"dark-violets-256.theme",
+	"dark-yellow-green.theme",
+	"default.theme",
+	"holidays.cs-CZ.rc",
+	"holidays.da-DK.rc",
+	"holidays.de-AT.rc",
+	"holidays.de-BE.rc",
+	"holidays.de-CH.rc",
+	"holidays.de-DE.rc",
+	"holidays.el-GR.rc",
+	"holidays.en-CA.rc",
+	"holidays.en-GB.rc",
+	"holidays.en-NZ.rc",
+	"holidays.en-US.rc",
+	"holidays.es-CO.rc",
+	"holidays.es-ES.rc",
+	"holidays.es-US.rc",
+	"holidays.fi-FI.rc",
+	"holidays.fr-BE.rc",
+	"holidays.fr-CA.rc",
+	"holidays.fr-FR.rc",
+	"holidays.hr-HR.rc",
+	"holidays.hu-HU.rc",
+	"holidays.is-IS.rc",
+	"holidays.it-IT.rc",
+	"holidays.nb-NO.rc",
+	"holidays.nl-BE.rc",
+	"holidays.nl-NL.rc",
+	"holidays.pl-PL.rc",
+	"holidays.por-PRT.rc",
+	"holidays.pt-BR.rc",
+	"holidays.pt-PT.rc",
+	"holidays.ru-RU.rc",
+	"holidays.sk-SK.rc",
+	"holidays.sv-FI.rc",
+	"holidays.sv-SE.rc",
+	"holidays.tr-TR.rc",
+	"light-16.theme",
+	"light-256.theme",
+	"no-color.theme",
+	"solarized-dark-256.theme",
+	"solarized-light-256.theme",
+]
 
 /// The directory `Configuration::parse` resolves includes against, with its trailing `/`.
 private func directory(of path: String) -> String {
@@ -12,12 +61,13 @@ private func directory(of path: String) -> String {
 	return String(path[...slash])
 }
 
-/// A theme or holiday file, the kinds TW ships in its share directory.
-private func isBundled(_ path: String) -> Bool {
-	let name = path.split(separator: "/").last ?? ""
-	return name.hasSuffix(".theme") || (name.hasPrefix("holidays.") && name.hasSuffix(".rc"))
-}
+/// TW refuses a file nested deeper than this, counting the Taskrc as 1.
+private let maximumDepth = 10
 
+/// libshared's `trim` set.
+private let whitespace: Set<Unicode.Scalar> = [" ", "\t", "\n", "\u{0C}", "\r"]
+
+/// A key's value and the line that set it.
 struct Entry {
 	/// Nil for TW's defaults.
 	var location: Taskrc.Location?
@@ -62,6 +112,20 @@ struct Parser {
 	var problems: [Taskrc.Problem] = []
 	let readFile: (_ path: String) throws(Taskrc.ReadError) -> Taskrc.File
 
+	/// Reads the file at `path` and parses it, throwing when it can't be read.
+	mutating func load(
+		_ path: String,
+		from location: Taskrc.Location?,
+		depth: Int,
+	) throws(Taskrc.ReadError) {
+		guard depth <= maximumDepth else {
+			problems.append(Taskrc.Problem(.includeNestedTooDeeply(path: path), at: location))
+			return
+		}
+		let file = try readFile(path)
+		parse(file.contents, file: (path, file.realPath), depth: depth)
+	}
+
 	/// Parses one file's lines into `entries`, later keys winning. `file` is nil for TW's defaults.
 	mutating func parse(_ contents: String, file: (path: String, realPath: String)?, depth: Int = 1) {
 		// Split on scalars, since `\r\n` is one `Character`.
@@ -101,9 +165,8 @@ struct Parser {
 					throw .notFound
 				}
 				try load(resolved, from: location, depth: depth + 1)
-			} catch .notFound where isRelative && isBundled(path) {
-				// It could only resolve through TW's share directory, whose themes and holiday files set
-				// nothing that changes tasks.
+			} catch .notFound where isRelative && bundledFiles.contains(path) {
+				// Only TW's share directory is left to resolve it.
 			} catch {
 				problems.append(
 					Taskrc.Problem(
@@ -113,65 +176,6 @@ struct Parser {
 				)
 			}
 		}
-	}
-
-	/// Reads the file at `path` and parses it, throwing when it can't be read.
-	mutating func load(
-		_ path: String,
-		from location: Taskrc.Location?,
-		depth: Int,
-	) throws(Taskrc.ReadError) {
-		guard depth <= maximumDepth else {
-			problems.append(Taskrc.Problem(.includeNestedTooDeeply(path: path), at: location))
-			return
-		}
-		let file = try readFile(path)
-		parse(file.contents, file: (path, file.realPath), depth: depth)
-	}
-
-	/// `Path::expand`: a leading `~` or `~user`, then every `$NAME`, an unset one becoming empty.
-	private func expand(
-		_ input: Substring.UnicodeScalarView,
-	) -> (value: String, unsetVariables: [String]) {
-		var output = String.UnicodeScalarView()
-		var unsetVariables: [String] = []
-		var index = input.startIndex
-
-		if input.first == "~" {
-			let slash = input.dropFirst().firstIndex(of: "/") ?? input.endIndex
-			let user = String(input[input.index(after: index) ..< slash])
-			let home =
-				if user.isEmpty {
-					environment.variables["HOME"] ?? ""
-				} else {
-					environment.homeDirectory(user) ?? "/home/\(user)"
-				}
-			output.append(contentsOf: home.unicodeScalars)
-			index = slash
-		}
-
-		while index < input.endIndex {
-			guard input[index] == "$" else {
-				output.append(input[index])
-				index = input.index(after: index)
-				continue
-			}
-			let nameStart = input.index(after: index)
-			let nameEnd = input[nameStart...].firstIndex { !$0.isVariableNameCharacter } ?? input.endIndex
-			index = nameEnd
-			guard nameStart < nameEnd else {
-				output.append("$")
-				continue
-			}
-			let name = String(input[nameStart ..< nameEnd])
-			guard let value = environment.variables[name] else {
-				unsetVariables.append(name)
-				continue
-			}
-			output.append(contentsOf: value.unicodeScalars)
-		}
-
-		return (String(output), unsetVariables)
 	}
 
 	/// `json::decode`, which libshared runs on every value.
@@ -220,5 +224,50 @@ struct Parser {
 			}
 		}
 		return String(output)
+	}
+
+	/// `Path::expand`: a leading `~` or `~user`, then every `$NAME`, an unset one becoming empty.
+	private func expand(
+		_ input: Substring.UnicodeScalarView,
+	) -> (value: String, unsetVariables: [String]) {
+		var output = String.UnicodeScalarView()
+		var unsetVariables: [String] = []
+		var index = input.startIndex
+
+		if input.first == "~" {
+			let slash = input.dropFirst().firstIndex(of: "/") ?? input.endIndex
+			let user = String(input[input.index(after: index) ..< slash])
+			let home =
+				if user.isEmpty {
+					environment.variables["HOME"] ?? ""
+				} else {
+					environment.homeDirectory(user) ?? "/home/\(user)"
+				}
+			output.append(contentsOf: home.unicodeScalars)
+			index = slash
+		}
+
+		while index < input.endIndex {
+			guard input[index] == "$" else {
+				output.append(input[index])
+				index = input.index(after: index)
+				continue
+			}
+			let nameStart = input.index(after: index)
+			let nameEnd = input[nameStart...].firstIndex { !$0.isVariableNameCharacter } ?? input.endIndex
+			index = nameEnd
+			guard nameStart < nameEnd else {
+				output.append("$")
+				continue
+			}
+			let name = String(input[nameStart ..< nameEnd])
+			guard let value = environment.variables[name] else {
+				unsetVariables.append(name)
+				continue
+			}
+			output.append(contentsOf: value.unicodeScalars)
+		}
+
+		return (String(output), unsetVariables)
 	}
 }
