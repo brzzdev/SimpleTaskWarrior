@@ -10,7 +10,6 @@ let package = Package(
 	],
 	dependencies: [
 		.package(url: "https://github.com/pointfreeco/swift-composable-architecture", from: "1.26.2"),
-		.package(url: "https://github.com/pointfreeco/swift-dependencies", from: "1.17.1"),
 		// Direct because the app host detects a test run through `TestContext`.
 		.package(url: "https://github.com/pointfreeco/swift-issue-reporting", from: "2.1.1"),
 		// Direct because MemberImportVisibility wants the declaring module imported
@@ -32,7 +31,6 @@ let package = Package(
 				.product(name: "ComposableArchitecture", package: "swift-composable-architecture"),
 			],
 		),
-		// `Engine` joins this list with the engine facade.
 		.target(
 			name: "ReplicaClient",
 			dependencies: [
@@ -80,8 +78,7 @@ let package = Package(
 			],
 		),
 
-		// `ReplicaClientTests` joins with the engine facade. The thin clients get no
-		// test targets: they are verified by running the app.
+		// The thin clients get no test targets: they are verified by running the app.
 		.testTarget(
 			name: "ModelsTests",
 			dependencies: [
@@ -94,8 +91,6 @@ let package = Package(
 			dependencies: [
 				"ReplicaFeature",
 				"TestSupport",
-				.product(name: "ComposableArchitecture", package: "swift-composable-architecture"),
-				.product(name: "DependenciesTestSupport", package: "swift-dependencies"),
 			],
 		),
 		.testTarget(

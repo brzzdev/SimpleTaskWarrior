@@ -6,21 +6,16 @@ import ProjectDescription
 // Forks/CI just supply their own; nothing personal is committed.
 let developmentTeam = Environment.developmentTeam.getString(default: "")
 
-var baseSettings: SettingsDictionary = [
+let baseSettings: SettingsDictionary = [
 	"ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon",
-	"ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME": "",
 	"ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS": "YES",
 	"SWIFT_VERSION": "6.0",
-	"MACOSX_DEPLOYMENT_TARGET": "27.0",
 	"ENABLE_HARDENED_RUNTIME": "YES",
 	// Off so the SwiftLint build phase can read the whole source tree. This is a
 	// build-time setting only — it does not affect the shipped app's hardened
 	// runtime, signing, or runtime App Sandbox.
 	"ENABLE_USER_SCRIPT_SANDBOXING": "NO",
 ]
-if !developmentTeam.isEmpty {
-	baseSettings["DEVELOPMENT_TEAM"] = .string(developmentTeam)
-}
 
 // Sign the app with Developer ID (manual): it needs no Xcode-registered account
 // or provisioning profile and gives a stable code identity, which is what
@@ -29,9 +24,8 @@ if !developmentTeam.isEmpty {
 // at the target level (overriding that default), and the sdk-specific key must
 // be set too or it wins on macOS.
 var signingSettings: SettingsDictionary = [
-	// Tuist defaults this to "AccentColor" at the target level, which overrides
-	// the empty value in baseSettings and makes actool warn about a missing
-	// AccentColor asset (we ship no asset catalog). Blank it here to silence it.
+	// Tuist defaults this to "AccentColor" at the target level, which makes
+	// actool warn about a missing AccentColor asset (we ship no asset catalog).
 	"ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME": "",
 	"AD_HOC_CODE_SIGNING_ALLOWED": "NO",
 	"CODE_SIGN_IDENTITY": "Developer ID Application",
@@ -77,7 +71,8 @@ let project = Project(
 					script: """
 						export PATH="$PATH:/opt/homebrew/bin"
 						if which mint >/dev/null; then
-							mint run swiftlint --quiet --strict
+							# `--config` makes a failed `parent_config` fetch fatal; see `just lint`.
+							mint run swiftlint --quiet --strict --config .swiftlint.yml
 						else
 							echo "warning: mint not installed — run 'just tools'"
 						fi

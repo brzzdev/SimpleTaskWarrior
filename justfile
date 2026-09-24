@@ -51,12 +51,9 @@ edit:
 build: ensure-generated
 	xcodebuild -workspace {{ workspace }} -scheme {{ scheme }} -destination '{{ destination }}' -allowProvisioningUpdates -derivedDataPath {{ derived_data }} build | xcbeautify
 
-[private]
-test-action action: ensure-generated
-	xcodebuild -workspace {{ workspace }} -scheme {{ scheme }} -destination '{{ destination }}' CODE_SIGNING_ALLOWED=NO -derivedDataPath {{ derived_data }} {{ action }} | xcbeautify
-
 # Run the test plan (all package test targets)
-test: (test-action "test")
+test: ensure-generated
+	xcodebuild -workspace {{ workspace }} -scheme {{ scheme }} -destination '{{ destination }}' CODE_SIGNING_ALLOWED=NO -derivedDataPath {{ derived_data }} test | xcbeautify
 
 # Build (signed) and launch the app
 run: build
@@ -263,11 +260,7 @@ lint:
 	# for the same reason a second file is a liability: a referenced local
 	# config that goes missing is ignored with a warning and a zero exit.
 	mint run swiftlint --strict --config .swiftlint.yml
-# Show outdated Swift packages
-outdated:
-	mint run swift-outdated --ignore-prerelease
 
-# Clean DerivedData and remove the SwiftPM build folder
-clean: ensure-generated
-	xcodebuild -workspace {{ workspace }} -scheme {{ scheme }} -destination '{{ destination }}' -derivedDataPath {{ derived_data }} clean | xcbeautify
+# Remove the SwiftPM build folder, which holds the pinned DerivedData too
+clean:
 	rm -rf .build
