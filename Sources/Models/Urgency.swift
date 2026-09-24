@@ -384,7 +384,8 @@ private let epsilon = 1e-6
 private let secondsPerDay = 86_400
 
 extension Task {
-	/// TW's `get`: the stored text of any attribute, built-ins included, or the UUID TW adds to them.
+	/// TW's `get`: the stored text of any attribute, built-ins included. TaskChampion keys a task by
+	/// its UUID rather than storing it, so TW adds `uuid` itself.
 	fileprivate func attribute(_ name: String) -> String? {
 		name == "uuid" ? id.uuidString.lowercased() : properties[name]
 	}
