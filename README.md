@@ -18,8 +18,10 @@ alongside the `task` CLI: changes made in either show up in the other.
    export TUIST_DEVELOPMENT_TEAM=XXXXXXXXXX
    ```
 
-3. Install the developer tools (`just`, Tuist, Mint and the pinned SwiftLint).
-   The build lints through Mint and fails without it:
+3. Install the developer tools (`just`, Tuist, Mint and the pinned SwiftLint,
+   and rustup for the engine). The build lints through Mint and fails without
+   it. `just engine` finds the brewed rustup, which installs the pinned Rust
+   toolchain on first use:
 
    ```sh
    brew install just
@@ -34,10 +36,14 @@ alongside the `task` CLI: changes made in either show up in the other.
    just run
    ```
 
+   Building from Xcode.app skips the engine, so run `just engine` after
+   pulling changes to `Engine/`.
+
 ## Development
 
 ```sh
 just tools     # brew bundle, mint packages and git hooks (once)
+just engine    # build the Rust engine and regenerate its Swift bindings
 just test      # run the full test plan (xcodebuild, unsigned)
 just format    # SwiftFormat
 just lint      # SwiftLint
@@ -53,6 +59,7 @@ Single SPM package, one module per concern, wired with
 
 | Module | Role |
 | --- | --- |
+| `Engine` | Generated Swift bindings to the Rust facade over TaskChampion in `Engine/` |
 | `Taskrc` | Parses a Taskrc the way Taskwarrior 3.5 does, over its compiled-in defaults |
 | `Models` | Task decoding, Urgency, the blocked rule and the write planner |
 | `ReplicaClient` | The engine behind an actor, one per open Replica |

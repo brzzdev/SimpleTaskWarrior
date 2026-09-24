@@ -33,10 +33,58 @@ release_dir := ".release"
 default:
 	@just --list
 
+# Regenerates the bindings in `Sources/Engine` and assembles
+# `Engine/build/EngineFFI.xcframework`. Xcode.app has no build phase for this
+# (cargo in a script phase fights the user-script sandbox), so run it after
+# pulling engine changes.
+# Build the Rust engine, its Swift bindings and the xcframework
+engine:
+	#!/usr/bin/env bash
+	set -euo pipefail
+
+	# The Brewfile's rustup is keg-only, so it is off PATH unless the shell put it
+	# there. Prepended, because Homebrew's `rust` formula puts a cargo in
+	# /opt/homebrew/bin that ignores rust-toolchain.toml; rustup's proxies honour it.
+	export PATH="/opt/homebrew/opt/rustup/bin:$PATH"
+	cd Engine
+	target=aarch64-apple-darwin
+	cargo build --locked --release --target "$target" --package engine
+	library="target/$target/release/libengine.a"
+
+	# Two SQLite copies in one process can drop each other's POSIX locks and
+	# corrupt the Replica, so the engine must reference the system libsqlite3
+	# rather than bundle its own. The symbols are captured first so a failing
+	# `nm` stops the recipe instead of reading as zero matches, which is what
+	# Xcode's `nm` does on the objects this toolchain's newer LLVM emits.
+	nm="$(rustc --print sysroot)/lib/rustlib/$target/bin/llvm-nm"
+	symbols="$("$nm" --quiet -g --defined-only "$library")"
+	if grep -q ' _sqlite3_' <<<"$symbols"; then
+		echo "libengine.a defines sqlite3_ symbols: something enabled rusqlite's \`bundled\` feature." >&2
+		exit 1
+	fi
+
+	generated=build/generated
+	rm -rf "$generated"
+	cargo run --locked --quiet --release --target "$target" --package uniffi-bindgen -- \
+		generate --library "$library" --language swift --out-dir "$generated"
+	# Copied only when changed, so an unchanged binding keeps its mtime and
+	# doesn't recompile the target.
+	bindings=../Sources/Engine/Engine.swift
+	cmp -s "$generated/Engine.swift" "$bindings" || cp "$generated/Engine.swift" "$bindings"
+
+	xcframework=build/EngineFFI.xcframework
+	if [ "$library" -nt "$xcframework" ]; then
+		rm -rf build/headers "$xcframework"
+		mkdir -p build/headers
+		cp "$generated/EngineFFI.h" build/headers/
+		cp "$generated/EngineFFI.modulemap" build/headers/module.modulemap
+		xcodebuild -create-xcframework -library "$library" -headers build/headers -output "$xcframework"
+	fi
+
 # Generate the Xcode project from Project.swift. The touch stamps the workspace
 # for `ensure-generated`: Tuist leaves unchanged files alone, so without it the
 # workspace's mtime would not record that a generate ran.
-generate:
+generate: engine
 	tuist generate --no-open
 	touch {{ workspace }}
 
@@ -44,9 +92,14 @@ generate:
 # build it: the manifest, the app host files its globs pick up, and the pins in
 # `.package.resolved`, which it restores into the workspace. The package's own
 # sources need nothing, since Xcode resolves the local package itself.
+#
+# It depends on `engine`, and so does everything that builds through it
+# (`build`, `test`, `release`): the package's binary target points into
+# `Engine/build/`, and the bindings must match the library they call.
+# `--no-deps` because `engine` has already run.
 [private]
-ensure-generated:
-	[ -d {{ workspace }} ] && [ -z "$(find .package.resolved Project.swift AppHost -newer {{ workspace }})" ] || just generate
+ensure-generated: engine
+	[ -d {{ workspace }} ] && [ -z "$(find .package.resolved Project.swift AppHost -newer {{ workspace }})" ] || just --no-deps generate
 
 # Edit the Tuist manifests in Xcode
 edit:

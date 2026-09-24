@@ -9,6 +9,8 @@ parent_config: https://raw.githubusercontent.com/brzzdev/Configs/main/Configs/sw
 deployment_target:
   macOS_deployment_target: 27.0
 
-# The parent excludes `**/.build`; this adds Tuist's generated sources.
+# The parent excludes `**/.build`; this adds Tuist's generated sources and the
+# engine's build output. The committed bindings opt out themselves.
 excluded:
   - Derived
+  - Engine/build

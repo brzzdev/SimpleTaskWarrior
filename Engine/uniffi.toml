@@ -1,0 +1,4 @@
+[bindings.swift]
+ffi_module_filename = "EngineFFI"
+ffi_module_name = "EngineFFI"
+module_name = "Engine"

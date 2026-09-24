@@ -17,6 +17,26 @@ let package = Package(
 		.package(url: "https://github.com/pointfreeco/swift-sharing", from: "2.10.1"),
 	],
 	targets: [
+		// Assembled into `Engine/build/` by `just engine`, which also regenerates the
+		// `Engine` target's sources: the UniFFI bindings, committed so a diff shows
+		// any change to the engine's surface.
+		.binaryTarget(name: "EngineFFI", path: "Engine/build/EngineFFI.xcframework"),
+		.target(
+			name: "Engine",
+			dependencies: [
+				"EngineFFI",
+			],
+			// Only this of the shared settings below: a UniFFI bump that brings warnings should
+			// fail the build, not erode it quietly.
+			swiftSettings: [
+				.treatAllWarnings(as: .error),
+			],
+			linkerSettings: [
+				// The engine links the system SQLite rather than bundling its own.
+				.linkedLibrary("sqlite3"),
+			],
+		),
+
 		.target(name: "Taskrc"),
 		.target(
 			name: "Models",
@@ -34,6 +54,7 @@ let package = Package(
 		.target(
 			name: "ReplicaClient",
 			dependencies: [
+				"Engine",
 				"Models",
 				.product(name: "ComposableArchitecture", package: "swift-composable-architecture"),
 			],
@@ -103,7 +124,8 @@ let package = Package(
 	],
 )
 
-for target in package.targets {
+// Not the engine's generated bindings, which break under `InternalImportsByDefault`.
+for target in package.targets where target.type != .binary && target.name != "Engine" {
 	target.swiftSettings = target.swiftSettings ?? []
 	target.swiftSettings?.append(contentsOf: [
 		.enableUpcomingFeature("ExistentialAny"),
