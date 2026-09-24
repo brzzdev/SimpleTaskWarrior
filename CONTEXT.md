@@ -31,3 +31,7 @@ _Avoid_: Parent, recurring task
 **Recurrence instance**:
 A pending task generated from a recurrence template; the only form of a repeating task users work with.
 _Avoid_: Occurrence, child
+
+**Series**:
+A recurrence template together with its recurrence instances; what a change to "all tasks" in a repeating task applies to.
+_Avoid_: Recurring task, recurrence
