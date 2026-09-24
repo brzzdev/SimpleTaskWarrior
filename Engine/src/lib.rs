@@ -84,6 +84,8 @@ pub struct WorkingSetEntry {
 /// One change in a batch passed to `apply`. Each writes exactly what it names.
 #[derive(uniffi::Enum)]
 pub enum PlannedOperation {
+	/// Refused with `Conflict` when the UUID already names a task, including one created earlier in
+	/// the batch.
 	Create {
 		uuid: String,
 	},
@@ -132,7 +134,8 @@ pub struct Expectation {
 #[derive(uniffi::Enum)]
 pub enum ApplyOutcome {
 	Committed,
-	/// Nothing was committed, because these tasks no longer match the expectations.
+	/// Nothing was committed, because these tasks no longer match the expectations, or already
+	/// exist where the batch creates them.
 	Conflict { uuids: Vec<String> },
 }
 
@@ -363,9 +366,15 @@ impl EngineHandle {
 			let mut batch = vec![Operation::UndoPoint];
 			for operation in operations {
 				match operation {
-					PlannedOperation::Create { uuid } => {
-						let uuid = parse_uuid(&uuid)?;
-						tasks.insert(uuid, Some(TaskData::create(uuid, &mut batch)));
+					PlannedOperation::Create { uuid: text } => {
+						// TaskChampion skips creating a task that exists but still logs the
+						// create, and undoing it would delete that task.
+						let uuid = parse_uuid(&text)?;
+						let task = task_data(replica, &mut tasks, uuid).await?;
+						if task.is_some() {
+							return Ok(ApplyOutcome::Conflict { uuids: vec![text] });
+						}
+						*task = Some(TaskData::create(uuid, &mut batch));
 					}
 					PlannedOperation::SetStatus { uuid, status } => {
 						let value = Some(status.stored_value().to_string());

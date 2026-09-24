@@ -1029,7 +1029,8 @@ public enum ApplyOutcome: Equatable, Hashable {
     
     case committed
     /**
-     * Nothing was committed, because these tasks no longer match the expectations.
+     * Nothing was committed, because these tasks no longer match the expectations, or already
+     * exist where the batch creates them.
      */
     case conflict(uuids: [String]
     )
@@ -1201,6 +1202,10 @@ public func FfiConverterTypeEngineError_lower(_ value: EngineError) -> RustBuffe
 
 public enum PlannedOperation: Equatable, Hashable {
     
+    /**
+     * Refused with `Conflict` when the UUID already names a task, including one created earlier in
+     * the batch.
+     */
     case create(uuid: String
     )
     /**
