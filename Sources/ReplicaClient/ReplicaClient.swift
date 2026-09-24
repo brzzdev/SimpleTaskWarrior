@@ -46,15 +46,10 @@ extension ReplicaClient: DependencyKey {
 			AsyncThrowingStream { continuation in
 				let polling = _Concurrency.Task {
 					do {
-						let replica = try Replica(directory: directory)
+						let replica = try await Replica.open(directory: directory)
 						while true {
 							// A failed read keeps the last tasks on screen and retries next tick.
-							if
-								await (try? replica.hasChanged()) == true,
-								let tasks = try? await replica.tasks()
-							{
-								continuation.yield(tasks)
-							}
+							try? await replica.publishTasksIfChanged(to: continuation)
 							try await _Concurrency.Task.sleep(for: pollInterval)
 						}
 					} catch is CancellationError {
@@ -66,8 +61,8 @@ extension ReplicaClient: DependencyKey {
 				continuation.onTermination = { _ in polling.cancel() }
 			}
 		},
-		validate: { @concurrent directory in
-			_ = try Replica(directory: directory)
+		validate: { directory in
+			_ = try await Replica.open(directory: directory)
 		},
 	)
 
@@ -86,7 +81,7 @@ extension DependencyValues {
 /// synchronous, so none of them interleave. The engine handle never leaves it.
 actor Replica {
 	private let engine: EngineHandle
-	private let queue = DispatchSerialQueue(label: "dev.brzz.SimpleTaskWarrior.Replica")
+	private let queue: DispatchSerialQueue
 	/// The `data_version` the last tasks were read at, nil before the first read.
 	private var readVersion: Int64?
 
@@ -94,9 +89,27 @@ actor Replica {
 		queue.asUnownedSerialExecutor()
 	}
 
-	init(directory: URL) throws(ReplicaError) {
+	private init(engine: EngineHandle, queue: DispatchSerialQueue) {
+		self.engine = engine
+		self.queue = queue
+	}
+
+	/// Opens on the actor's queue, since opening waits on a held lock like any other call.
+	static func open(directory: URL) async throws(ReplicaError) -> Replica {
+		let queue = DispatchSerialQueue(label: "dev.brzz.SimpleTaskWarrior.Replica")
+		let engine = await withCheckedContinuation { continuation in
+			queue.async {
+				continuation.resume(returning: Result { () throws(ReplicaError) in
+					try openEngine(directory: directory)
+				})
+			}
+		}
+		return try Replica(engine: engine.get(), queue: queue)
+	}
+
+	private static func openEngine(directory: URL) throws(ReplicaError) -> EngineHandle {
 		do {
-			engine = try EngineHandle.open(directory: directory.path(percentEncoded: false))
+			return try EngineHandle.open(directory: directory.path(percentEncoded: false))
 		} catch EngineError.NotAReplica {
 			throw .notAReplica
 		} catch EngineError.UnsupportedSchema {
@@ -108,24 +121,24 @@ actor Replica {
 		}
 	}
 
-	/// Whether anything has committed since the last `tasks()`.
-	func hasChanged() throws -> Bool {
-		try engine.dataVersion() != readVersion
-	}
-
-	func tasks() throws -> [Models.Task] {
+	/// Yields every task when anything has committed since the last read.
+	func publishTasksIfChanged(
+		to continuation: AsyncThrowingStream<[Models.Task], any Error>.Continuation,
+	) throws {
+		guard try engine.dataVersion() != readVersion else { return }
 		let snapshot = try engine.snapshot()
 		readVersion = snapshot.dataVersion
 		let workingSetIDs = Dictionary(
 			snapshot.workingSet.map { ($0.uuid, Int($0.id)) },
 			uniquingKeysWith: { first, _ in first },
 		)
-		return snapshot.tasks.compactMap { task in
+		let tasks = snapshot.tasks.compactMap { task in
 			Models.Task(
 				uuid: task.uuid,
 				workingSetID: workingSetIDs[task.uuid],
 				properties: task.properties,
 			)
 		}
+		continuation.yield(tasks)
 	}
 }
