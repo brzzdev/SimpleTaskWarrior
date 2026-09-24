@@ -101,11 +101,17 @@ generate: engine
 ensure-generated: engine
 	[ -d {{ workspace }} ] && [ -z "$(find .package.resolved Project.swift AppHost -newer {{ workspace }})" ] || just --no-deps generate
 
-# Each fixture's `expected.rc` is what `task _show` prints for its `taskrc`,
-# which `TaskrcTests` compares the parser against. The environment is fixed to
-# the one the tests expand with, and `task` runs from an empty directory so no
-# include resolves against the CWD, which the app ignores.
-# Record the golden Taskrc fixtures from real `task` 3.5
+# Each Taskrc fixture's `expected.rc` is what `task _show` prints for its
+# `taskrc`, which `TaskrcTests` compares the parser against. The environment is
+# fixed to the one the tests expand with, and `task` runs from an empty directory
+# so no include resolves against the CWD, which the app ignores.
+#
+# Each Models fixture's `tasks.sh` builds a fresh Replica under its `taskrc`, in
+# UTC. `ModelsTests` reads the Replica's properties (`tasks.json`) back against
+# what `task` reports at `now`: `export.json`, and the UUIDs it counts as
+# blocked, blocking and templates. TW stamps tasks with the time, so every
+# recording differs.
+# Record the golden Taskrc and Models fixtures from real `task` 3.5
 fixtures:
 	#!/usr/bin/env bash
 	set -euo pipefail
@@ -135,6 +141,31 @@ fixtures:
 			env -i HOME=/home/fixture USER=fixture FIXTURE=value \
 				TASKDATA="$taskdata" TASKRC="$fixture/taskrc" "$task" _show
 		) > "$fixture/expected.rc"
+	done
+
+	for fixture in "$PWD"/Tests/ModelsTests/Fixtures/*/; do
+		replica="$taskdata/$(basename "$fixture")"
+		task() {
+			(
+				cd "$scratch"
+				env -i HOME=/home/fixture TZ=UTC TASKDATA="$replica" TASKRC="$fixture/taskrc" \
+					"$task" rc.confirmation=0 rc.hooks=0 rc.verbose=nothing "$@"
+			)
+		}
+		source "$fixture/tasks.sh" > /dev/null
+		# TW generates Recurrence instances only when a report runs.
+		task list > /dev/null
+		sqlite3 "$replica/taskchampion.sqlite3" "
+			SELECT json_group_object(uuid, json_object(
+				'properties', json(data),
+				'workingSetID', (SELECT id FROM working_set WHERE working_set.uuid = tasks.uuid)
+			)) FROM tasks
+		" | python3 -m json.tool --sort-keys --tab > "$fixture/tasks.json"
+		date +%s > "$fixture/now"
+		task export > "$fixture/export.json"
+		task +BLOCKED _uuids | sort > "$fixture/blocked"
+		task +BLOCKING _uuids | sort > "$fixture/blocking"
+		task status:recurring or +TEMPLATE _uuids | sort > "$fixture/templates"
 	done
 
 # Edit the Tuist manifests in Xcode

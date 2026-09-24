@@ -1,0 +1,55 @@
+# One UDA of each type.
+uda.area.type=string
+uda.area.values=home,work,
+uda.estimate.type=duration
+uda.link.type=uuid
+uda.review.type=date
+uda.size.type=numeric
+# No type, so no UDA: `note` values are orphans.
+uda.note.label=Note
+
+urgency.uda.area.work.coefficient=2.5
+urgency.uda.size.3.5.coefficient=0.25
+urgency.uda.size.coefficient=1.5
+urgency.user.keyword.Bug.coefficient=3
+urgency.user.project.Home.coefficient=4
+urgency.user.tag.later.coefficient=-2
+
+# Every synthetic tag, each weighted differently, so one that's wrong shows in the total.
+urgency.user.tag.ACTIVE.coefficient=0.01
+urgency.user.tag.ANNOTATED.coefficient=0.02
+urgency.user.tag.BLOCKED.coefficient=0.03
+urgency.user.tag.BLOCKING.coefficient=0.04
+urgency.user.tag.CHILD.coefficient=0.05
+urgency.user.tag.COMPLETED.coefficient=0.06
+urgency.user.tag.DELETED.coefficient=0.07
+urgency.user.tag.DUE.coefficient=0.08
+urgency.user.tag.DUETODAY.coefficient=0.09
+urgency.user.tag.INSTANCE.coefficient=0.11
+urgency.user.tag.MONTH.coefficient=0.12
+urgency.user.tag.ORPHAN.coefficient=0.13
+urgency.user.tag.OVERDUE.coefficient=0.14
+urgency.user.tag.PARENT.coefficient=0.15
+urgency.user.tag.PENDING.coefficient=0.16
+urgency.user.tag.PRIORITY.coefficient=0.17
+urgency.user.tag.PROJECT.coefficient=0.18
+urgency.user.tag.QUARTER.coefficient=0.19
+urgency.user.tag.READY.coefficient=0.21
+urgency.user.tag.SCHEDULED.coefficient=0.22
+urgency.user.tag.TAGGED.coefficient=0.23
+urgency.user.tag.TEMPLATE.coefficient=0.24
+urgency.user.tag.TODAY.coefficient=0.25
+urgency.user.tag.TOMORROW.coefficient=0.26
+urgency.user.tag.UDA.coefficient=0.27
+urgency.user.tag.UNBLOCKED.coefficient=0.28
+urgency.user.tag.UNTIL.coefficient=0.29
+urgency.user.tag.WAITING.coefficient=0.31
+urgency.user.tag.WEEK.coefficient=0.32
+urgency.user.tag.YEAR.coefficient=0.33
+urgency.user.tag.YESTERDAY.coefficient=0.34
+
+# The active Context overrides a built-in coefficient, a discovered one and `due`.
+context=work
+context.work.rc.due=3
+context.work.rc.urgency.active.coefficient=6
+context.work.rc.urgency.user.project.Home.coefficient=40

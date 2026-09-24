@@ -1,14 +1,9 @@
 import Foundation
 import Taskrc
 import Testing
+import TestSupport
 
 struct TaskrcTests {
-	/// The environment `just fixtures` records with.
-	let environment = Taskrc.Environment(
-		homeDirectory: { $0 == "root" ? "/var/root" : nil },
-		variables: ["FIXTURE": "value", "HOME": "/home/fixture", "USER": "fixture"],
-	)
-
 	@Test
 	func contextOnlyKeyIsReadByNameButNotEnumerated() {
 		let taskrc = parse([
@@ -214,20 +209,7 @@ struct TaskrcTests {
 			.map { $0.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false) }
 			.reduce(into: [String: String]()) { $0[String($1[0])] = String($1[1]) }
 
-		let taskrc = Taskrc(
-			path: directory.appending(path: "taskrc").path(percentEncoded: false),
-			environment: environment,
-		) { path throws(Taskrc.ReadError) in
-			let url = URL(filePath: path)
-			// Decoded by hand, since `String(contentsOf:encoding:)` drops a BOM the parser must handle.
-			guard let data = try? Data(contentsOf: url) else {
-				throw .notFound
-			}
-			return Taskrc.File(
-				contents: String(decoding: data, as: UTF8.self),
-				realPath: url.resolvingSymlinksInPath().path(percentEncoded: false),
-			)
-		}
+		let taskrc = Taskrc(fixture: directory.appending(path: "taskrc"))
 
 		// Set by the bundled theme and holiday files the app skips, or overridden by the CLI at runtime.
 		let isComparable = { (key: String) in
@@ -244,7 +226,7 @@ struct TaskrcTests {
 		realPaths: [String: String] = [:],
 		unreadable: Set<String> = [],
 	) -> Taskrc {
-		Taskrc(path: "/rc/taskrc", environment: environment) { path throws(Taskrc.ReadError) in
+		Taskrc(path: "/rc/taskrc", environment: .fixture) { path throws(Taskrc.ReadError) in
 			guard !unreadable.contains(path) else {
 				throw .unreadable
 			}

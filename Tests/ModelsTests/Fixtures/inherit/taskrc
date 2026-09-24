@@ -1,0 +1,4 @@
+# As taskrc.5 advises for inheritance.
+urgency.blocked.coefficient=0
+urgency.blocking.coefficient=0
+urgency.inherit=1
