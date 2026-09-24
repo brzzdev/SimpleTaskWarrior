@@ -38,13 +38,7 @@ extension BookmarkClient: DependencyKey {
 		resolve: { bookmark in
 			// A stale bookmark still resolves, to where the folder moved. Re-saving it is part of
 			// handling a lost Replica.
-			var isStale = false
-			return try URL(
-				resolvingBookmarkData: bookmark,
-				options: .withSecurityScope,
-				relativeTo: nil,
-				bookmarkDataIsStale: &isStale,
-			)
+			try resolved(bookmark).url
 		},
 		saveGrant: { file, include in
 			let bookmark = try makeBookmark(file)
@@ -79,7 +73,7 @@ extension DependencyValues {
 }
 
 /// The bookmarks the app keeps.
-private struct Stored: Codable {
+private struct Stored: Codable, Equatable {
 	var grants: [Taskrc.Include: Data] = [:]
 	/// Taskrc bookmarks by the path of the Replica they're paired with.
 	var taskrcs: [String: Data] = [:]
@@ -96,11 +90,10 @@ private let stored = Mutex(
 /// Runs `body` on the kept bookmarks, then saves them to the user defaults if it changed them.
 private func update<Result>(_ body: (inout Stored) -> Result) -> Result {
 	stored.withLock { stored in
-		let old = try? JSONEncoder().encode(stored)
+		let old = stored
 		let result = body(&stored)
-		let new = try? JSONEncoder().encode(stored)
-		if new != old {
-			UserDefaults.standard.set(new, forKey: storedKey)
+		if stored != old {
+			UserDefaults.standard.set(try? JSONEncoder().encode(stored), forKey: storedKey)
 		}
 		return result
 	}
@@ -122,17 +115,21 @@ private func makeBookmark(_ url: URL) throws -> Data {
 	)
 }
 
+/// The URL `bookmark` resolves to, and whether the bookmark is stale and wants saving again.
+private func resolved(_ bookmark: Data) throws -> (url: URL, isStale: Bool) {
+	var isStale = false
+	let url = try URL(
+		resolvingBookmarkData: bookmark,
+		options: .withSecurityScope,
+		relativeTo: nil,
+		bookmarkDataIsStale: &isStale,
+	)
+	return (url, isStale)
+}
+
 /// The URL `bookmark` resolves to, passing `resave` a fresh bookmark when it's stale.
 private func url(of bookmark: Data, resave: (Data) -> Void) -> URL? {
-	var isStale = false
-	guard
-		let url = try? URL(
-			resolvingBookmarkData: bookmark,
-			options: .withSecurityScope,
-			relativeTo: nil,
-			bookmarkDataIsStale: &isStale,
-		)
-	else {
+	guard let (url, isStale) = try? resolved(bookmark) else {
 		return nil
 	}
 	if isStale, let fresh = try? makeBookmark(url) {

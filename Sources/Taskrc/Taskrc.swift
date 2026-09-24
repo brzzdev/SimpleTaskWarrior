@@ -1,6 +1,6 @@
 // Parses a Taskrc the way Taskwarrior 3.5 does, over its compiled-in defaults.
 import Darwin
-import Foundation
+public import Foundation
 
 /// A parsed Taskrc: TW's compiled-in defaults, overlaid by the Taskrc and the files it includes,
 /// read through the active Context.
@@ -113,6 +113,23 @@ extension Taskrc {
 		public init(contents: String, realPath: String) {
 			self.contents = contents
 			self.realPath = realPath
+		}
+
+		/// Reads the file at `url`.
+		public init(reading url: URL) throws(ReadError) {
+			let data: Data
+			do {
+				data = try Data(contentsOf: url)
+			} catch CocoaError.fileReadNoSuchFile {
+				throw .notFound
+			} catch {
+				throw .unreadable
+			}
+			// Decoded by hand, since `String(contentsOf:encoding:)` drops a BOM the parser must handle.
+			self.init(
+				contents: String(decoding: data, as: UTF8.self),
+				realPath: url.resolvingSymlinksInPath().path(percentEncoded: false),
+			)
 		}
 	}
 
@@ -318,7 +335,7 @@ private struct Configuration {
 extension Taskrc.Environment {
 	/// The app's environment, with `HOME` and `USER` set to the real user's rather than the sandbox
 	/// container's, so `~` means what it does to the CLI.
-	public static var live: Self {
+	public static let live: Self = {
 		var variables = ProcessInfo.processInfo.environment
 		if let account = getpwuid(getuid()) {
 			variables["HOME"] = String(cString: account.pointee.pw_dir)
@@ -330,5 +347,5 @@ extension Taskrc.Environment {
 			},
 			variables: variables,
 		)
-	}
+	}()
 }

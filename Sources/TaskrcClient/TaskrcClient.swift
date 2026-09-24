@@ -68,21 +68,9 @@ extension TaskrcClient: DependencyKey {
 						let parsed = Taskrc(path: url.path(percentEncoded: false), environment: .live) {
 							path, include throws(Taskrc.ReadError) in
 							let file = include.flatMap { grants[$0] } ?? URL(filePath: path)
-							let contents: Data
-							do {
-								contents = try Data(contentsOf: file)
-							} catch CocoaError.fileReadNoSuchFile {
-								throw .notFound
-							} catch {
-								throw .unreadable
-							}
+							let contents = try Taskrc.File(reading: file)
 							read.append(file)
-							// Decoded by hand, since `String(contentsOf:encoding:)` drops a BOM the parser
-							// must handle.
-							return Taskrc.File(
-								contents: String(decoding: contents, as: UTF8.self),
-								realPath: file.resolvingSymlinksInPath().path(percentEncoded: false),
-							)
+							return contents
 						}
 						let fatal = parsed.problems.first(where: \.kind.isFatal)
 						if fatal == nil {

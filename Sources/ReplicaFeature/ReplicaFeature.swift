@@ -34,18 +34,28 @@ public struct ReplicaFeature {
 
 		/// The Taskrc's `data.location`, where it names a folder other than the window's Replica.
 		var otherDataLocation: String? {
-			guard
-				let directory,
-				let taskrc,
-				taskrc.url != nil,
-				let location = taskrc.taskrc["data.location"]
-			else {
+			guard hasTaskrc, let directory, let location = taskrc?.taskrc["data.location"] else {
 				return nil
 			}
 			let folder = { (path: String) in
 				URL(filePath: path, directoryHint: .isDirectory).standardizedFileURL
 			}
 			return folder(location) == folder(directory.path(percentEncoded: false)) ? nil : location
+		}
+
+		/// The file panel that fixes the Taskrc's problem: a grant for an include the app can't read,
+		/// or another Taskrc in place of one it can't.
+		var taskrcRemedy: FileImporter? {
+			guard let problem = taskrc?.problem else {
+				return nil
+			}
+			switch problem.kind {
+			case let .notFound(path, _), let .unreadable(path, _):
+				return problem.include.map { .grant($0, file: URL(filePath: path)) } ?? .taskrc
+
+			default:
+				return nil
+			}
 		}
 
 		public init(bookmark: Data) {
@@ -66,7 +76,6 @@ public struct ReplicaFeature {
 		case directoryResolved(URL)
 		case fetchRequested
 		case fileChosen(URL, for: FileImporter)
-		case fileImporterDismissed
 		case grantAccessButtonTapped
 		case openFailed(String)
 		case taskrcHintCloseButtonTapped
@@ -111,44 +120,19 @@ public struct ReplicaFeature {
 
 			case let .fileChosen(file, .grant(include, _)):
 				state.fileImporter = nil
-				guard let directory = state.directory else {
-					return .none
+				return reloadTaskrc(pairedWith: state.directory) { [bookmarkClient] _ in
+					try bookmarkClient.saveGrant(file, include)
 				}
-				return .concatenate(
-					.run { [bookmarkClient] _ in
-						try bookmarkClient.saveGrant(file, include)
-					},
-					loadTaskrc(pairedWith: directory),
-				)
 
 			case let .fileChosen(file, .taskrc):
 				state.fileImporter = nil
 				state.isTaskrcHintPresented = false
-				guard let directory = state.directory else {
-					return .none
+				return reloadTaskrc(pairedWith: state.directory) { [bookmarkClient] directory in
+					try bookmarkClient.saveTaskrc(file, directory)
 				}
-				return .concatenate(
-					.run { [bookmarkClient] _ in
-						try bookmarkClient.saveTaskrc(file, directory)
-					},
-					loadTaskrc(pairedWith: directory),
-				)
-
-			case .fileImporterDismissed:
-				state.fileImporter = nil
-				return .none
 
 			case .grantAccessButtonTapped:
-				guard let problem = state.taskrc?.problem, let include = problem.include else {
-					return .none
-				}
-				switch problem.kind {
-				case let .notFound(path, _), let .unreadable(path, _):
-					state.fileImporter = .grant(include, file: URL(filePath: path))
-
-				default:
-					break
-				}
+				state.fileImporter = state.taskrcRemedy
 				return .none
 
 			case let .openFailed(failure):
@@ -178,15 +162,9 @@ public struct ReplicaFeature {
 
 			case .useTaskwarriorDefaultsButtonTapped:
 				state.isTaskrcHintPresented = false
-				guard let directory = state.directory else {
-					return .none
+				return reloadTaskrc(pairedWith: state.directory) { [bookmarkClient] directory in
+					try bookmarkClient.saveTaskrc(nil, directory)
 				}
-				return .concatenate(
-					.run { [bookmarkClient] _ in
-						try bookmarkClient.saveTaskrc(nil, directory)
-					},
-					loadTaskrc(pairedWith: directory),
-				)
 			}
 		}
 	}
@@ -203,6 +181,17 @@ public struct ReplicaFeature {
 			}
 		}
 		.cancellable(id: CancelID.taskrc, cancelInFlight: true)
+	}
+
+	/// Runs `save` with the Replica's folder, then loads its Taskrc again.
+	private func reloadTaskrc(
+		pairedWith directory: URL?,
+		after save: @escaping @Sendable (_ directory: URL) throws -> Void,
+	) -> Effect<Action> {
+		guard let directory else {
+			return .none
+		}
+		return .concatenate(.run { _ in try save(directory) }, loadTaskrc(pairedWith: directory))
 	}
 }
 
@@ -265,14 +254,7 @@ public struct ReplicaView: View {
 		.navigationTitle(store.directory?.lastPathComponent ?? "")
 		.navigationSubtitle(store.directory?.path(percentEncoded: false) ?? "")
 		.fileImporter(
-			isPresented: Binding(
-				get: { store.fileImporter != nil },
-				set: { isPresented in
-					if !isPresented {
-						store.send(.fileImporterDismissed)
-					}
-				},
-			),
+			isPresented: Binding($store.fileImporter),
 			allowedContentTypes: [.item],
 		) { [fileImporter = store.fileImporter] result in
 			guard let fileImporter, let file = try? result.get() else {
@@ -302,10 +284,15 @@ public struct ReplicaView: View {
 				Banner(systemImage: "exclamationmark.triangle.fill") {
 					Text(description(of: problem))
 				} actions: {
-					if problem.include != nil {
+					switch store.taskrcRemedy {
+					case .grant:
 						Button("Grant Access…") { store.send(.grantAccessButtonTapped) }
-					} else if problem.location == nil {
+
+					case .taskrc:
 						Button("Choose Taskrc…") { store.send(.chooseTaskrcButtonTapped) }
+
+					case nil:
+						EmptyView()
 					}
 				}
 			}
