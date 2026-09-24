@@ -229,6 +229,9 @@ span:now
 span:10000d
 span:10001d
 span:5s
+span:185542587187200s
+span:-185542587187200s
+span:371085174374400s
 span:30sec
 span:1wk 2d
 span:1d*-1.5

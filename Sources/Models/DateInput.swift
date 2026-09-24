@@ -81,7 +81,8 @@ public struct TaskDuration: Hashable, Sendable {
 		let minutes = remainder % 60
 		remainder /= 60
 		let hours = remainder % 24
-		let days = remainder / 24
+		// TW formats the day count through a signed 32-bit int, so past `Int32.max` days it wraps.
+		let days = Int32(truncatingIfNeeded: remainder / 24)
 
 		var iso = seconds < 0 ? "-P" : "P"
 		if days != 0 {
