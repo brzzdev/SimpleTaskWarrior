@@ -41,11 +41,12 @@ generate:
 	touch {{ workspace }}
 
 # Generate when the workspace is missing or older than anything Tuist reads to
-# build it: the manifest, and the app host files its globs pick up. The package's
-# own sources need nothing, since Xcode resolves the local package itself.
+# build it: the manifest, the app host files its globs pick up, and the pins in
+# `.package.resolved`, which it restores into the workspace. The package's own
+# sources need nothing, since Xcode resolves the local package itself.
 [private]
 ensure-generated:
-	[ -d {{ workspace }} ] && [ -z "$(find Project.swift AppHost -newer {{ workspace }})" ] || just generate
+	[ -d {{ workspace }} ] && [ -z "$(find .package.resolved Project.swift AppHost -newer {{ workspace }})" ] || just generate
 
 # Edit the Tuist manifests in Xcode
 edit:
