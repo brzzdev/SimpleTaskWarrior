@@ -111,6 +111,7 @@ let package = Package(
 			],
 			resources: [
 				// Recorded by `just fixtures`.
+				.copy("DateFixtures"),
 				.copy("Fixtures"),
 			],
 		),
