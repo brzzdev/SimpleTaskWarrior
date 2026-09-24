@@ -145,8 +145,10 @@ actor Replica {
 			uniquingKeysWith: { first, _ in first },
 		)
 		let tasks = snapshot.tasks.compactMap { task in
+			// Without the window's Taskrc, which it doesn't read yet, every UDA reads as an orphan.
 			Models.Task(
 				properties: task.properties,
+				udaTypes: [:],
 				uuid: task.uuid,
 				workingSetID: workingSetIDs[task.uuid],
 			)

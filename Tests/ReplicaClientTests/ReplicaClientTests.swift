@@ -34,7 +34,7 @@ final class ReplicaClientTests {
 
 		#expect(
 			try await tasks.next() == [
-				Models.Task(description: "Buy milk", id: uuid, status: .pending, workingSetID: 1),
+				pendingTask("Buy milk", id: uuid),
 			],
 		)
 	}
@@ -48,7 +48,7 @@ final class ReplicaClientTests {
 
 		#expect(
 			try await tasks.next() == [
-				Models.Task(description: "Buy milk", id: uuid, status: .pending, workingSetID: 1),
+				pendingTask("Buy milk", id: uuid),
 			],
 		)
 	}
@@ -95,6 +95,13 @@ final class ReplicaClientTests {
 		)
 		try #require(outcome == .committed)
 		return uuid
+	}
+
+	/// A task `addPendingTask` adds, as the Replica reads it back.
+	private func pendingTask(_ description: String, id: UUID) -> Models.Task {
+		var task = Models.Task(description: description, id: id, status: .pending, workingSetID: 1)
+		task.properties = ["description": description, "status": "pending"]
+		return task
 	}
 
 	/// The engine opens a Replica but never creates one, so this starts from an empty database

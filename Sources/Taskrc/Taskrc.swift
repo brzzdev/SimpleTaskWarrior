@@ -10,6 +10,8 @@ public struct Taskrc: Equatable, Sendable {
 	/// The active Context's write modifications, which new tasks take as defaults.
 	public var contextWrite: ContextWrite
 	public var problems: [Problem]
+	/// The UDAs the Taskrc defines, by name.
+	public var udaTypes: [String: UDAType]
 	/// Every key the defaults and the Taskrc set, each read through the active Context: what TW
 	/// enumerates, as `task _show` prints it. Read a single key by name with the subscript.
 	public var values: [String: String]
@@ -34,6 +36,7 @@ public struct Taskrc: Equatable, Sendable {
 		contextOnlyValues = configuration.contextOnlyValues()
 		contextWrite = ContextWrite(configuration)
 		problems = parser.problems + configuration.problems()
+		udaTypes = configuration.udaTypes()
 		values = configuration.values()
 	}
 
@@ -41,6 +44,22 @@ public struct Taskrc: Equatable, Sendable {
 	/// active Context sets even when the Taskrc doesn't.
 	public subscript(key: String) -> String? {
 		contextOnlyValues[key] ?? values[key]
+	}
+
+	/// `Configuration::getBoolean`: true only for `1`, `on`, `true`, `y` or `yes`, in any case.
+	public func boolean(_ key: String) -> Bool {
+		self[key].map { ["1", "on", "true", "y", "yes"].contains($0.lowercased()) } ?? false
+	}
+
+	/// `Configuration::getInteger`, which reads a leading number with `strtoimax` and ignores the
+	/// rest.
+	public func integer(_ key: String) -> Int {
+		self[key].map { strtol($0, nil, 10) } ?? 0
+	}
+
+	/// `Configuration::getReal`, which reads a leading number with `strtod` and ignores the rest.
+	public func real(_ key: String) -> Double {
+		self[key].map { strtod($0, nil) } ?? 0
 	}
 }
 
@@ -154,8 +173,14 @@ extension Taskrc.ContextWrite {
 	}
 }
 
-/// The UDA types TW accepts, where an empty type means no UDA.
-private let udaTypes: Set = ["", "date", "duration", "numeric", "string", "uuid"]
+/// The types TW accepts in `uda.<name>.type`, besides an empty one, which means no UDA.
+public enum UDAType: String, Sendable {
+	case date
+	case duration
+	case numeric
+	case string
+	case uuid
+}
 
 /// The days `weekstart` may name.
 private let weekstartDays = ["monday", "sunday"]
@@ -203,12 +228,12 @@ private struct Configuration {
 				Taskrc.Problem(.invalidWeekstart(weekstart.value), at: weekstart.location),
 			)
 		}
-		// TW finds UDAs among the keys the Taskrc sets, then reads each type through the Context.
-		let udas = Set(
-			entries.keys.compactMap { $0.firstMatch(of: /^uda\.([^.]*)\./).map { String($0.1) } },
-		)
-		for uda in udas.sorted() {
-			guard let type = entry("uda.\(uda).type"), !udaTypes.contains(type.value) else {
+		for uda in udaNames().sorted() {
+			guard
+				let type = entry("uda.\(uda).type"),
+				!type.value.isEmpty,
+				UDAType(rawValue: type.value) == nil
+			else {
 				continue
 			}
 			problems.append(
@@ -218,11 +243,24 @@ private struct Configuration {
 		return problems
 	}
 
+	/// Every UDA with a type TW accepts, by name.
+	func udaTypes() -> [String: UDAType] {
+		udaNames().reduce(into: [:]) { types, uda in
+			types[uda] = entry("uda.\(uda).type").flatMap { UDAType(rawValue: $0.value) }
+		}
+	}
+
 	/// Every key the Taskrc sets, read through the Context.
 	func values() -> [String: String] {
 		entries.keys.reduce(into: [:]) { values, key in
 			values[key] = entry(key)?.value
 		}
+	}
+
+	/// The UDA names TW finds among the keys the Taskrc sets, before it reads each type through the
+	/// Context.
+	private func udaNames() -> Set<String> {
+		Set(entries.keys.compactMap { $0.firstMatch(of: /^uda\.([^.]*)\./).map { String($0.1) } })
 	}
 
 	/// `Datetime::dayOfWeek` finding Sunday or Monday: the whole name or 3+ letters of it, in any

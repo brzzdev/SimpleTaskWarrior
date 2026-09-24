@@ -106,7 +106,12 @@ let package = Package(
 			name: "ModelsTests",
 			dependencies: [
 				"Models",
+				"Taskrc",
 				"TestSupport",
+			],
+			resources: [
+				// Recorded by `just fixtures`.
+				.copy("Fixtures"),
 			],
 		),
 		.testTarget(

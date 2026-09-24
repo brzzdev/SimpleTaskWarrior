@@ -63,7 +63,7 @@ public struct ReplicaFeature {
 			case let .tasksLoaded(tasks):
 				state.tasks = IdentifiedArray(
 					uniqueElements: tasks
-						.filter { $0.status == .pending }
+						.filter { $0.status == .pending && !$0.isTemplate }
 						.sorted { ($0.workingSetID ?? .max) < ($1.workingSetID ?? .max) },
 				)
 				state.selection.formIntersection(state.tasks.ids)

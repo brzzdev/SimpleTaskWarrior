@@ -1,0 +1,8 @@
+[
+{"id":0,"description":"Completed while blocked","due":"20260916T192104Z","end":"20260924T192104Z","entry":"20260924T192104Z","modified":"20260924T192104Z","status":"completed","uuid":"c647c5de-14ca-4db9-9771-08cc2a17996b","depends":["64cea747-1cff-44b7-950b-977c6c5ef13d"],"urgency":12},
+{"id":1,"description":"Root of the chain","entry":"20260924T192104Z","modified":"20260924T192104Z","status":"pending","uuid":"180d03d5-eec2-43ac-95a9-c7f6ad41ce3a","urgency":27.82},
+{"id":2,"description":"Middle of the chain","entry":"20260924T192104Z","modified":"20260924T192104Z","status":"pending","uuid":"34049814-957b-4360-ad95-ab3e9acd30d2","depends":["180d03d5-eec2-43ac-95a9-c7f6ad41ce3a"],"urgency":27.81},
+{"id":3,"description":"Urgent end of the chain","due":"20260916T192104Z","entry":"20260924T192104Z","modified":"20260924T192104Z","status":"pending","uuid":"bb77b10e-5400-4761-9ee4-ac5268f4fc3b","tags":["next"],"depends":["34049814-957b-4360-ad95-ab3e9acd30d2"],"urgency":27.8},
+{"id":4,"description":"Less urgent, blocked by the root","entry":"20260924T192104Z","modified":"20260924T192104Z","status":"pending","uuid":"3ed759f3-b80b-4a42-afc5-767970a9a1ca","depends":["180d03d5-eec2-43ac-95a9-c7f6ad41ce3a"],"urgency":0},
+{"id":5,"description":"Blocking only a completed task","entry":"20260924T192104Z","modified":"20260924T192104Z","status":"pending","uuid":"64cea747-1cff-44b7-950b-977c6c5ef13d","urgency":0}
+]

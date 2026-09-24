@@ -1,0 +1,69 @@
+{
+	"180d03d5-eec2-43ac-95a9-c7f6ad41ce3a": {
+		"properties": {
+			"description": "Root of the chain",
+			"entry": "1790277664",
+			"modified": "1790277664",
+			"status": "pending"
+		},
+		"workingSetID": 1
+	},
+	"34049814-957b-4360-ad95-ab3e9acd30d2": {
+		"properties": {
+			"dep_180d03d5-eec2-43ac-95a9-c7f6ad41ce3a": "x",
+			"depends": "180d03d5-eec2-43ac-95a9-c7f6ad41ce3a",
+			"description": "Middle of the chain",
+			"entry": "1790277664",
+			"modified": "1790277664",
+			"status": "pending"
+		},
+		"workingSetID": 2
+	},
+	"3ed759f3-b80b-4a42-afc5-767970a9a1ca": {
+		"properties": {
+			"dep_180d03d5-eec2-43ac-95a9-c7f6ad41ce3a": "x",
+			"depends": "180d03d5-eec2-43ac-95a9-c7f6ad41ce3a",
+			"description": "Less urgent, blocked by the root",
+			"entry": "1790277664",
+			"modified": "1790277664",
+			"status": "pending"
+		},
+		"workingSetID": 4
+	},
+	"64cea747-1cff-44b7-950b-977c6c5ef13d": {
+		"properties": {
+			"description": "Blocking only a completed task",
+			"entry": "1790277664",
+			"modified": "1790277664",
+			"status": "pending"
+		},
+		"workingSetID": 5
+	},
+	"bb77b10e-5400-4761-9ee4-ac5268f4fc3b": {
+		"properties": {
+			"dep_34049814-957b-4360-ad95-ab3e9acd30d2": "x",
+			"depends": "34049814-957b-4360-ad95-ab3e9acd30d2",
+			"description": "Urgent end of the chain",
+			"due": "1789586464",
+			"entry": "1790277664",
+			"modified": "1790277664",
+			"status": "pending",
+			"tag_next": "x",
+			"tags": "next"
+		},
+		"workingSetID": 3
+	},
+	"c647c5de-14ca-4db9-9771-08cc2a17996b": {
+		"properties": {
+			"dep_64cea747-1cff-44b7-950b-977c6c5ef13d": "x",
+			"depends": "64cea747-1cff-44b7-950b-977c6c5ef13d",
+			"description": "Completed while blocked",
+			"due": "1789586464",
+			"end": "1790277664",
+			"entry": "1790277664",
+			"modified": "1790277664",
+			"status": "completed"
+		},
+		"workingSetID": null
+	}
+}
