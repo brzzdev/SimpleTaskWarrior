@@ -56,6 +56,9 @@ extension ReplicaClient: DependencyKey {
 					do {
 						let replica = try await Replica.open(directory: directory)
 						while true {
+							// Before every read too: cancelling doesn't interrupt a blocked `open`, and
+							// once it returns, a read would start a fresh wait on the lock.
+							try _Concurrency.Task.checkCancellation()
 							// A failed read keeps the last tasks on screen and retries next tick.
 							try? await replica.publishTasksIfChanged(to: continuation)
 							try await _Concurrency.Task.sleep(for: pollInterval)
