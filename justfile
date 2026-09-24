@@ -33,16 +33,19 @@ release_dir := ".release"
 default:
 	@just --list
 
-# Generate the Xcode project from Project.swift
+# Generate the Xcode project from Project.swift. The touch stamps the workspace
+# for `ensure-generated`: Tuist leaves unchanged files alone, so without it the
+# workspace's mtime would not record that a generate ran.
 generate:
 	tuist generate --no-open
+	touch {{ workspace }}
 
-# Generate when the workspace is missing or older than the manifest. The touch
-# stamps the workspace, since Tuist leaves unchanged files untouched and its
-# mtime alone would not record that a generate ran.
+# Generate when the workspace is missing or older than anything Tuist reads to
+# build it: the manifest, and the app host files its globs pick up. The package's
+# own sources need nothing, since Xcode resolves the local package itself.
 [private]
 ensure-generated:
-	[ {{ workspace }} -nt Project.swift ] || { tuist generate --no-open && touch {{ workspace }}; }
+	[ -d {{ workspace }} ] && [ -z "$(find Project.swift AppHost -newer {{ workspace }})" ] || just generate
 
 # Edit the Tuist manifests in Xcode
 edit:
@@ -75,13 +78,27 @@ run: build
 	fi
 
 	# `open` only activates a copy that is already running, so quit the previous
-	# dev build first. Matching its full path spares an installed release copy.
+	# dev build first. Matching the exact executable path spares an installed
+	# release copy and anything else that merely names the path.
 	binary="$PWD/$app/Contents/MacOS/{{ scheme }}"
-	if pkill -f "$binary"; then
+	running() {
+		for pid in $(pgrep -x {{ scheme }}); do
+			[ "$(ps -o comm= -p "$pid")" = "$binary" ] && echo "$pid"
+		done
+		return 0
+	}
+	pids="$(running)"
+	if [ -n "$pids" ]; then
+		kill $pids
+		# Up to five seconds for it to exit.
 		for _ in {1..50}; do
-			pgrep -f "$binary" >/dev/null || break
+			[ -z "$(running)" ] && break
 			sleep 0.1
 		done
+		if [ -n "$(running)" ]; then
+			echo "the previous {{ scheme }} is still running; quit it and retry" >&2
+			exit 1
+		fi
 	fi
 
 	open "$app"
