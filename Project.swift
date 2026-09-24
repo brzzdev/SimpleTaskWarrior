@@ -9,12 +9,12 @@ let developmentTeam = Environment.developmentTeam.getString(default: "")
 let baseSettings: SettingsDictionary = [
 	"ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon",
 	"ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS": "YES",
-	"SWIFT_VERSION": "6.0",
 	"ENABLE_HARDENED_RUNTIME": "YES",
 	// Off so the SwiftLint build phase can read the whole source tree. This is a
 	// build-time setting only — it does not affect the shipped app's hardened
 	// runtime, signing, or runtime App Sandbox.
 	"ENABLE_USER_SCRIPT_SANDBOXING": "NO",
+	"SWIFT_VERSION": "6.0",
 ]
 
 // Sign the app with Developer ID (manual): it needs no Xcode-registered account

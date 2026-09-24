@@ -37,7 +37,7 @@ jobs:
           path: ~/.mint
           key: mint-${{ runner.os }}-${{ hashFiles('Mintfile') }}
 
-      - name: Install pinned Mint packages (SwiftLint)
+      - name: Install pinned Mint packages
         run: mint bootstrap
 
       - name: Skip macro fingerprint validation

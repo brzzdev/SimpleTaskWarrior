@@ -18,13 +18,12 @@ destination := "platform=macOS"
 # pinned tree is covered there too.
 #
 # Xcode.app keeps its own DerivedData under ~/Library, so a CLI build and an
-# Xcode build no longer share one; the first after switching cold-compiles.
+# Xcode build do not share one; the first after switching cold-compiles.
 # `release` deliberately does not pin it — a notarised build has no business
 # reusing an incremental dev cache.
 derived_data := ".build/xcode"
-# Repo-scoped rather than the bare /tmp/swiftformat-base every repo in the family
-# shares: two checkouts on different config revisions otherwise fight over one
-# file, and each overwrites the other's config mid-commit.
+# Repo-scoped because a path shared across repos lets two checkouts on different
+# config revisions fight over one file, each overwriting the other's mid-commit.
 swiftformat_base := "/tmp/swiftformat-base-SimpleTaskWarrior"
 swiftformat_url := "https://raw.githubusercontent.com/brzzdev/Configs/main/Configs/swiftformat"
 notary_profile := "SimpleTaskWarrior"
@@ -62,7 +61,7 @@ run: build
 
 	# `build` above put the app under the pinned derived data, so the path is
 	# known and needs no second xcodebuild to ask for it — that query re-resolves
-	# the package graph, and it ran on every `just run`.
+	# the package graph.
 	#
 	# The guard is not checking whether the build succeeded (pipefail already
 	# did) but whether the product still lands where this line says, which a
