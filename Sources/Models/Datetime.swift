@@ -867,6 +867,10 @@ struct Datetime {
 		if julian != 0, !(1 ... daysInYear(year)).contains(julian) {
 			return false
 		}
+		// TW accepts `2026-00-00` but refuses a day in month 0, such as `2026-00-15`.
+		if day != 0, month == 0 {
+			return false
+		}
 		if day != 0, !(1 ... daysInMonth(year: year, month: month)).contains(day) {
 			return false
 		}
