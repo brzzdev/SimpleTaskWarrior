@@ -45,16 +45,33 @@ extension BookmarkClient: DependencyKey {
 			update { $0.grants[include] = bookmark }
 		},
 		saveTaskrc: { taskrc, replica in
-			let bookmark = try taskrc.map(makeBookmark)
-			update { $0.taskrcs[replica.path(percentEncoded: false)] = bookmark }
+			let pairing = try taskrc.map { try Pairing(
+				replica: makeBookmark(replica),
+				taskrc: makeBookmark($0),
+			) }
+			update { stored in
+				switch (pairingIndex(of: replica, in: &stored), pairing) {
+				case let (index?, pairing?):
+					stored.pairings[index] = pairing
+
+				case let (index?, nil):
+					stored.pairings.remove(at: index)
+
+				case let (nil, pairing?):
+					stored.pairings.append(pairing)
+
+				case (nil, nil):
+					break
+				}
+			}
 		},
 		taskrc: { replica in
 			update { stored -> URL? in
-				let key = replica.path(percentEncoded: false)
-				guard let bookmark = stored.taskrcs[key] else {
+				guard let index = pairingIndex(of: replica, in: &stored) else {
 					return nil
 				}
-				return url(of: bookmark) { stored.taskrcs[key] = $0 }
+				let bookmark = stored.pairings[index].taskrc
+				return url(of: bookmark) { stored.pairings[index].taskrc = $0 }
 					?? URL.resourceValues(forKeys: [.pathKey], fromBookmarkData: bookmark)?
 					.path
 					.map { URL(filePath: $0) }
@@ -88,6 +105,25 @@ private func makeBookmark(_ url: URL) throws -> Data {
 	)
 }
 
+/// A Taskrc and the Replica it's paired with, by bookmark on each, so the pairing follows a
+/// Replica that moves and isn't inherited by another later made at its old path.
+private struct Pairing: Codable, Equatable {
+	var replica: Data
+	var taskrc: Data
+}
+
+/// The index of the pairing whose Replica bookmark resolves to the folder `replica`, re-saving any
+/// stale Replica bookmark it resolves on the way.
+private func pairingIndex(of replica: URL, in stored: inout Stored) -> Int? {
+	let folder = { (url: URL) in
+		URL(filePath: url.path(percentEncoded: false), directoryHint: .isDirectory).standardizedFileURL
+	}
+	return stored.pairings.indices.first { index in
+		url(of: stored.pairings[index].replica) { stored.pairings[index].replica = $0 }
+			.map(folder) == folder(replica)
+	}
+}
+
 /// The URL `bookmark` resolves to, and whether the bookmark is stale and wants saving again.
 private func resolved(_ bookmark: Data) throws -> (url: URL, isStale: Bool) {
 	var isStale = false
@@ -103,8 +139,7 @@ private func resolved(_ bookmark: Data) throws -> (url: URL, isStale: Bool) {
 /// The bookmarks the app keeps.
 private struct Stored: Codable, Equatable {
 	var grants: [Taskrc.Include: Data] = [:]
-	/// Taskrc bookmarks by the path of the Replica they're paired with.
-	var taskrcs: [String: Data] = [:]
+	var pairings: [Pairing] = []
 }
 
 private let stored = Mutex(

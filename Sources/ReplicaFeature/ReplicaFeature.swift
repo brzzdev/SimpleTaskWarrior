@@ -25,6 +25,8 @@ public struct ReplicaFeature {
 		/// Kept by UUID, so it survives the CLI renumbering tasks.
 		var selection: Set<Models.Task.ID> = []
 		var taskrc: TaskrcClient.Loaded?
+		/// Why the last Taskrc or grant the user chose couldn't be kept.
+		var taskrcSaveFailure: TaskrcSaveFailure?
 		var tasks: IdentifiedArrayOf<Models.Task> = []
 
 		/// Whether Grant Access… can fix the Taskrc's problem.
@@ -78,6 +80,12 @@ public struct ReplicaFeature {
 		}
 	}
 
+	public struct TaskrcSaveFailure: Equatable, Sendable {
+		public var message: String
+		/// The panel that chose the file, which Try Again… opens again.
+		public var retry: FileImporter?
+	}
+
 	/// What a file panel on screen is choosing.
 	public enum FileImporter: Equatable, Sendable {
 		/// The file an `include` line names, which the app couldn't read at `file`.
@@ -95,7 +103,9 @@ public struct ReplicaFeature {
 		case openFailed(String)
 		case taskrcHintCloseButtonTapped
 		case taskrcLoaded(TaskrcClient.Loaded)
+		case taskrcSaveFailed(TaskrcSaveFailure)
 		case tasksLoaded([Models.Task])
+		case tryAgainButtonTapped
 		case useTaskwarriorDefaultsButtonTapped
 	}
 
@@ -133,16 +143,22 @@ public struct ReplicaFeature {
 					await send(.openFailed(error.localizedDescription))
 				}
 
-			case let .fileChosen(file, .grant(include, _)):
+			case let .fileChosen(file, .grant(include, resolved)):
 				state.fileImporter = nil
-				return reloadTaskrc(pairedWith: state.directory) { [bookmarkClient] _ in
+				state.taskrcSaveFailure = nil
+				return reloadTaskrc(
+					pairedWith: state.directory,
+					retrying: .grant(include, file: resolved),
+				) { [bookmarkClient] _ in
 					try bookmarkClient.saveGrant(file, include)
 				}
 
 			case let .fileChosen(file, .taskrc):
 				state.fileImporter = nil
 				state.isTaskrcHintPresented = false
-				return reloadTaskrc(pairedWith: state.directory) { [bookmarkClient] directory in
+				state.taskrcSaveFailure = nil
+				return reloadTaskrc(pairedWith: state.directory, retrying: .taskrc) {
+					[bookmarkClient] directory in
 					try bookmarkClient.saveTaskrc(file, directory)
 				}
 
@@ -166,6 +182,10 @@ public struct ReplicaFeature {
 				}
 				return .none
 
+			case let .taskrcSaveFailed(failure):
+				state.taskrcSaveFailure = failure
+				return .none
+
 			case let .tasksLoaded(tasks):
 				state.tasks = IdentifiedArray(
 					uniqueElements: tasks
@@ -175,9 +195,14 @@ public struct ReplicaFeature {
 				state.selection.formIntersection(state.tasks.ids)
 				return .none
 
+			case .tryAgainButtonTapped:
+				state.fileImporter = state.taskrcSaveFailure?.retry
+				return .none
+
 			case .useTaskwarriorDefaultsButtonTapped:
 				state.isTaskrcHintPresented = false
-				return reloadTaskrc(pairedWith: state.directory) { [bookmarkClient] directory in
+				state.taskrcSaveFailure = nil
+				return reloadTaskrc(pairedWith: state.directory, retrying: nil) { [bookmarkClient] directory in
 					try bookmarkClient.saveTaskrc(nil, directory)
 				}
 			}
@@ -205,15 +230,26 @@ public struct ReplicaFeature {
 		.cancellable(id: CancelID.taskrc, cancelInFlight: true)
 	}
 
-	/// Runs `save` with the Replica's folder, then loads its Taskrc again.
+	/// Runs `save` with the Replica's folder, then loads its Taskrc again. A failed save is
+	/// reported with the panel that would choose the file again.
 	private func reloadTaskrc(
 		pairedWith directory: URL?,
+		retrying retry: FileImporter?,
 		after save: @escaping @Sendable (_ directory: URL) throws -> Void,
 	) -> Effect<Action> {
 		guard let directory else {
 			return .none
 		}
-		return .concatenate(.run { _ in try save(directory) }, loadTaskrc(pairedWith: directory))
+		return .concatenate(
+			.run { _ in
+				try save(directory)
+			} catch: { error, send in
+				await send(
+					.taskrcSaveFailed(TaskrcSaveFailure(message: error.localizedDescription, retry: retry)),
+				)
+			},
+			loadTaskrc(pairedWith: directory),
+		)
 	}
 }
 
@@ -315,6 +351,15 @@ public struct ReplicaView: View {
 
 					case nil:
 						EmptyView()
+					}
+				}
+			}
+			if let failure = store.taskrcSaveFailure {
+				Banner(systemImage: "exclamationmark.triangle.fill") {
+					Text("SimpleTaskWarrior couldn't keep access to the file: \(failure.message)")
+				} actions: {
+					if failure.retry != nil {
+						Button("Try Again…") { store.send(.tryAgainButtonTapped) }
 					}
 				}
 			}

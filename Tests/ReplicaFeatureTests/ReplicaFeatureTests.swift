@@ -12,6 +12,35 @@ import TestSupport
 @MainActor
 struct ReplicaFeatureTests {
 	@Test
+	func failedSaveIsReportedAndTryAgainReopensThePanel() async {
+		struct Gone: LocalizedError {
+			var errorDescription: String? { "The file is gone." }
+		}
+		let store = TestStore(initialState: ReplicaFeature.State(bookmark: Data())) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.bookmarkClient.grants = { [:] }
+			$0.bookmarkClient.saveTaskrc = { _, _ in throw Gone() }
+			$0.taskrcClient.load = { _, _ in .finished }
+		}
+		await store.send(.directoryResolved(replicaDirectory)) {
+			$0.directory = replicaDirectory
+		}
+
+		await store.send(.fileChosen(taskrcFile, for: .taskrc))
+		await store.receive(\.taskrcSaveFailed) {
+			$0.taskrcSaveFailure = ReplicaFeature.TaskrcSaveFailure(
+				message: "The file is gone.",
+				retry: .taskrc,
+			)
+		}
+
+		await store.send(.tryAgainButtonTapped) {
+			$0.fileImporter = .taskrc
+		}
+	}
+
+	@Test
 	func grantAccessAsksForTheIncludeAtThePathItResolvedTo() async {
 		let include = Taskrc.Include(file: taskrcFile.path(), line: "include $DOTFILES/work.rc")
 		let problem = Taskrc.Problem(

@@ -56,6 +56,8 @@ extension TaskrcClient: DependencyKey {
 					}
 					var lastGood = Taskrc.defaults
 					var lastLoaded: Loaded?
+					// The files the last parse read, which the next is watched over.
+					var watched: [URL] = []
 					while !_Concurrency.Task.isCancelled {
 						guard let url = taskrc() else {
 							continuation.yield(Loaded(taskrc: .defaults, url: nil))
@@ -69,6 +71,8 @@ extension TaskrcClient: DependencyKey {
 							}
 						}
 
+						// Armed before reading, so a save that lands mid-parse still wakes the loop.
+						let watch = changes(to: watched)
 						var read: [URL] = []
 						let parsed = Taskrc(path: url.path(percentEncoded: false), environment: .live) {
 							path, include throws(Taskrc.ReadError) in
@@ -88,13 +92,19 @@ extension TaskrcClient: DependencyKey {
 							lastLoaded = loaded
 						}
 
+						// A file the watch didn't cover may have changed unseen, so parse again under a watch that
+						// does.
+						guard read == watched else {
+							watched = read
+							continue
+						}
 						let isMissingFiles = parsed.problems.contains { problem in
 							switch problem.kind {
 							case .notFound, .unreadable: true
 							default: false
 							}
 						}
-						await firstChange(to: read, orAfter: isMissingFiles ? missingFilePoll : nil)
+						await firstChange(in: watch, orAfter: isMissingFiles ? missingFilePoll : nil)
 						try? await _Concurrency.Task.sleep(for: debounce)
 					}
 					continuation.finish()
@@ -114,11 +124,11 @@ extension DependencyValues {
 	}
 }
 
-/// Returns once any of `files` changes, or after `timeout` when there is one.
-private func firstChange(to files: [URL], orAfter timeout: Duration?) async {
+/// Returns once `changes` yields, or after `timeout` when there is one.
+private func firstChange(in changes: AsyncStream<Void>, orAfter timeout: Duration?) async {
 	await withTaskGroup { group in
 		group.addTask {
-			for await _ in changes(to: files) {
+			for await _ in changes {
 				return
 			}
 		}
