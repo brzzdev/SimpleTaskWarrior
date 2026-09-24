@@ -205,7 +205,7 @@ struct TaskrcTests {
 		)
 	}
 
-	@Test(arguments: ["context", "defaults", "expansion", "includes", "syntax"])
+	@Test(arguments: ["bom", "context", "defaults", "expansion", "includes", "syntax"])
 	func valuesMatchTaskShow(fixture: String) throws {
 		let directory = try #require(Bundle.module.url(forResource: "Fixtures", withExtension: nil))
 			.appending(path: fixture)
@@ -219,11 +219,12 @@ struct TaskrcTests {
 			environment: environment,
 		) { path throws(Taskrc.ReadError) in
 			let url = URL(filePath: path)
-			guard let contents = try? String(contentsOf: url, encoding: .utf8) else {
+			// Decoded by hand, since `String(contentsOf:encoding:)` drops a BOM the parser must handle.
+			guard let data = try? Data(contentsOf: url) else {
 				throw .notFound
 			}
 			return Taskrc.File(
-				contents: contents,
+				contents: String(decoding: data, as: UTF8.self),
 				realPath: url.resolvingSymlinksInPath().path(percentEncoded: false),
 			)
 		}

@@ -123,7 +123,11 @@ struct Parser {
 			return
 		}
 		let file = try readFile(path)
-		parse(file.contents, file: (path, file.realPath), depth: depth)
+		// libshared's `File::read` drops a UTF-8 BOM from the start of every file it reads.
+		let contents = file.contents.unicodeScalars.first == "\u{FEFF}"
+			? String(file.contents.unicodeScalars.dropFirst())
+			: file.contents
+		parse(contents, file: (path, file.realPath), depth: depth)
 	}
 
 	/// Parses one file's lines into `entries`, later keys winning. `file` is nil for TW's defaults.

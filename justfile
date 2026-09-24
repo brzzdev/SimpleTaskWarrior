@@ -117,13 +117,16 @@ fixtures:
 		exit 1
 	fi
 
+	# `_show` prints `TASKDATA` as `data.location`, so it's a fixed path rather than a temporary
+	# one: a re-recording leaves the goldens unchanged.
+	data=/tmp/SimpleTaskWarrior-fixtures
 	scratch="$(mktemp -d)"
-	trap 'rm -rf "$scratch"' EXIT
+	trap 'rm -rf "$scratch" "$data"' EXIT
 	for fixture in "$PWD"/Tests/TaskrcTests/Fixtures/*/; do
 		(
 			cd "$scratch"
 			env -i HOME=/home/fixture USER=fixture FIXTURE=value \
-				TASKDATA="$scratch/data" TASKRC="$fixture/taskrc" "$task" _show
+				TASKDATA="$data" TASKRC="$fixture/taskrc" "$task" _show
 		) > "$fixture/expected.rc"
 	done
 
