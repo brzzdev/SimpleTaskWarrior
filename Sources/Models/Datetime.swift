@@ -77,8 +77,7 @@ struct WallClock {
 	/// Normalises out-of-range fields on the wall clock, as `mktime` does, before Foundation
 	/// resolves the result, including a time a DST change skips or repeats.
 	func epoch(_ time: BrokenDownTime, utc: Bool = false) -> Int {
-		let seconds = time.hour * 3_600 + time.minute * 60 + time.second
-		let (carriedDays, secondOfDay) = floorDivision(seconds, 86_400)
+		let (carriedDays, secondOfDay) = floorDivision(time.secondOfDay, secondsPerDay)
 		let (carriedYears, month) = floorDivision(time.month, 12)
 		let days = daysFromCivil(year: time.year + carriedYears, month: month + 1, day: 1)
 			+ time.day - 1 + carriedDays
@@ -87,8 +86,8 @@ struct WallClock {
 			year: year,
 			month: month1,
 			day: day,
-			hour: secondOfDay / 3_600,
-			minute: secondOfDay % 3_600 / 60,
+			hour: secondOfDay / secondsPerHour,
+			minute: secondOfDay % secondsPerHour / secondsPerMinute,
 			second: secondOfDay % 60,
 		)
 		guard let date = (utc ? Self.utcCalendar : calendar).date(from: components) else {
@@ -311,7 +310,7 @@ struct Datetime {
 		self.year = year
 		self.month = month == -1 ? 1 : month
 		self.day = day == -1 ? 1 : day
-		seconds = max(hour, 0) * 3_600 + max(minute, 0) * 60 + max(second, 0)
+		seconds = max(hour, 0) * secondsPerHour + max(minute, 0) * secondsPerMinute + max(second, 0)
 		return true
 	}
 
@@ -424,7 +423,7 @@ struct Datetime {
 					}
 					minute = parsed
 				}
-				offset = hour * 3_600 + minute * 60
+				offset = hour * secondsPerHour + minute * secondsPerMinute
 				if sign == ascii("-") {
 					offset = -offset
 				}
@@ -451,7 +450,7 @@ struct Datetime {
 					let second = parseMinute(&pig), !isLatinDigit(pig.peek()),
 					!terminated || !isOffset(pig.peek())
 				{
-					seconds = hour * 3_600 + minute * 60 + second
+					seconds = hour * secondsPerHour + minute * secondsPerMinute + second
 					return true
 				}
 				pig.cursor = checkpoint
@@ -462,7 +461,7 @@ struct Datetime {
 				!isLatinDigit(following), !terminated || !isOffset(following),
 				!"AaPp".utf8.contains(where: { Int($0) == following })
 			{
-				seconds = hour * 3_600 + minute * 60
+				seconds = hour * secondsPerHour + minute * secondsPerMinute
 				return true
 			}
 		}
@@ -588,7 +587,7 @@ struct Datetime {
 						&& terminator != ascii("+")
 				)
 			{
-				seconds = hour * 3_600 + minute * 60 + second
+				seconds = hour * secondsPerHour + minute * secondsPerMinute + second
 				return true
 			}
 		}
@@ -605,7 +604,7 @@ struct Datetime {
 			if let hour = parseOffsetHour(&pig) {
 				let minute = parseMinute(&pig) ?? 0
 				if !isLatinDigit(pig.peek()) {
-					offset = hour * 3_600 + minute * 60
+					offset = hour * secondsPerHour + minute * secondsPerMinute
 					if sign == ascii("-") {
 						offset = -offset
 					}
@@ -790,8 +789,7 @@ struct Datetime {
 			return false
 		}
 		date = clock.local { time in
-			let secondOfDay = time.hour * 3_600 + time.minute * 60 + time.second
-			if hours * 3_600 + minutes * 60 + seconds < secondOfDay {
+			if hours * secondsPerHour + minutes * secondsPerMinute + seconds < time.secondOfDay {
 				time.day += 1
 			}
 			time.hour = hours
@@ -872,10 +870,10 @@ struct Datetime {
 		if day != 0, !(1 ... daysInMonth(year: year, month: month)).contains(day) {
 			return false
 		}
-		if seconds != 0, !(1 ... 86_400).contains(seconds) {
+		if seconds != 0, !(1 ... secondsPerDay).contains(seconds) {
 			return false
 		}
-		if offset != 0, !(-86_400 ... 86_400).contains(offset) {
+		if offset != 0, !(-secondsPerDay ... secondsPerDay).contains(offset) {
 			return false
 		}
 		return true
@@ -900,12 +898,12 @@ struct Datetime {
 		let timeNow = clock.brokenDown(now, utc: utc)
 
 		// A time alone that's already passed today means tomorrow.
-		let secondsNow = timeNow.hour * 3_600 + timeNow.minute * 60 + timeNow.second
+		let secondsNow = timeNow.secondOfDay
 		if
 			year == 0, month == 0, day == 0, week == 0, weekday == settings.weekstart,
 			seconds < secondsNow
 		{
-			seconds += 86_400
+			seconds += secondsPerDay
 		}
 
 		if week != 0 {
@@ -947,12 +945,12 @@ struct Datetime {
 			minute: 0,
 			second: 0,
 		)
-		if seconds > 86_400 {
-			time.day += seconds / 86_400
-			seconds %= 86_400
+		if seconds > secondsPerDay {
+			time.day += seconds / secondsPerDay
+			seconds %= secondsPerDay
 		}
-		time.hour = seconds / 3_600
-		time.minute = seconds % 3_600 / 60
+		time.hour = seconds / secondsPerHour
+		time.minute = seconds % secondsPerHour / secondsPerMinute
 		time.second = seconds % 60
 		date = clock.epoch(time, utc: utc)
 	}
@@ -1000,6 +998,11 @@ private let periodBoundaries: [(name: String, adjust: @Sendable (inout BrokenDow
 ]
 
 extension BrokenDownTime {
+	/// Seconds since midnight, as the fields say, even out of range.
+	var secondOfDay: Int {
+		hour * secondsPerHour + minute * secondsPerMinute + second
+	}
+
 	/// Days back to Monday: 0 on a Monday, 6 on a Sunday.
 	fileprivate var daysSinceMonday: Int {
 		(weekday + 6) % 7

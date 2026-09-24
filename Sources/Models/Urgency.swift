@@ -382,8 +382,6 @@ private enum DateState {
 /// TW's `epsilon`: a coefficient no larger than this counts as 0.
 private let epsilon = 1e-6
 
-private let secondsPerDay = 86_400
-
 extension Task {
 	/// TW's `has` and `get` in one: the stored text of any attribute, built-ins included, or nil for a
 	/// missing one, which `get` reads as "". TaskChampion keys a task by its UUID rather than storing

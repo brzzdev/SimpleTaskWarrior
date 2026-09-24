@@ -90,13 +90,6 @@ struct DateInputTests {
 		#expect(try DateInput(taskrc: taskrc(""), timeZone: .gmt).duration(display, at: .now) == duration)
 	}
 
-	@Test
-	func storedDurationsReadAsTheirStart() {
-		#expect(TaskDuration(stored: "P1M")?.iso == "P30D")
-		#expect(TaskDuration(stored: "weekly")?.iso == "P7D")
-		#expect(TaskDuration(stored: "soon") == nil)
-	}
-
 	/// A Taskrc of `contents` over TW's defaults.
 	private func taskrc(_ contents: String) -> Taskrc {
 		Taskrc(path: "/taskrc", environment: .fixture) { path throws(Taskrc.ReadError) in

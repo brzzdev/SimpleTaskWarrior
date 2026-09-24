@@ -21,7 +21,8 @@ public struct DateInput: Sendable {
 	private let timeZone: TimeZone
 
 	/// Reads the Taskrc's `dateformat`, `date.iso` and `weekstart`, which only affects ISO week
-	/// dates such as `2026-W02`: named weeks such as `sow` always run Monday to Sunday.
+	/// dates such as `2026-W02`: named weeks such as `sow` always run Monday to Sunday. A
+	/// `weekstart` other than Monday reads as Sunday; `Taskrc` reports one TW refuses as a problem.
 	public init(taskrc: Taskrc, timeZone: TimeZone) {
 		format = taskrc["dateformat"] ?? ""
 		settings = Datetime.Settings(
@@ -98,22 +99,18 @@ public struct TaskDuration: Hashable, Sendable {
 	public init(seconds: Int) {
 		self.seconds = seconds
 	}
-
-	/// Reads a stored value as TW does when an expression refers to it: as much of its start as is
-	/// a duration, so `P1M` and `weekly` both read. Nil when none of it is.
-	public init?(stored: String) {
-		guard let duration = DurationLiteral.parse(Array(stored.utf8)) else {
-			return nil
-		}
-		seconds = duration.seconds
-	}
 }
 
 extension TaskDuration: CustomStringConvertible {
 	/// The largest of weeks, days, hours and minutes that divides the duration exactly, as in `2w`
 	/// or `90min`, else ISO 8601.
 	public var description: String {
-		let units = [("w", 604_800), ("d", 86_400), ("h", 3_600), ("min", 60)]
+		let units = [
+			("w", 7 * secondsPerDay),
+			("d", secondsPerDay),
+			("h", secondsPerHour),
+			("min", secondsPerMinute),
+		]
 		guard let (unit, length) = units.first(where: { seconds.isMultiple(of: $0.1) }) else {
 			return iso
 		}
