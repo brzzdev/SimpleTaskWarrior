@@ -18,7 +18,13 @@ alongside the `task` CLI: changes made in either show up in the other.
    export TUIST_DEVELOPMENT_TEAM=XXXXXXXXXX
    ```
 
-3. Generate, build, run:
+3. Install the developer tools. The build lints through Mint and fails without it:
+
+   ```sh
+   just tools
+   ```
+
+4. Generate, build, run:
 
    ```sh
    just generate

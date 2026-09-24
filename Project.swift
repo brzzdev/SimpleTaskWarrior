@@ -70,12 +70,13 @@ let project = Project(
 				.pre(
 					script: """
 						export PATH="$PATH:/opt/homebrew/bin"
-						if which mint >/dev/null; then
-							# `--config` makes a failed `parent_config` fetch fatal; see `just lint`.
-							mint run swiftlint --quiet --strict --config .swiftlint.yml
-						else
-							echo "warning: mint not installed — run 'just tools'"
+						# Missing Mint fails the build, so a green build has always linted.
+						if ! which mint >/dev/null; then
+							echo "error: mint not installed — run 'just tools'"
+							exit 1
 						fi
+						# `--config` makes a failed `parent_config` fetch fatal; see `just lint`.
+						mint run swiftlint --quiet --strict --config .swiftlint.yml
 						""",
 					name: "SwiftLint",
 					basedOnDependencyAnalysis: false,
