@@ -1,34 +1,6 @@
 public import Foundation
 public import Taskrc
 
-/// TW's blocked rule over one Replica's tasks: a task is blocked while it depends on another and
-/// neither is completed or deleted. TaskChampion's own rule counts only a pending dependency, so
-/// there a Recurrence template never blocks.
-public struct DependencyScan: Equatable, Sendable {
-	public var blocked: Set<Task.ID> = []
-	public var blocking: Set<Task.ID> = []
-
-	/// The open tasks that depend on each task, which `urgency.inherit` reads.
-	var dependents: [Task.ID: [Task.ID]] = [:]
-
-	public init(_ tasks: some Collection<Task>) {
-		let statuses = Dictionary(
-			tasks.map { ($0.id, $0.status) },
-			uniquingKeysWith: { first, _ in first },
-		)
-		for task in tasks where task.status.isOpen {
-			for dependency in task.dependencies {
-				dependents[dependency, default: []].append(task.id)
-				guard statuses[dependency]?.isOpen == true else {
-					continue
-				}
-				blocked.insert(task.id)
-				blocking.insert(dependency)
-			}
-		}
-	}
-}
-
 /// How a Taskrc weighs Urgency, read through its active Context.
 public struct UrgencyCoefficients: Equatable, Sendable {
 	var active: Double
@@ -47,7 +19,7 @@ public struct UrgencyCoefficients: Equatable, Sendable {
 	var scheduled: Double
 	var tags: Double
 	/// The `urgency.user.*` and `urgency.uda.*` coefficients, each a flat amount for a match.
-	var user: [UserCoefficient]
+	var matchCoefficients: [UserCoefficient]
 	var waiting: Double
 
 	public init(_ taskrc: Taskrc) {
@@ -64,7 +36,7 @@ public struct UrgencyCoefficients: Equatable, Sendable {
 		scheduled = taskrc.real("urgency.scheduled.coefficient")
 		tags = taskrc.real("urgency.tags.coefficient")
 		// TW finds these among the keys the Taskrc sets, not the ones only the Context does.
-		user = taskrc.values.keys.sorted().compactMap { key in
+		matchCoefficients = taskrc.values.keys.sorted().compactMap { key in
 			UserCoefficient(key: key, value: taskrc.real(key))
 		}
 		waiting = taskrc.real("urgency.waiting.coefficient")
@@ -78,7 +50,7 @@ public struct UrgencyCoefficients: Equatable, Sendable {
 		at now: Date,
 		in timeZone: TimeZone,
 	) -> [Task.ID: Double] {
-		let scorer = Scorer(
+		let calculator = UrgencyCalculator(
 			coefficients: self,
 			// TW reads the clock in whole seconds.
 			now: Date(timeIntervalSince1970: now.timeIntervalSince1970.rounded(.down)),
@@ -93,11 +65,11 @@ public struct UrgencyCoefficients: Equatable, Sendable {
 			if let urgency = urgencies[task.id] {
 				return urgency
 			}
-			var urgency = scorer.urgency(of: task)
+			var urgency = calculator.urgency(of: task)
 			// TW recurses without a guard and never finishes on a cycle, so here a task in one skips
 			// the tasks that lead back to it.
-			if inherits, scorer.scan.blocking.contains(task.id), visiting.insert(task.id).inserted {
-				let inherited = (scorer.scan.dependents[task.id] ?? [])
+			if inherits, calculator.scan.blocking.contains(task.id), visiting.insert(task.id).inserted {
+				let inherited = (calculator.scan.dependents[task.id] ?? [])
 					.filter { !visiting.contains($0) }
 					.compactMap { tasksByID[$0].map(urgency(of:)) }
 					.max()
@@ -135,8 +107,7 @@ extension UrgencyCoefficients {
 		var value: Double
 
 		init?(key: String, value: Double) {
-			// TW skips a coefficient this close to 0.
-			guard abs(value) > 1e-6 else {
+			guard abs(value) > epsilon else {
 				return nil
 			}
 			self.value = value
@@ -160,7 +131,7 @@ extension UrgencyCoefficients {
 }
 
 /// Urgency without inheritance, at one moment.
-private struct Scorer {
+private struct UrgencyCalculator {
 	/// Gregorian, in the time zone the dates are read in.
 	let calendar: Calendar
 	let coefficients: UrgencyCoefficients
@@ -207,6 +178,7 @@ private struct Scorer {
 	}
 
 	func urgency(of task: Task) -> Double {
+		// In TW's order, which a sum of floats can depend on.
 		let terms: [(term: Double, coefficient: Double)] = [
 			(task.project != nil ? 1 : 0, coefficients.project),
 			(task.start != nil ? 1 : 0, coefficients.active),
@@ -220,10 +192,10 @@ private struct Scorer {
 			(ageTerm(task), coefficients.age),
 		]
 		var urgency = 0.0
-		for (term, coefficient) in terms where abs(coefficient) > 1e-6 {
+		for (term, coefficient) in terms where abs(coefficient) > epsilon {
 			urgency += term * coefficient
 		}
-		for coefficient in coefficients.user where matches(task, coefficient.match) {
+		for coefficient in coefficients.matchCoefficients where matches(task, coefficient.match) {
 			urgency += coefficient.value
 		}
 		return urgency
@@ -241,7 +213,7 @@ private struct Scorer {
 		return age / coefficients.ageMax
 	}
 
-	/// 0, 1, 2 and 3 or more annotations or tags score 0, 0.8, 0.9 and 1.
+	/// 0, 1, 2 and 3 or more annotations or tags weigh 0, 0.8, 0.9 and 1.
 	private func countTerm(_ count: Int) -> Double {
 		switch count {
 		case 0: 0
@@ -249,6 +221,23 @@ private struct Scorer {
 		case 2: 0.9
 		default: 1
 		}
+	}
+
+	/// `Task::getDateState` for the due date.
+	private func dueState(_ task: Task) -> DateState {
+		guard let due = task.due, due.timeIntervalSince1970 > 0 else {
+			return .notDue
+		}
+		if due < today {
+			return .beforeToday
+		}
+		if calendar.isDate(due, inSameDayAs: now) {
+			return due < now ? .earlierToday : .laterToday
+		}
+		guard let imminent else {
+			return .afterToday
+		}
+		return due < imminent ? .afterToday : .notDue
 	}
 
 	private func dueTerm(_ task: Task) -> Double {
@@ -264,25 +253,6 @@ private struct Scorer {
 			return (daysOverdue + 14) * 0.8 / 21 + 0.2
 		}
 		return 0.2
-	}
-
-	private func matches(_ task: Task, _ match: UrgencyCoefficients.UserCoefficient.Match) -> Bool {
-		switch match {
-		case let .keyword(keyword):
-			task.description.contains(keyword)
-
-		case let .project(project):
-			task.project.map { $0 == project || $0.hasPrefix(project + ".") } ?? false
-
-		case let .tag(tag):
-			hasTag(task, tag)
-
-		case let .uda(name):
-			task.hasAttribute(name)
-
-		case let .udaValue(name, value):
-			task.hasAttribute(name, equalTo: value)
-		}
 	}
 
 	/// `Task::hasTag`: a synthetic tag when `tag` starts with an uppercase letter and names one,
@@ -310,6 +280,9 @@ private struct Scorer {
 		case "DUE": return isOpen && [.afterToday, .earlierToday, .laterToday].contains(dueState(task))
 
 		case "DUETODAY", "TODAY": return isOpen && [.earlierToday, .laterToday].contains(dueState(task))
+
+		// `LATEST` means the task the running command added, and the app runs none.
+		case "LATEST": return false
 
 		case "MONTH": return isOpen && isDue(task, within: .month)
 
@@ -353,28 +326,8 @@ private struct Scorer {
 
 		case "YESTERDAY": return isOpen && isDue(task, on: yesterday)
 
-		// `LATEST` means the task the running command added, and the app runs none.
-		case "LATEST": return false
-
 		default: return task.tags.contains(tag)
 		}
-	}
-
-	/// `Task::getDateState` for the due date.
-	private func dueState(_ task: Task) -> DateState {
-		guard let due = task.due, due.timeIntervalSince1970 > 0 else {
-			return .notDue
-		}
-		if due < today {
-			return .beforeToday
-		}
-		if calendar.isDate(due, inSameDayAs: now) {
-			return due < now ? .earlierToday : .laterToday
-		}
-		guard let imminent else {
-			return .afterToday
-		}
-		return due < imminent ? .afterToday : .notDue
 	}
 
 	private func isDue(_ task: Task, on day: Date?) -> Bool {
@@ -396,6 +349,25 @@ private struct Scorer {
 	private func isWaiting(_ task: Task) -> Bool {
 		task.status == .pending && task.wait.map { $0 > now } == true
 	}
+
+	private func matches(_ task: Task, _ match: UrgencyCoefficients.UserCoefficient.Match) -> Bool {
+		switch match {
+		case let .keyword(keyword):
+			task.description.contains(keyword)
+
+		case let .project(project):
+			task.project.map { $0 == project || $0.hasPrefix(project + ".") } ?? false
+
+		case let .tag(tag):
+			hasTag(task, tag)
+
+		case let .uda(name):
+			task.hasAttribute(name)
+
+		case let .udaValue(name, value):
+			task.hasAttribute(name, equalTo: value)
+		}
+	}
 }
 
 private enum DateState {
@@ -406,17 +378,14 @@ private enum DateState {
 	case notDue
 }
 
+/// TW's `epsilon`: a coefficient no larger than this counts as 0.
+private let epsilon = 1e-6
+
 private let secondsPerDay = 86_400
 
-extension Status {
-	/// Neither completed nor deleted, which is what TW's blocked rule and date tags ask.
-	fileprivate var isOpen: Bool {
-		self != .completed && self != .deleted
-	}
-}
-
 extension Task {
-	/// TW's `get(name) == value` for a UDA or orphan, with a UDA's value read as its type.
+	/// TW's `get(name) == value` for a UDA or orphan, with a UDA's value read as its type. TW compares
+	/// the stored text, so a value it would store differently (`7.0` for `7`) matches here only.
 	fileprivate func hasAttribute(_ name: String, equalTo value: String) -> Bool {
 		guard let uda = udas[name] else {
 			return orphans[name] == value
@@ -424,7 +393,8 @@ extension Task {
 		return uda == UDAValue(value, as: uda.type)
 	}
 
-	/// TW's `has` for a UDA or orphan, where `priority` is only ever one of those.
+	/// TW's `has` for a UDA or orphan, where `priority` is only ever one of those. TW's also sees
+	/// built-in attributes, which `urgency.uda.*` can name but no Taskrc does.
 	fileprivate func hasAttribute(_ name: String) -> Bool {
 		udas[name] != nil || orphans[name] != nil
 	}

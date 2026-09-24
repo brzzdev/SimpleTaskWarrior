@@ -103,6 +103,9 @@ extension Task {
 				continue
 			}
 			switch key {
+			// Mirrors of `dep_*` and `tag_*` that TW writes but never reads back, and names TW reserves.
+			case "depends", "id", "status", "tags", "urgency", "uuid": continue
+
 			case "description": description = value
 
 			case "due": due = Date(epoch: value)
@@ -137,9 +140,6 @@ extension Task {
 
 			case "wait": wait = Date(epoch: value)
 
-			// Mirrors of `dep_*` and `tag_*` that TW writes but never reads back, and names TW reserves.
-			case "depends", "id", "status", "tags", "urgency", "uuid": continue
-
 			default:
 				if let type = udaTypes[key] {
 					udas[key] = UDAValue(value, as: type)
@@ -157,6 +157,13 @@ public enum Status: String, Sendable {
 	case deleted
 	case pending
 	case recurring
+}
+
+extension Status {
+	/// Neither completed nor deleted, which is what TW's blocked rule and date tags ask.
+	var isOpen: Bool {
+		self != .completed && self != .deleted
+	}
 }
 
 public enum UDAValue: Equatable, Sendable {
