@@ -51,6 +51,40 @@ jobs:
       - name: Lint
         run: just lint
 
+      # A RUSTUP_HOME of its own, so the cache holds just the toolchain that
+      # Engine/rust-toolchain.toml pins, not the image's. rustup installs it on
+      # the first cargo call.
+      - name: Point Rust caches
+        if: '!cancelled()'
+        run: echo "RUSTUP_HOME=$HOME/.rustup-engine" >> "$GITHUB_ENV"
+
+      # Of CARGO_HOME, only the downloaded crates: `registry/` and `git/`, never
+      # `.global-cache`, which is cargo's own SQLite bookkeeping. `target/` makes
+      # a run without dependency changes rebuild only the engine crate.
+      - name: Cache Rust toolchain and crates
+        if: '!cancelled()'
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.rustup-engine
+            ~/.cargo/registry
+            ~/.cargo/git
+            Engine/target
+          key: rust-${{ runner.os }}-${{ hashFiles('Engine/rust-toolchain.toml', 'Engine/Cargo.lock') }}
+
+      - name: Build engine
+        if: '!cancelled()'
+        run: just engine
+
+      - name: Check engine bindings
+        if: '!cancelled()'
+        run: |
+          if [ -n "$(git status --porcelain -- Sources/Engine)" ]; then
+            git diff -- Sources/Engine
+            echo "::error::The engine bindings are stale: run \`just engine\` and commit the bindings."
+            exit 1
+          fi
+
       - name: Build and test
         if: '!cancelled()'
         run: just test
