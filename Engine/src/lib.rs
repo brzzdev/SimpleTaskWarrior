@@ -366,13 +366,13 @@ impl EngineHandle {
 			let mut batch = vec![Operation::UndoPoint];
 			for operation in operations {
 				match operation {
-					PlannedOperation::Create { uuid: text } => {
+					PlannedOperation::Create { uuid: raw_uuid } => {
 						// TaskChampion skips creating a task that exists but still logs the
 						// create, and undoing it would delete that task.
-						let uuid = parse_uuid(&text)?;
+						let uuid = parse_uuid(&raw_uuid)?;
 						let task = task_data(replica, &mut tasks, uuid).await?;
 						if task.is_some() {
-							return Ok(ApplyOutcome::Conflict { uuids: vec![text] });
+							return Ok(ApplyOutcome::Conflict { uuids: vec![raw_uuid] });
 						}
 						*task = Some(TaskData::create(uuid, &mut batch));
 					}
