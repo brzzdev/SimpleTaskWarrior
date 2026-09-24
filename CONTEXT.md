@@ -35,3 +35,7 @@ _Avoid_: Occurrence, child
 **Series**:
 A recurrence template together with its recurrence instances; what a change to "all tasks" in a repeating task applies to.
 _Avoid_: Recurring task, recurrence
+
+**Undo point**:
+The changes from one user action, undone together, whether by the app or by `task undo`. The app undoes only its own.
+_Avoid_: Undo group, transaction, history entry
