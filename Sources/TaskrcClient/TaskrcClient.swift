@@ -72,7 +72,7 @@ extension TaskrcClient: DependencyKey {
 						}
 
 						// Armed before reading, so a save that lands mid-parse still wakes the loop.
-						let watch = changes(to: watched)
+						let watchedChanges = changes(to: watched)
 						var read: [URL] = []
 						let parsed = Taskrc(path: url.path(percentEncoded: false), environment: .live) {
 							path, include throws(Taskrc.ReadError) in
@@ -104,7 +104,7 @@ extension TaskrcClient: DependencyKey {
 							default: false
 							}
 						}
-						await firstChange(in: watch, orAfter: isMissingFiles ? missingFilePoll : nil)
+						await firstChange(in: watchedChanges, orAfter: isMissingFiles ? missingFilePoll : nil)
 						try? await _Concurrency.Task.sleep(for: debounce)
 					}
 					continuation.finish()

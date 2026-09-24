@@ -157,8 +157,10 @@ public struct ReplicaFeature {
 				state.fileImporter = nil
 				state.isTaskrcHintPresented = false
 				state.taskrcSaveFailure = nil
-				return reloadTaskrc(pairedWith: state.directory, retrying: .taskrc) {
-					[bookmarkClient] directory in
+				return reloadTaskrc(
+					pairedWith: state.directory,
+					retrying: .taskrc,
+				) { [bookmarkClient] directory in
 					try bookmarkClient.saveTaskrc(file, directory)
 				}
 
@@ -202,7 +204,11 @@ public struct ReplicaFeature {
 			case .useTaskwarriorDefaultsButtonTapped:
 				state.isTaskrcHintPresented = false
 				state.taskrcSaveFailure = nil
-				return reloadTaskrc(pairedWith: state.directory, retrying: nil) { [bookmarkClient] directory in
+				// Detaching makes no bookmark, so it has nothing to retry.
+				return reloadTaskrc(
+					pairedWith: state.directory,
+					retrying: nil,
+				) { [bookmarkClient] directory in
 					try bookmarkClient.saveTaskrc(nil, directory)
 				}
 			}
