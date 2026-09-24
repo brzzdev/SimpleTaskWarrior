@@ -23,7 +23,7 @@ public struct ReplicaFeature {
 		}
 	}
 
-	public enum Action: BindableAction {
+	public enum Action: BindableAction, Sendable {
 		case binding(BindingAction<State>)
 		case directoryResolved(URL)
 		case fetchRequested

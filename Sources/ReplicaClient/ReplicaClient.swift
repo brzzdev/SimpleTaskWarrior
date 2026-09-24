@@ -88,6 +88,10 @@ actor Replica {
 		queue.asUnownedSerialExecutor()
 	}
 
+	/// Releasing the engine blocks too, while TaskChampion joins its storage thread, so the
+	/// last reference is dropped on the actor's queue rather than wherever it happens to go.
+	isolated deinit {}
+
 	private init(directory: URL, queue: DispatchSerialQueue) throws(ReplicaError) {
 		self.queue = queue
 		do {
