@@ -1,0 +1,3 @@
+﻿weekstart=monday
+# Each file loses its own leading BOM, but one inside a value is kept.
+include included.rc

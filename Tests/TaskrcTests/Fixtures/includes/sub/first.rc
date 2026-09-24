@@ -1,0 +1,3 @@
+order=first
+# Relative to this file's directory, not the Taskrc's.
+include second.rc

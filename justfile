@@ -101,6 +101,42 @@ generate: engine
 ensure-generated: engine
 	[ -d {{ workspace }} ] && [ -z "$(find .package.resolved Project.swift AppHost -newer {{ workspace }})" ] || just --no-deps generate
 
+# Each fixture's `expected.rc` is what `task _show` prints for its `taskrc`,
+# which `TaskrcTests` compares the parser against. The environment is fixed to
+# the one the tests expand with, and `task` runs from an empty directory so no
+# include resolves against the CWD, which the app ignores.
+# Record the golden Taskrc fixtures from real `task` 3.5
+fixtures:
+	#!/usr/bin/env bash
+	set -euo pipefail
+
+	task="$(command -v task)"
+	version="$("$task" --version)"
+	if [ "$version" != 3.5.0 ]; then
+		echo "the fixtures are recorded from task 3.5.0, not $version" >&2
+		exit 1
+	fi
+
+	# `_show` prints `TASKDATA` as `data.location`, so it's a fixed path rather than a temporary
+	# one: a re-recording leaves the goldens unchanged.
+	taskdata=/tmp/SimpleTaskWarrior-fixtures
+	scratch="$(mktemp -d)"
+	trap 'rm -rf "$scratch"' EXIT
+	# `mkdir` claims the path atomically, and the cleanup below covers it only once it's this
+	# run's, so a concurrent recording is never removed.
+	if ! mkdir "$taskdata"; then
+		echo "can't claim $taskdata: another recording is running, or remove it" >&2
+		exit 1
+	fi
+	trap 'rm -rf "$scratch" "$taskdata"' EXIT
+	for fixture in "$PWD"/Tests/TaskrcTests/Fixtures/*/; do
+		(
+			cd "$scratch"
+			env -i HOME=/home/fixture USER=fixture FIXTURE=value \
+				TASKDATA="$taskdata" TASKRC="$fixture/taskrc" "$task" _show
+		) > "$fixture/expected.rc"
+	done
+
 # Edit the Tuist manifests in Xcode
 edit:
 	tuist edit
