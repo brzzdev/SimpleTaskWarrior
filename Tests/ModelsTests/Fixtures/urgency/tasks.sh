@@ -27,6 +27,7 @@ add Waited wait:now-3d
 add Until until:now+30d
 add Sub-project project:Home.garden
 add Not a sub-project project:Homework
+add Project named exactly project:Home
 add Fix Bug in keyword
 add Fix bug in lowercase keyword
 add One tag +a

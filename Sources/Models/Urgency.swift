@@ -296,7 +296,7 @@ private struct UrgencyCalculator {
 
 		case "PENDING": return task.status == .pending && !isWaiting(task)
 
-		case "PRIORITY": return task.hasAttribute("priority")
+		case "PRIORITY": return task.attribute("priority") != nil
 
 		case "PROJECT": return task.project != nil
 
@@ -362,10 +362,10 @@ private struct UrgencyCalculator {
 			hasTag(task, tag)
 
 		case let .uda(name):
-			task.hasAttribute(name)
+			task.attribute(name) != nil
 
 		case let .udaValue(name, value):
-			task.hasAttribute(name, equalTo: value)
+			task.attribute(name) == value
 		}
 	}
 }
@@ -384,18 +384,8 @@ private let epsilon = 1e-6
 private let secondsPerDay = 86_400
 
 extension Task {
-	/// TW's `get(name) == value` for a UDA or orphan, with a UDA's value read as its type. TW compares
-	/// the stored text, so a value it would store differently (`7.0` for `7`) matches here only.
-	fileprivate func hasAttribute(_ name: String, equalTo value: String) -> Bool {
-		guard let uda = udas[name] else {
-			return orphans[name] == value
-		}
-		return uda == UDAValue(value, as: uda.type)
-	}
-
-	/// TW's `has` for a UDA or orphan, where `priority` is only ever one of those. TW's also sees
-	/// built-in attributes, which `urgency.uda.*` can name but no Taskrc does.
-	fileprivate func hasAttribute(_ name: String) -> Bool {
-		udas[name] != nil || orphans[name] != nil
+	/// TW's `get`: the stored text of any attribute, built-ins included, or the UUID TW adds to them.
+	fileprivate func attribute(_ name: String) -> String? {
+		name == "uuid" ? id.uuidString.lowercased() : properties[name]
 	}
 }

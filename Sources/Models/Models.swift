@@ -25,6 +25,8 @@ public struct Task: Equatable, Identifiable, Sendable {
 	/// A Recurrence instance's template UUID, as stored.
 	public var parent: String?
 	public var project: String?
+	/// Every property as TaskChampion stores it, which TW's rules read by name.
+	public var properties: [String: String] = [:]
 	public var recur: String?
 	public var rtype: String?
 	public var scheduled: Date?
@@ -85,6 +87,7 @@ extension Task {
 			return nil
 		}
 		self.init(id: id, status: status, workingSetID: workingSetID)
+		self.properties = properties
 		for (key, value) in properties {
 			if let tag = key.dropPrefix("tag_") {
 				tags.insert(tag)
@@ -174,17 +177,6 @@ public enum UDAValue: Equatable, Sendable {
 	/// A string UDA, or any value that doesn't read as its UDA's type, as stored.
 	case string(String)
 	case uuid(UUID)
-
-	/// The type this value reads as, where one that didn't read as its UDA's type is a string.
-	var type: UDAType {
-		switch self {
-		case .date: .date
-		case .duration: .duration
-		case .numeric: .numeric
-		case .string: .string
-		case .uuid: .uuid
-		}
-	}
 
 	init(_ value: String, as type: UDAType) {
 		switch type {
