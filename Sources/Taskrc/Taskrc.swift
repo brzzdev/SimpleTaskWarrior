@@ -76,6 +76,7 @@ extension Taskrc {
 	}
 
 	public struct File: Sendable {
+		/// The file's text. The parser drops a leading BOM itself, as libshared does.
 		public var contents: String
 		/// The path with symlinks resolved, which relative includes resolve against, as TW's do.
 		public var realPath: String

@@ -119,14 +119,18 @@ fixtures:
 
 	# `_show` prints `TASKDATA` as `data.location`, so it's a fixed path rather than a temporary
 	# one: a re-recording leaves the goldens unchanged.
-	data=/tmp/SimpleTaskWarrior-fixtures
+	taskdata=/tmp/SimpleTaskWarrior-fixtures
+	if [ -e "$taskdata" ]; then
+		echo "$taskdata already exists; remove it or wait for the other recording" >&2
+		exit 1
+	fi
 	scratch="$(mktemp -d)"
-	trap 'rm -rf "$scratch" "$data"' EXIT
+	trap 'rm -rf "$scratch" "$taskdata"' EXIT
 	for fixture in "$PWD"/Tests/TaskrcTests/Fixtures/*/; do
 		(
 			cd "$scratch"
 			env -i HOME=/home/fixture USER=fixture FIXTURE=value \
-				TASKDATA="$data" TASKRC="$fixture/taskrc" "$task" _show
+				TASKDATA="$taskdata" TASKRC="$fixture/taskrc" "$task" _show
 		) > "$fixture/expected.rc"
 	done
 
