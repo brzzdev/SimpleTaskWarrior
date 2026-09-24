@@ -120,11 +120,14 @@ fixtures:
 	# `_show` prints `TASKDATA` as `data.location`, so it's a fixed path rather than a temporary
 	# one: a re-recording leaves the goldens unchanged.
 	taskdata=/tmp/SimpleTaskWarrior-fixtures
-	if [ -e "$taskdata" ]; then
-		echo "$taskdata already exists; remove it or wait for the other recording" >&2
+	scratch="$(mktemp -d)"
+	trap 'rm -rf "$scratch"' EXIT
+	# `mkdir` claims the path atomically, and the cleanup below covers it only once it's this
+	# run's, so a concurrent recording is never removed.
+	if ! mkdir "$taskdata"; then
+		echo "can't claim $taskdata: another recording is running, or remove it" >&2
 		exit 1
 	fi
-	scratch="$(mktemp -d)"
 	trap 'rm -rf "$scratch" "$taskdata"' EXIT
 	for fixture in "$PWD"/Tests/TaskrcTests/Fixtures/*/; do
 		(
