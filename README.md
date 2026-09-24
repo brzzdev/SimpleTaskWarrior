@@ -18,9 +18,11 @@ alongside the `task` CLI: changes made in either show up in the other.
    export TUIST_DEVELOPMENT_TEAM=XXXXXXXXXX
    ```
 
-3. Install the developer tools. The build lints through Mint and fails without it:
+3. Install the developer tools (`just`, Tuist, Mint and the pinned SwiftLint).
+   The build lints through Mint and fails without it:
 
    ```sh
+   brew install just
    just tools
    ```
 
