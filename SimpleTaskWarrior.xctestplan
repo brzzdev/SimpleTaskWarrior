@@ -1,0 +1,38 @@
+{
+  "configurations" : [
+    {
+      "id" : "7405FA13-1A78-4EA5-90CC-01FDAB56B02D",
+      "name" : "Configuration 1",
+      "options" : {
+
+      }
+    }
+  ],
+  "defaultOptions" : {
+    "testExecutionOrdering" : "random"
+  },
+  "testTargets" : [
+    {
+      "target" : {
+        "containerPath" : "container:.",
+        "identifier" : "ModelsTests",
+        "name" : "ModelsTests"
+      }
+    },
+    {
+      "target" : {
+        "containerPath" : "container:.",
+        "identifier" : "ReplicaFeatureTests",
+        "name" : "ReplicaFeatureTests"
+      }
+    },
+    {
+      "target" : {
+        "containerPath" : "container:.",
+        "identifier" : "TaskrcTests",
+        "name" : "TaskrcTests"
+      }
+    }
+  ],
+  "version" : 1
+}

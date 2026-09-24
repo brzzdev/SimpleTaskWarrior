@@ -1,5 +1,8 @@
 # SimpleTaskWarrior
 
+- Build and test via `just build` / `just test`; never call xcodebuild directly
+- The Xcode project is Tuist-generated from `Project.swift`: edit the manifest, never the `.xcodeproj`
+
 ## Agent skills
 
 ### Issue tracker

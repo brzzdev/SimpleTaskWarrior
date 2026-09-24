@@ -1,0 +1,23 @@
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# Tuist-generated (regenerate with `tuist generate`)
+*.xcodeproj
+*.xcworkspace
+Derived/
+graph.dot
+
+# Xcode
+DerivedData/
+*.xcuserstate
+*.xcscmblueprint
+
+# Release artifacts (archive, export, notarization zip) — see `just release`
+.release/
+
+# macOS
+.DS_Store
+
+# SwiftLint remote config cache
+.swiftlint/RemoteConfigCache
