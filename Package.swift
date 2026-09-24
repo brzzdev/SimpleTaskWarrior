@@ -83,6 +83,7 @@ let package = Package(
 			name: "App",
 			dependencies: [
 				"BookmarkClient",
+				"ReplicaClient",
 				"ReplicaFeature",
 				.product(name: "ComposableArchitecture", package: "swift-composable-architecture"),
 			],
@@ -99,7 +100,8 @@ let package = Package(
 			],
 		),
 
-		// The thin clients get no test targets: they are verified by running the app.
+		// The thin clients get no test targets, since running the app verifies them, except
+		// `ReplicaClient`: its tests are end to end across the Swift/Rust seam.
 		.testTarget(
 			name: "ModelsTests",
 			dependencies: [
@@ -108,10 +110,23 @@ let package = Package(
 			],
 		),
 		.testTarget(
+			name: "ReplicaClientTests",
+			dependencies: [
+				// For a second handle on the Replica, standing in for the CLI.
+				"Engine",
+				"Models",
+				"ReplicaClient",
+			],
+		),
+		.testTarget(
 			name: "ReplicaFeatureTests",
 			dependencies: [
+				"BookmarkClient",
+				"Models",
+				"ReplicaClient",
 				"ReplicaFeature",
 				"TestSupport",
+				.product(name: "ComposableArchitecture", package: "swift-composable-architecture"),
 			],
 		),
 		.testTarget(
