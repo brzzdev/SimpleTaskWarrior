@@ -1,0 +1,19 @@
+[package]
+name = "stw-engine"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["staticlib", "lib"]
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "uniffi-bindgen.rs"
+
+[dependencies]
+# No `bundled`: link the system libsqlite3 so the process holds one SQLite.
+rusqlite = "0.39"
+taskchampion = { version = "=3.1.0", default-features = false, features = ["storage-sqlite"] }
+tokio = { version = "1", features = ["rt"] }
+uniffi = { version = "0.32", features = ["cli"] }
