@@ -88,27 +88,10 @@ actor Replica {
 		queue.asUnownedSerialExecutor()
 	}
 
-	private init(engine: EngineHandle, queue: DispatchSerialQueue) {
-		self.engine = engine
+	private init(directory: URL, queue: DispatchSerialQueue) throws(ReplicaError) {
 		self.queue = queue
-	}
-
-	/// Opens on the actor's queue, since opening waits on a held lock like any other call.
-	static func open(directory: URL) async throws(ReplicaError) -> Replica {
-		let queue = DispatchSerialQueue(label: "dev.brzz.SimpleTaskWarrior.Replica")
-		let engine = await withCheckedContinuation { continuation in
-			queue.async {
-				continuation.resume(returning: Result { () throws(ReplicaError) in
-					try openEngine(directory: directory)
-				})
-			}
-		}
-		return try Replica(engine: engine.get(), queue: queue)
-	}
-
-	private static func openEngine(directory: URL) throws(ReplicaError) -> EngineHandle {
 		do {
-			return try EngineHandle.open(directory: directory.path(percentEncoded: false))
+			engine = try EngineHandle.open(directory: directory.path(percentEncoded: false))
 		} catch EngineError.NotAReplica {
 			throw .notAReplica
 		} catch EngineError.UnsupportedSchema {
@@ -118,6 +101,20 @@ actor Replica {
 		} catch {
 			throw .failed(error.localizedDescription)
 		}
+	}
+
+	/// Opens on the actor's queue, since opening waits on a held lock like any other call. The
+	/// whole actor is built there, so only it crosses back to the caller, never the engine handle.
+	static func open(directory: URL) async throws(ReplicaError) -> Replica {
+		let queue = DispatchSerialQueue(label: "dev.brzz.SimpleTaskWarrior.Replica")
+		let replica = await withCheckedContinuation { continuation in
+			queue.async {
+				continuation.resume(returning: Result { () throws(ReplicaError) in
+					try Replica(directory: directory, queue: queue)
+				})
+			}
+		}
+		return try replica.get()
 	}
 
 	/// Yields every task when anything has committed since the last read.
