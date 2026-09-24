@@ -1,538 +1,23 @@
 {
-	"026774cd-baa0-4cd1-872a-c9e73ea11ed1": {
-		"properties": {
-			"description": "Plain",
-			"entry": "1789413664",
-			"modified": "1790277664",
-			"status": "pending"
-		},
-		"workingSetID": 1
-	},
-	"03314e0c-489d-406b-ad8d-3b0e10a2953e": {
-		"properties": {
-			"dep_58b457af-bc85-4938-8a98-9541e7b4aa8d": "x",
-			"depends": "58b457af-bc85-4938-8a98-9541e7b4aa8d",
-			"description": "Blocked by a template",
-			"entry": "1790277668",
-			"modified": "1790277668",
-			"status": "pending"
-		},
-		"workingSetID": 47
-	},
-	"0c58678c-3119-4e8c-b1b8-2d155c9e20c6": {
-		"properties": {
-			"description": "Due tomorrow",
-			"due": "1790294400",
-			"entry": "1790277665",
-			"modified": "1790277665",
-			"status": "pending"
-		},
-		"workingSetID": 10
-	},
-	"0d07536e-44db-4910-8b78-69f8c11894ab": {
-		"properties": {
-			"dep_f326b951-5a4e-451c-8c73-97bd4e3e4464": "x",
-			"depends": "f326b951-5a4e-451c-8c73-97bd4e3e4464",
-			"description": "Blocked by a pending task",
-			"entry": "1790277667",
-			"modified": "1790277667",
-			"status": "pending"
-		},
-		"workingSetID": 38
-	},
-	"14d5b2dc-a2e2-46a3-bdf6-d535fadffeb3": {
-		"properties": {
-			"description": "One tag",
-			"entry": "1790277666",
-			"modified": "1790277666",
-			"status": "pending",
-			"tag_a": "x",
-			"tags": "a"
-		},
-		"workingSetID": 25
-	},
-	"189f978e-41fc-4d32-8f1e-fe762543c91b": {
-		"properties": {
-			"description": "Due this year",
-			"due": "1798761599",
-			"entry": "1790277665",
-			"modified": "1790277665",
-			"status": "pending"
-		},
-		"workingSetID": 14
-	},
-	"19d49ad6-5753-4924-b199-b4322c6242c7": {
-		"properties": {
-			"description": "Due earlier today",
-			"due": "1790208000",
-			"entry": "1790277665",
-			"modified": "1790277665",
-			"status": "pending"
-		},
-		"workingSetID": 8
-	},
-	"28d5defb-f2f5-4eb2-be80-7e7c41704a09": {
-		"properties": {
-			"description": "Priority medium",
-			"entry": "1790277666",
-			"modified": "1790277666",
-			"priority": "M",
-			"status": "pending"
-		},
-		"workingSetID": 29
-	},
-	"2b858239-70f1-45ef-b0b4-acfd6004a91e": {
-		"properties": {
-			"description": "Overdue a week",
-			"due": "1789586464",
-			"entry": "1790277664",
-			"modified": "1790277664",
-			"status": "pending"
-		},
-		"workingSetID": 4
-	},
-	"2f280b97-62b7-4a86-a893-b11290eca975": {
-		"properties": {
-			"description": "Orphan",
-			"entry": "1790277666",
-			"modified": "1790277666",
-			"note": "kept",
-			"status": "pending"
-		},
-		"workingSetID": 33
-	},
-	"3b27a6b2-dba5-41f0-ae38-46a3dcf98c28": {
-		"properties": {
-			"description": "Waited",
-			"entry": "1790277665",
-			"modified": "1790277665",
-			"status": "pending",
-			"wait": "1790018465"
-		},
-		"workingSetID": 18
-	},
-	"447183ce-d7b9-4f98-9f13-3570f4aad6e1": {
-		"properties": {
-			"description": "Another size",
-			"entry": "1790277666",
-			"modified": "1790277666",
-			"size": "7",
-			"status": "pending"
-		},
-		"workingSetID": 32
-	},
-	"4e1477b6-5890-4842-9b0d-5f36f192fbee": {
-		"properties": {
-			"description": "Monthly",
-			"due": "1790450467",
-			"entry": "1790277667",
-			"imask": "0",
-			"modified": "1790277667",
-			"parent": "aeaac6ae-4b0a-4a07-af3f-2eed73070e62",
-			"recur": "monthly",
-			"rtype": "periodic",
-			"status": "pending"
-		},
-		"workingSetID": 46
-	},
-	"4f38aeeb-252e-4c10-b798-4454a59f7f55": {
-		"properties": {
-			"description": "Two tags",
-			"entry": "1790277666",
-			"modified": "1790277666",
-			"status": "pending",
-			"tag_a": "x",
-			"tag_b": "x",
-			"tags": "a,b"
-		},
-		"workingSetID": 26
-	},
-	"513d938b-2600-472a-a8c6-d15eb15433bd": {
-		"properties": {
-			"description": "Until",
-			"entry": "1790277665",
-			"modified": "1790277665",
-			"status": "pending",
-			"until": "1792869665"
-		},
-		"workingSetID": 19
-	},
-	"52856783-0abf-435f-b55d-833cd6e9f69e": {
-		"properties": {
-			"description": "Deleted",
-			"end": "1790277667",
-			"entry": "1790277667",
-			"modified": "1790277667",
-			"status": "deleted"
-		},
-		"workingSetID": null
-	},
-	"54da77bb-34e3-4c0f-a096-8cb5d06a0c59": {
-		"properties": {
-			"description": "Waiting",
-			"entry": "1790277665",
-			"modified": "1790277665",
-			"status": "pending",
-			"wait": "1790536865"
-		},
-		"workingSetID": 17
-	},
-	"5636c837-967f-409c-a615-b34567b4b978": {
-		"properties": {
-			"description": "Fix Bug in keyword",
-			"entry": "1790277666",
-			"modified": "1790277666",
-			"status": "pending"
-		},
-		"workingSetID": 23
-	},
-	"5807cf7e-3079-49b8-9c18-e1f16a453edd": {
-		"properties": {
-			"annotation_1790277667": "one",
-			"description": "Annotated once",
-			"entry": "1790277666",
-			"modified": "1790277667",
-			"status": "pending"
-		},
-		"workingSetID": 35
-	},
-	"58b457af-bc85-4938-8a98-9541e7b4aa8d": {
-		"properties": {
-			"description": "Weekly",
-			"due": "1790364067",
-			"entry": "1790277667",
-			"mask": "-",
-			"modified": "1790277667",
-			"recur": "weekly",
-			"rtype": "periodic",
-			"status": "recurring",
-			"until": "1792869667"
-		},
-		"workingSetID": 44
-	},
-	"5b474242-cf65-4ece-bafa-43196f32fd7d": {
-		"properties": {
-			"description": "Entered in the future",
-			"entry": "1790450464",
-			"modified": "1790277664",
-			"status": "pending"
-		},
-		"workingSetID": 3
-	},
-	"5d786e2c-bb86-4107-82ce-8142a1a11f08": {
-		"properties": {
-			"description": "Overdue",
-			"due": "1790018464",
-			"entry": "1790277664",
-			"modified": "1790277664",
-			"status": "pending"
-		},
-		"workingSetID": 5
-	},
-	"5eda7069-d73b-42ee-b8cf-ae4c6b7e1404": {
-		"properties": {
-			"description": "Scheduled in the future",
-			"entry": "1790277665",
-			"modified": "1790277665",
-			"scheduled": "1790364065",
-			"status": "pending"
-		},
-		"workingSetID": 16
-	},
-	"60a7460e-27c3-414c-94e3-d2b043864b8d": {
-		"properties": {
-			"description": "Not a sub-project",
-			"entry": "1790277666",
-			"modified": "1790277666",
-			"project": "Homework",
-			"status": "pending"
-		},
-		"workingSetID": 21
-	},
-	"6b3371ad-652f-4076-93c3-4aba2c6e38c2": {
-		"properties": {
-			"annotation_1790277666": "one",
-			"annotation_1790277667": "two",
-			"annotation_1790277668": "three",
-			"description": "Annotated three times",
-			"entry": "1790277666",
-			"modified": "1790277666",
-			"status": "pending"
-		},
-		"workingSetID": 34
-	},
-	"701cc06b-9c48-4776-931f-5937421787b0": {
-		"properties": {
-			"dep_cf8e7d2b-df9c-42fa-ba42-1ecb1eec0aa8": "x",
-			"depends": "cf8e7d2b-df9c-42fa-ba42-1ecb1eec0aa8",
-			"description": "Blocked by a completed task",
-			"entry": "1790277667",
-			"modified": "1790277667",
-			"status": "pending"
-		},
-		"workingSetID": 39
-	},
-	"a4069674-8ce1-49d5-995a-e15f4fc8877e": {
-		"properties": {
-			"description": "Due this quarter",
-			"due": "1790812799",
-			"entry": "1790277665",
-			"modified": "1790277665",
-			"status": "pending"
-		},
-		"workingSetID": 13
-	},
-	"a667e498-9dc4-48e6-8516-d53027920519": {
+	"03cd1c0a-4b2b-4229-8fff-d2df634d2d15": {
 		"properties": {
 			"area": "work",
 			"description": "Every UDA",
-			"entry": "1790277666",
+			"entry": "1790279040",
 			"estimate": "PT2H",
 			"link": "6f1d4a3c-5b1e-4f7a-9c2d-8e0b1a2c3d4e",
-			"modified": "1790277666",
-			"review": "1790364066",
+			"modified": "1790279040",
+			"review": "1790365440",
 			"size": "3.5",
 			"status": "pending"
 		},
 		"workingSetID": 31
 	},
-	"a9f15d91-feb8-471a-b2dc-2fa7309bb9a4": {
-		"properties": {
-			"dep_bc25ac4c-73b1-4bf2-8841-897ac4b8c770": "x",
-			"depends": "bc25ac4c-73b1-4bf2-8841-897ac4b8c770",
-			"description": "Blocked by a waiting task",
-			"entry": "1790277667",
-			"modified": "1790277667",
-			"status": "pending"
-		},
-		"workingSetID": 42
-	},
-	"aeaac6ae-4b0a-4a07-af3f-2eed73070e62": {
-		"properties": {
-			"description": "Monthly",
-			"due": "1790450467",
-			"end": "1790277668",
-			"entry": "1790277667",
-			"mask": "-",
-			"modified": "1790277668",
-			"recur": "monthly",
-			"rtype": "periodic",
-			"status": "deleted"
-		},
-		"workingSetID": null
-	},
-	"af8d3e48-ee34-4089-b57f-12efad83a2b0": {
-		"properties": {
-			"description": "Due later today",
-			"due": "1790294399",
-			"entry": "1790277665",
-			"modified": "1790277665",
-			"status": "pending"
-		},
-		"workingSetID": 9
-	},
-	"b0d5dc48-daed-4f10-83c9-f7ffe85189e8": {
-		"properties": {
-			"description": "Priority high",
-			"entry": "1790277666",
-			"modified": "1790277666",
-			"priority": "H",
-			"status": "pending"
-		},
-		"workingSetID": 28
-	},
-	"b2da4c0d-ab16-4c2f-92c4-420cc342ba19": {
-		"properties": {
-			"dep_f326b951-5a4e-451c-8c73-97bd4e3e4464": "x",
-			"depends": "f326b951-5a4e-451c-8c73-97bd4e3e4464",
-			"description": "Waiting and blocked",
-			"entry": "1790277667",
-			"modified": "1790277667",
-			"status": "pending",
-			"wait": "1790450467"
-		},
-		"workingSetID": 43
-	},
-	"b69000a9-f83e-488c-964f-aa31200ae2a2": {
-		"properties": {
-			"description": "Weekly",
-			"due": "1790364067",
-			"entry": "1790277667",
-			"imask": "0",
-			"modified": "1790277667",
-			"parent": "58b457af-bc85-4938-8a98-9541e7b4aa8d",
-			"recur": "weekly",
-			"rtype": "periodic",
-			"status": "pending",
-			"until": "1792869667"
-		},
-		"workingSetID": 45
-	},
-	"b733e247-fdf9-4c5f-a584-ae88a2d91cdc": {
-		"properties": {
-			"description": "Sub-project",
-			"entry": "1790277665",
-			"modified": "1790277665",
-			"project": "Home.garden",
-			"status": "pending"
-		},
-		"workingSetID": 20
-	},
-	"b763f3f3-fd15-4567-9f7b-1b9359fa32ba": {
-		"properties": {
-			"description": "Due yesterday",
-			"due": "1790121600",
-			"entry": "1790277665",
-			"modified": "1790277665",
-			"status": "pending"
-		},
-		"workingSetID": 11
-	},
-	"b7d44066-275f-45aa-a1bc-569ff4d1c9ce": {
-		"properties": {
-			"description": "Scheduled in the past",
-			"entry": "1790277665",
-			"modified": "1790277665",
-			"scheduled": "1790191265",
-			"status": "pending"
-		},
-		"workingSetID": 15
-	},
-	"bc25ac4c-73b1-4bf2-8841-897ac4b8c770": {
-		"properties": {
-			"description": "Waiting blocker",
-			"entry": "1790277667",
-			"modified": "1790277667",
-			"status": "pending",
-			"wait": "1790450467"
-		},
-		"workingSetID": 41
-	},
-	"bf71002b-0c6a-4b21-87da-8668bf58f29f": {
-		"properties": {
-			"description": "Due this month",
-			"due": "1790812799",
-			"entry": "1790277665",
-			"modified": "1790277665",
-			"status": "pending"
-		},
-		"workingSetID": 12
-	},
-	"c670c443-1770-4ef9-a445-329cbec07474": {
-		"properties": {
-			"description": "Older than urgency.age.max",
-			"entry": "1755717664",
-			"modified": "1790277664",
-			"status": "pending"
-		},
-		"workingSetID": 2
-	},
-	"c694a30c-d00c-4378-9f6e-694817af37e4": {
-		"properties": {
-			"description": "Due in three weeks",
-			"due": "1792092065",
-			"entry": "1790277665",
-			"modified": "1790277665",
-			"status": "pending"
-		},
-		"workingSetID": 7
-	},
-	"ca0a9c5b-44f3-452a-be1b-4f4df4a1a4db": {
-		"properties": {
-			"dep_52856783-0abf-435f-b55d-833cd6e9f69e": "x",
-			"depends": "52856783-0abf-435f-b55d-833cd6e9f69e",
-			"description": "Blocked by a deleted task",
-			"entry": "1790277667",
-			"modified": "1790277667",
-			"status": "pending"
-		},
-		"workingSetID": 40
-	},
-	"cf8e7d2b-df9c-42fa-ba42-1ecb1eec0aa8": {
-		"properties": {
-			"description": "Completed",
-			"end": "1790277667",
-			"entry": "1790277667",
-			"modified": "1790277667",
-			"status": "completed"
-		},
-		"workingSetID": null
-	},
-	"d5e3925b-12c6-420b-b794-9a670c23aa9c": {
-		"properties": {
-			"description": "Due soon",
-			"due": "1790709665",
-			"entry": "1790277665",
-			"modified": "1790277665",
-			"status": "pending"
-		},
-		"workingSetID": 6
-	},
-	"da6716d6-a9bd-4198-aa33-f08bbe35d848": {
-		"properties": {
-			"description": "Active",
-			"entry": "1790277667",
-			"modified": "1790277667",
-			"start": "1790277667",
-			"status": "pending"
-		},
-		"workingSetID": 36
-	},
-	"e474e462-a385-4b46-a8ba-830540f56e0a": {
-		"properties": {
-			"description": "Project named exactly",
-			"entry": "1790277666",
-			"modified": "1790277666",
-			"project": "Home",
-			"status": "pending"
-		},
-		"workingSetID": 22
-	},
-	"e6de55cd-7ba8-4bda-979f-ed44b45c9971": {
-		"properties": {
-			"description": "Priority low",
-			"entry": "1790277666",
-			"modified": "1790277666",
-			"priority": "L",
-			"status": "pending"
-		},
-		"workingSetID": 30
-	},
-	"ee16c567-3d31-45fe-ae3a-8b8e7dafda80": {
-		"properties": {
-			"description": "Fix bug in lowercase keyword",
-			"entry": "1790277666",
-			"modified": "1790277666",
-			"status": "pending"
-		},
-		"workingSetID": 24
-	},
-	"f2019ec6-1e67-4206-932e-abafb32eecac": {
-		"properties": {
-			"dep_f326b951-5a4e-451c-8c73-97bd4e3e4464": "x",
-			"depends": "f326b951-5a4e-451c-8c73-97bd4e3e4464",
-			"description": "Completed while blocked",
-			"end": "1790277667",
-			"entry": "1790277667",
-			"modified": "1790277667",
-			"status": "completed"
-		},
-		"workingSetID": null
-	},
-	"f326b951-5a4e-451c-8c73-97bd4e3e4464": {
-		"properties": {
-			"description": "Blocker",
-			"entry": "1790277667",
-			"modified": "1790277667",
-			"status": "pending"
-		},
-		"workingSetID": 37
-	},
-	"f701f633-80ce-4b73-b35d-928af9f006ab": {
+	"0a0a13f5-cbff-4ee9-a912-008177f5bc1a": {
 		"properties": {
 			"description": "Four tags",
-			"entry": "1790277666",
-			"modified": "1790277666",
+			"entry": "1790279039",
+			"modified": "1790279039",
 			"status": "pending",
 			"tag_a": "x",
 			"tag_b": "x",
@@ -541,5 +26,520 @@
 			"tags": "a,b,c,later"
 		},
 		"workingSetID": 27
+	},
+	"1142e802-d0d1-47a8-90e7-6cb9a810594d": {
+		"properties": {
+			"description": "Due soon",
+			"due": "1790711038",
+			"entry": "1790279038",
+			"modified": "1790279038",
+			"status": "pending"
+		},
+		"workingSetID": 6
+	},
+	"142932d5-6c07-49d9-9638-5a76efe46a06": {
+		"properties": {
+			"description": "Due in three weeks",
+			"due": "1792093438",
+			"entry": "1790279038",
+			"modified": "1790279038",
+			"status": "pending"
+		},
+		"workingSetID": 7
+	},
+	"1853ac9a-73cc-4cae-a886-f6fb71e04d6b": {
+		"properties": {
+			"annotation_1790279040": "one",
+			"description": "Annotated once",
+			"entry": "1790279040",
+			"modified": "1790279040",
+			"status": "pending"
+		},
+		"workingSetID": 35
+	},
+	"1d7a17ad-1d9e-45ac-99fe-59ddb3f886d3": {
+		"properties": {
+			"dep_f1f64b20-7d9d-4502-bb31-694a4c2e7019": "x",
+			"depends": "f1f64b20-7d9d-4502-bb31-694a4c2e7019",
+			"description": "Blocked by a waiting task",
+			"entry": "1790279041",
+			"modified": "1790279041",
+			"status": "pending"
+		},
+		"workingSetID": 42
+	},
+	"24e2da61-c914-40f7-8cf7-7f9ccc86ab91": {
+		"properties": {
+			"dep_e547687d-e372-4c90-855e-e95f139e0d37": "x",
+			"depends": "e547687d-e372-4c90-855e-e95f139e0d37",
+			"description": "Completed while blocked",
+			"end": "1790279041",
+			"entry": "1790279041",
+			"modified": "1790279041",
+			"status": "completed"
+		},
+		"workingSetID": null
+	},
+	"25f54293-9761-4264-9337-5a57e948223c": {
+		"properties": {
+			"description": "Plain",
+			"entry": "1789415038",
+			"modified": "1790279038",
+			"status": "pending"
+		},
+		"workingSetID": 1
+	},
+	"2634709c-486b-44ec-9f1d-e0b75fe32489": {
+		"properties": {
+			"description": "Weekly",
+			"due": "1790365441",
+			"entry": "1790279041",
+			"imask": "0",
+			"modified": "1790279041",
+			"parent": "a4380ffc-871e-4b14-86bc-80b262f73357",
+			"recur": "weekly",
+			"rtype": "periodic",
+			"status": "pending",
+			"until": "1792871041"
+		},
+		"workingSetID": 45
+	},
+	"2dcb2219-72a1-4266-87a0-d72822809027": {
+		"properties": {
+			"description": "Waited",
+			"entry": "1790279039",
+			"modified": "1790279039",
+			"status": "pending",
+			"wait": "1790019839"
+		},
+		"workingSetID": 18
+	},
+	"372e240d-ebce-4d44-8ead-ac1a5e880f9d": {
+		"properties": {
+			"description": "Deleted",
+			"end": "1790279040",
+			"entry": "1790279040",
+			"modified": "1790279040",
+			"status": "deleted"
+		},
+		"workingSetID": null
+	},
+	"38b60599-c7f1-4fe5-a45e-743b9c8fbec2": {
+		"properties": {
+			"description": "Due this quarter",
+			"due": "1790812799",
+			"entry": "1790279039",
+			"modified": "1790279039",
+			"status": "pending"
+		},
+		"workingSetID": 13
+	},
+	"3ba64311-1af0-4c6e-aca8-2b13412f9c45": {
+		"properties": {
+			"description": "Overdue",
+			"due": "1790019838",
+			"entry": "1790279038",
+			"modified": "1790279038",
+			"status": "pending"
+		},
+		"workingSetID": 5
+	},
+	"40c91dea-6126-49a1-a5a9-51d875243b92": {
+		"properties": {
+			"description": "Priority low",
+			"entry": "1790279040",
+			"modified": "1790279040",
+			"priority": "L",
+			"status": "pending"
+		},
+		"workingSetID": 30
+	},
+	"40de771b-ba9e-4f69-8aa3-b4179bd834ef": {
+		"properties": {
+			"description": "Until",
+			"entry": "1790279039",
+			"modified": "1790279039",
+			"status": "pending",
+			"until": "1792871039"
+		},
+		"workingSetID": 19
+	},
+	"430963b0-2456-4f90-9bb1-10c788001aa0": {
+		"properties": {
+			"description": "Priority high",
+			"entry": "1790279040",
+			"modified": "1790279040",
+			"priority": "H",
+			"status": "pending"
+		},
+		"workingSetID": 28
+	},
+	"57a5e327-b14e-40a3-b509-3d46b0e3d4a8": {
+		"properties": {
+			"description": "Active",
+			"entry": "1790279040",
+			"modified": "1790279040",
+			"start": "1790279040",
+			"status": "pending"
+		},
+		"workingSetID": 36
+	},
+	"58688b84-e6a8-4d54-b0cf-70bfc0ed0126": {
+		"properties": {
+			"dep_86b6648d-01ca-439a-8b83-d6a629e1fa7a": "x",
+			"depends": "86b6648d-01ca-439a-8b83-d6a629e1fa7a",
+			"description": "Blocked by a completed task",
+			"entry": "1790279041",
+			"modified": "1790279041",
+			"status": "pending"
+		},
+		"workingSetID": 39
+	},
+	"5ebc6b02-7c43-4541-a2df-083216567fa8": {
+		"properties": {
+			"description": "Not a sub-project",
+			"entry": "1790279039",
+			"modified": "1790279039",
+			"project": "Homework",
+			"status": "pending"
+		},
+		"workingSetID": 21
+	},
+	"6c63f74f-aa0c-4cb4-8bac-e7fc3e2db7bc": {
+		"properties": {
+			"description": "Two tags",
+			"entry": "1790279039",
+			"modified": "1790279039",
+			"status": "pending",
+			"tag_a": "x",
+			"tag_b": "x",
+			"tags": "a,b"
+		},
+		"workingSetID": 26
+	},
+	"6e641795-64c7-4255-a613-5294f608e334": {
+		"properties": {
+			"description": "Project named exactly",
+			"entry": "1790279039",
+			"modified": "1790279039",
+			"project": "Home",
+			"status": "pending"
+		},
+		"workingSetID": 22
+	},
+	"7642f8b4-6c7d-452d-b0c0-b540ecbf97fa": {
+		"properties": {
+			"description": "Due earlier today",
+			"due": "1790208000",
+			"entry": "1790279038",
+			"modified": "1790279038",
+			"status": "pending"
+		},
+		"workingSetID": 8
+	},
+	"79538f26-586e-4bfa-8ed8-f82ad004cfff": {
+		"properties": {
+			"description": "Fix bug in lowercase keyword",
+			"entry": "1790279039",
+			"modified": "1790279039",
+			"status": "pending"
+		},
+		"workingSetID": 24
+	},
+	"7ba72a13-1f06-4621-b615-55d10d445358": {
+		"properties": {
+			"description": "Entered in the future",
+			"entry": "1790451838",
+			"modified": "1790279038",
+			"status": "pending"
+		},
+		"workingSetID": 3
+	},
+	"7dd3061e-c72f-4e93-97d2-5de4e9b77c4e": {
+		"properties": {
+			"dep_a4380ffc-871e-4b14-86bc-80b262f73357": "x",
+			"depends": "a4380ffc-871e-4b14-86bc-80b262f73357",
+			"description": "Blocked by a template",
+			"entry": "1790279041",
+			"modified": "1790279041",
+			"status": "pending"
+		},
+		"workingSetID": 47
+	},
+	"86b6648d-01ca-439a-8b83-d6a629e1fa7a": {
+		"properties": {
+			"description": "Completed",
+			"end": "1790279040",
+			"entry": "1790279040",
+			"modified": "1790279040",
+			"status": "completed"
+		},
+		"workingSetID": null
+	},
+	"8c1dd3fc-4b80-430b-8fe7-0e008829bfbd": {
+		"properties": {
+			"description": "Waiting",
+			"entry": "1790279039",
+			"modified": "1790279039",
+			"status": "pending",
+			"wait": "1790538239"
+		},
+		"workingSetID": 17
+	},
+	"8f64b946-8a4d-4c35-823f-38b6aa1bc24a": {
+		"properties": {
+			"description": "Another size",
+			"entry": "1790279040",
+			"modified": "1790279040",
+			"size": "7",
+			"status": "pending"
+		},
+		"workingSetID": 32
+	},
+	"93baa2bc-8ccd-4300-92e2-aae48cd78391": {
+		"properties": {
+			"description": "One tag",
+			"entry": "1790279039",
+			"modified": "1790279039",
+			"status": "pending",
+			"tag_a": "x",
+			"tags": "a"
+		},
+		"workingSetID": 25
+	},
+	"93d601dd-478f-4ea7-801e-2eabba55b0b2": {
+		"properties": {
+			"description": "Monthly",
+			"due": "1790451841",
+			"entry": "1790279041",
+			"imask": "0",
+			"modified": "1790279041",
+			"parent": "aa80d28c-3526-424b-b385-bbe88d889d3b",
+			"recur": "monthly",
+			"rtype": "periodic",
+			"status": "pending"
+		},
+		"workingSetID": 46
+	},
+	"9463d826-39c4-4510-ae65-98a556e1b2b7": {
+		"properties": {
+			"description": "Sub-project",
+			"entry": "1790279039",
+			"modified": "1790279039",
+			"project": "Home.garden",
+			"status": "pending"
+		},
+		"workingSetID": 20
+	},
+	"9b856d3b-50f0-4b8d-85ea-c2c3cc3d7cab": {
+		"properties": {
+			"description": "Due later today",
+			"due": "1790294399",
+			"entry": "1790279038",
+			"modified": "1790279038",
+			"status": "pending"
+		},
+		"workingSetID": 9
+	},
+	"a09926d7-d489-4480-9a5a-9a95e174b682": {
+		"properties": {
+			"description": "Due yesterday",
+			"due": "1790121600",
+			"entry": "1790279039",
+			"modified": "1790279039",
+			"status": "pending"
+		},
+		"workingSetID": 11
+	},
+	"a37c1ff1-7cfd-4ca2-9846-237ae45205a7": {
+		"properties": {
+			"description": "Fix Bug in keyword",
+			"entry": "1790279039",
+			"modified": "1790279039",
+			"status": "pending"
+		},
+		"workingSetID": 23
+	},
+	"a4380ffc-871e-4b14-86bc-80b262f73357": {
+		"properties": {
+			"description": "Weekly",
+			"due": "1790365441",
+			"entry": "1790279041",
+			"mask": "-",
+			"modified": "1790279041",
+			"recur": "weekly",
+			"rtype": "periodic",
+			"status": "recurring",
+			"until": "1792871041"
+		},
+		"workingSetID": 44
+	},
+	"aa80d28c-3526-424b-b385-bbe88d889d3b": {
+		"properties": {
+			"description": "Monthly",
+			"due": "1790451841",
+			"end": "1790279041",
+			"entry": "1790279041",
+			"mask": "-",
+			"modified": "1790279041",
+			"recur": "monthly",
+			"rtype": "periodic",
+			"status": "deleted"
+		},
+		"workingSetID": null
+	},
+	"ab374e1b-321a-43d5-a724-f1aa7b4d68e7": {
+		"properties": {
+			"description": "Overdue a week",
+			"due": "1789587838",
+			"entry": "1790279038",
+			"modified": "1790279038",
+			"status": "pending"
+		},
+		"workingSetID": 4
+	},
+	"b646dca3-fea4-41dd-85f7-fcb3ec39e461": {
+		"properties": {
+			"dep_e547687d-e372-4c90-855e-e95f139e0d37": "x",
+			"depends": "e547687d-e372-4c90-855e-e95f139e0d37",
+			"description": "Waiting and blocked",
+			"entry": "1790279041",
+			"modified": "1790279041",
+			"status": "pending",
+			"wait": "1790451841"
+		},
+		"workingSetID": 43
+	},
+	"bac503ad-06a9-42bc-8568-cf29491a4088": {
+		"properties": {
+			"description": "Orphan",
+			"entry": "1790279040",
+			"modified": "1790279040",
+			"note": "kept",
+			"status": "pending"
+		},
+		"workingSetID": 33
+	},
+	"be341ee8-3c01-4921-a3ae-8b03e342d382": {
+		"properties": {
+			"dep_372e240d-ebce-4d44-8ead-ac1a5e880f9d": "x",
+			"depends": "372e240d-ebce-4d44-8ead-ac1a5e880f9d",
+			"description": "Blocked by a deleted task",
+			"entry": "1790279041",
+			"modified": "1790279041",
+			"status": "pending"
+		},
+		"workingSetID": 40
+	},
+	"da83a120-0cff-4f51-bafe-de06a93e63c8": {
+		"properties": {
+			"description": "Scheduled in the future",
+			"entry": "1790279039",
+			"modified": "1790279039",
+			"scheduled": "1790365439",
+			"status": "pending"
+		},
+		"workingSetID": 16
+	},
+	"dc3bd0df-f815-4f9e-86f4-b00b0e82f052": {
+		"properties": {
+			"description": "Older than urgency.age.max",
+			"entry": "1755719038",
+			"modified": "1790279038",
+			"status": "pending"
+		},
+		"workingSetID": 2
+	},
+	"dc945710-17b7-49b1-8d48-70e886f7c575": {
+		"properties": {
+			"description": "Due this year",
+			"due": "1798761599",
+			"entry": "1790279039",
+			"modified": "1790279039",
+			"status": "pending"
+		},
+		"workingSetID": 14
+	},
+	"df0da9a8-62d1-471d-acd2-e5031d74c2f5": {
+		"properties": {
+			"annotation_1790279040": "one",
+			"annotation_1790279041": "two",
+			"annotation_1790279042": "three",
+			"description": "Annotated three times",
+			"entry": "1790279040",
+			"modified": "1790279040",
+			"status": "pending"
+		},
+		"workingSetID": 34
+	},
+	"df6a109a-bb79-4d11-be01-939b3b09cdaa": {
+		"properties": {
+			"description": "Due this month",
+			"due": "1790812799",
+			"entry": "1790279039",
+			"modified": "1790279039",
+			"status": "pending"
+		},
+		"workingSetID": 12
+	},
+	"e0161a64-5279-444d-8ea6-ef6f040ecd67": {
+		"properties": {
+			"description": "Due tomorrow",
+			"due": "1790294400",
+			"entry": "1790279038",
+			"modified": "1790279038",
+			"status": "pending"
+		},
+		"workingSetID": 10
+	},
+	"e547687d-e372-4c90-855e-e95f139e0d37": {
+		"properties": {
+			"description": "Blocker",
+			"entry": "1790279040",
+			"modified": "1790279040",
+			"status": "pending"
+		},
+		"workingSetID": 37
+	},
+	"ef2d7a4a-90f6-4814-aa9a-0b4ebb62e029": {
+		"properties": {
+			"description": "Scheduled in the past",
+			"entry": "1790279039",
+			"modified": "1790279039",
+			"scheduled": "1790192639",
+			"status": "pending"
+		},
+		"workingSetID": 15
+	},
+	"f1f64b20-7d9d-4502-bb31-694a4c2e7019": {
+		"properties": {
+			"description": "Waiting blocker",
+			"entry": "1790279041",
+			"modified": "1790279041",
+			"status": "pending",
+			"wait": "1790451841"
+		},
+		"workingSetID": 41
+	},
+	"f38a6313-f94e-482f-a995-25241ba92006": {
+		"properties": {
+			"dep_e547687d-e372-4c90-855e-e95f139e0d37": "x",
+			"depends": "e547687d-e372-4c90-855e-e95f139e0d37",
+			"description": "Blocked by a pending task",
+			"entry": "1790279040",
+			"modified": "1790279040",
+			"status": "pending"
+		},
+		"workingSetID": 38
+	},
+	"f69e1b6c-7335-4473-aff3-e55041c8ad4d": {
+		"properties": {
+			"description": "Priority medium",
+			"entry": "1790279040",
+			"modified": "1790279040",
+			"priority": "M",
+			"status": "pending"
+		},
+		"workingSetID": 29
 	}
 }

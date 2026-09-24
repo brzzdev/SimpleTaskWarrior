@@ -12,6 +12,8 @@ urgency.uda.area.work.coefficient=2.5
 # TW matches these against any attribute, built-ins included, by its stored text.
 urgency.uda.due.coefficient=0.5
 urgency.uda.project.Home.coefficient=0.75
+# An empty value matches every task without the attribute.
+urgency.uda.size..coefficient=0.6
 urgency.uda.size.3.5.coefficient=0.25
 urgency.uda.size.7.0.coefficient=5
 urgency.uda.size.coefficient=1.5

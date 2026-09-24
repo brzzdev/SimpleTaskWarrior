@@ -99,7 +99,8 @@ extension UrgencyCoefficients {
 			case tag(String)
 			/// Any value of the attribute.
 			case uda(String)
-			/// One value of the attribute, which may itself contain dots.
+			/// One value of the attribute, which may itself contain dots. An empty one matches a task
+			/// without the attribute.
 			case udaValue(String, String)
 		}
 
@@ -119,7 +120,8 @@ extension UrgencyCoefficients {
 				default: match = .tag(argument)
 				}
 			} else if let name = key.prefixMatch(of: /urgency\.uda\.(.*?)\.coefficient/)?.1 {
-				let parts = name.split(separator: ".", maxSplits: 1)
+				// TW splits at the first dot and keeps an empty value.
+				let parts = name.split(separator: ".", maxSplits: 1, omittingEmptySubsequences: false)
 				match = parts.count == 2
 					? .udaValue(String(parts[0]), String(parts[1]))
 					: .uda(String(name))
@@ -365,7 +367,7 @@ private struct UrgencyCalculator {
 			task.attribute(name) != nil
 
 		case let .udaValue(name, value):
-			task.attribute(name) == value
+			(task.attribute(name) ?? "") == value
 		}
 	}
 }
