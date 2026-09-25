@@ -204,6 +204,42 @@ struct ReplicaFeatureTests {
 	}
 
 	@Test
+	func layoutIsKeptPerReplicaForTheNextWindowOnIt() async {
+		let work = URL(filePath: "/Users/paul/work", directoryHint: .isDirectory)
+		let home = URL(filePath: "/Users/paul/home", directoryHint: .isDirectory)
+		let sortOrder = [TaskSort(.description)]
+		func window() -> TestStoreOf<ReplicaFeature> {
+			TestStore(initialState: ReplicaFeature.State(bookmark: Data())) {
+				ReplicaFeature()
+			} withDependencies: {
+				$0.bookmarkClient.changes = { .finished }
+				$0.taskrcClient.load = { _, _, _ in .finished }
+			}
+		}
+
+		let closed = window()
+		await closed.send(.directoryResolved(work)) {
+			$0.directory = work
+		}
+		await closed.send(\.binding.sortOrder, sortOrder) {
+			$0.$layout.withLock { $0.sortOrder = sortOrder }
+			$0.sortOrder = sortOrder
+		}
+
+		let reopened = window()
+		await reopened.send(.directoryResolved(work)) {
+			$0.directory = work
+			$0.$layout.withLock { $0.sortOrder = sortOrder }
+			$0.sortOrder = sortOrder
+		}
+
+		let other = window()
+		await other.send(.directoryResolved(home)) {
+			$0.directory = home
+		}
+	}
+
+	@Test
 	func listsPendingTasksSortedAndDropsSelectedTasksThatLeave() async {
 		let directory = URL(filePath: "/Users/paul/.task")
 		let (tasks, continuation) = AsyncThrowingStream<[StoredTask], any Error>.makeStream()
@@ -235,6 +271,7 @@ struct ReplicaFeatureTests {
 			$0.rows = try [row(milk), row(dog)]
 		}
 		await store.send(\.binding.sortOrder, [TaskSort(.description, order: .reverse)]) {
+			$0.$layout.withLock { $0.sortOrder = [TaskSort(.description, order: .reverse)] }
 			$0.rows = try [row(dog), row(milk)]
 			$0.sortOrder = [TaskSort(.description, order: .reverse)]
 		}

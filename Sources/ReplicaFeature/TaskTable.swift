@@ -197,26 +197,12 @@ private enum SortKey {
 struct TaskTable: View {
 	@Bindable var store: StoreOf<ReplicaFeature>
 
-	/// Visible columns, their order and widths, as JSON. Remembered per window, like the sort order.
-	@SceneStorage("columns") private var columns: Data?
-	/// The store's sort order as JSON, which the window restores it from.
-	@SceneStorage("sortOrder") private var sortOrder: Data?
-
-	private var columnCustomization: Binding<TableColumnCustomization<TaskRow>> {
-		Binding {
-			columns.flatMap { try? JSONDecoder().decode(TableColumnCustomization.self, from: $0) }
-				?? TableColumnCustomization()
-		} set: {
-			columns = try? JSONEncoder().encode($0)
-		}
-	}
-
 	var body: some View {
 		Table(
 			store.rows,
 			selection: $store.selection,
 			sortOrder: $store.sortOrder,
-			columnCustomization: columnCustomization,
+			columnCustomization: Binding(store.$layout.columns),
 		) {
 			TableColumn("ID", sortUsing: TaskSort(.id)) { row in
 				Text(row.task.workingSetID.map(String.init) ?? "")
@@ -280,18 +266,6 @@ struct TaskTable: View {
 				}
 			}
 			.defaultVisibility(.hidden)
-		}
-		.onAppear {
-			guard
-				let sortOrder,
-				let restored = try? JSONDecoder().decode([TaskSort].self, from: sortOrder)
-			else {
-				return
-			}
-			store.sortOrder = restored
-		}
-		.onChange(of: store.sortOrder) { _, newValue in
-			sortOrder = try? JSONEncoder().encode(newValue)
 		}
 	}
 }

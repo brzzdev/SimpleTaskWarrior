@@ -24,13 +24,16 @@ public struct ReplicaFeature {
 		/// The highest Urgency in the table, which scales every row's bar.
 		var highestUrgency = 0.0
 		var isTaskrcHintPresented = false
+		/// Kept per Replica once its folder resolves, so it outlives the window.
+		@Shared(value: Layout()) var layout
 		/// Every task in the Replica as last read, which the blocked rule and Urgency read.
 		var storedTasks: [StoredTask] = []
 		/// Pending tasks, in `sortOrder`.
 		var rows: IdentifiedArrayOf<TaskRow> = []
 		/// Kept by UUID, so it survives the CLI renumbering tasks.
 		var selection: Set<Models.Task.ID> = []
-		var sortOrder = [TaskSort(.urgency, order: .reverse)]
+		/// The table's binding to `layout.sortOrder`, which re-sorts the rows as it changes.
+		var sortOrder = Layout().sortOrder
 		var taskrc: TaskrcClient.Loaded?
 		/// Why the last Taskrc or grant the user chose couldn't be kept.
 		var taskrcSaveFailure: TaskrcSaveFailure?
@@ -124,6 +127,13 @@ public struct ReplicaFeature {
 		case useTaskwarriorDefaultsButtonTapped
 	}
 
+	/// How a window over the Replica arranges its table and inspector.
+	struct Layout: Codable, Equatable {
+		var columns = TableColumnCustomization<TaskRow>()
+		var isInspectorPresented = true
+		var sortOrder = [TaskSort(.urgency, order: .reverse)]
+	}
+
 	private enum CancelID {
 		case bookmarkChanges
 		case taskrc
@@ -141,6 +151,7 @@ public struct ReplicaFeature {
 		Reduce { state, action in
 			switch action {
 			case .binding(\.sortOrder):
+				state.$layout.withLock { [sortOrder = state.sortOrder] in $0.sortOrder = sortOrder }
 				sortRows(&state)
 				return .none
 
@@ -153,6 +164,8 @@ public struct ReplicaFeature {
 
 			case let .directoryResolved(directory):
 				state.directory = directory
+				state.$layout = Shared(wrappedValue: Layout(), .appStorage(layoutKey(for: directory)))
+				state.sortOrder = state.layout.sortOrder
 				// Another window pairing, detaching or granting changes this window's Taskrc too. Subscribed
 				// here rather than in the effect, so the subscription exists before the first load reads the
 				// pairing and a change between the two can't be missed.
@@ -351,13 +364,19 @@ public struct ReplicaFeature {
 	}
 }
 
+/// The user defaults key of the layout of the Replica in `directory`. Keyed on the folder rather
+/// than the bookmark, since opening the folder again makes a new bookmark. Its dots are encoded,
+/// since a key with one can't be observed through key-value observing.
+private func layoutKey(for directory: URL) -> String {
+	let path = directory.standardizedFileURL.path(percentEncoded: false)
+	return "layout:" + path.replacing(".", with: "%2E")
+}
+
 /// How often an open window computes its tasks' Urgency again.
 private let urgencyInterval = Duration.seconds(60)
 
 public struct ReplicaView: View {
 	@Bindable var store: StoreOf<ReplicaFeature>
-
-	@SceneStorage("isInspectorPresented") private var isInspectorPresented = true
 
 	/// Where the file panel opens: at the path an include resolved to, or in the home folder, where
 	/// the CLI looks for `.taskrc`.
@@ -403,14 +422,14 @@ public struct ReplicaView: View {
 					.safeAreaInset(edge: .top, spacing: 0) {
 						banners
 					}
-					.inspector(isPresented: $isInspectorPresented) {
+					.inspector(isPresented: Binding(store.$layout.isInspectorPresented)) {
 						if store.selection.isEmpty {
 							ContentUnavailableView("No Selection", systemImage: "sidebar.trailing")
 						}
 					}
 					.toolbar {
 						Button("Inspector", systemImage: "sidebar.trailing") {
-							isInspectorPresented.toggle()
+							store.$layout.withLock { $0.isInspectorPresented.toggle() }
 						}
 					}
 			}
