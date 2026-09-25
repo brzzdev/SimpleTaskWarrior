@@ -7,8 +7,10 @@ public import SwiftUI
 
 public struct SimpleTaskWarriorApp: App {
 	public var body: some Scene {
-		// Keyed on the Replica's bookmark, so SwiftUI restores each window after a relaunch.
-		WindowGroup(for: Data.self) { $bookmark in
+		// Keyed on the Replica's bookmark, so SwiftUI restores each window after a relaunch. The
+		// explicit id keeps restored windows' identifiers stable; the default derives from the
+		// content's type, whose name changes every launch.
+		WindowGroup(id: "replica", for: Data.self) { $bookmark in
 			if let bookmark {
 				ReplicaWindow(bookmark: bookmark)
 			} else {
