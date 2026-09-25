@@ -204,9 +204,9 @@ struct ReplicaFeatureTests {
 	}
 
 	@Test
-	func listsPendingTasksAndDropsSelectedTasksThatLeave() async throws {
+	func listsPendingTasksSortedAndDropsSelectedTasksThatLeave() async {
 		let directory = URL(filePath: "/Users/paul/.task")
-		let (tasks, continuation) = AsyncThrowingStream<[Models.Task], any Error>.makeStream()
+		let (tasks, continuation) = AsyncThrowingStream<[StoredTask], any Error>.makeStream()
 		let store = TestStore(initialState: ReplicaFeature.State(bookmark: Data())) {
 			ReplicaFeature()
 		} withDependencies: {
@@ -218,30 +218,35 @@ struct ReplicaFeatureTests {
 			$0.taskrcClient.load = { _, _, _ in .finished }
 			$0.timeZone = .gmt
 		}
-		let milk = try storedTask(0, "Buy milk", workingSetID: 1)
-		let dog = try storedTask(1, "Walk the dog", workingSetID: 2)
-		let taxes = try storedTask(2, "File taxes", status: "completed", workingSetID: nil)
+		let milk = storedTask(0, "Buy milk", workingSetID: 1)
+		let dog = storedTask(1, "Walk the dog", workingSetID: 2)
+		let taxes = storedTask(2, "File taxes", status: "completed", workingSetID: nil)
 
 		let task = await store.send(.fetchRequested)
 		await store.receive(\.directoryResolved) {
 			$0.directory = directory
 		}
 
+		// Tied on Urgency, so in ID order.
 		continuation.yield([dog, taxes, milk])
 		await store.receive(\.tasksLoaded) {
 			$0.replica = [dog, taxes, milk]
-			$0.rows = [row(milk), row(dog)]
+			$0.rows = try [row(milk), row(dog)]
 		}
-		await store.send(\.binding.selection, [milk.id, dog.id]) {
-			$0.selection = [milk.id, dog.id]
+		await store.send(\.binding.sortOrder, [TaskSort(.description, order: .reverse)]) {
+			$0.rows = try [row(dog), row(milk)]
+			$0.sortOrder = [TaskSort(.description, order: .reverse)]
+		}
+		await store.send(\.binding.selection, [UUID(0), UUID(1)]) {
+			$0.selection = [UUID(0), UUID(1)]
 		}
 
-		let milkDone = try storedTask(0, "Buy milk", status: "completed", workingSetID: 1)
+		let milkDone = storedTask(0, "Buy milk", status: "completed", workingSetID: 1)
 		continuation.yield([dog, taxes, milkDone])
 		await store.receive(\.tasksLoaded) {
 			$0.replica = [dog, taxes, milkDone]
-			$0.rows = [row(dog)]
-			$0.selection = [dog.id]
+			$0.rows = try [row(dog)]
+			$0.selection = [UUID(1)]
 		}
 
 		continuation.finish()
@@ -249,31 +254,26 @@ struct ReplicaFeatureTests {
 	}
 
 	@Test
-	func ranksTasksAndRanksThemAgainWhenTheTaskrcReloads() async throws {
+	func ranksTasksAndRanksThemAgainWhenTheTaskrcReloads() async {
 		let store = TestStore(initialState: ReplicaFeature.State(bookmark: Data())) {
 			ReplicaFeature()
 		} withDependencies: {
 			$0.date.now = now
 			$0.timeZone = .gmt
 		}
-		let estimated = try storedTask(0, "Estimate the move", workingSetID: 1, ["estimate": "3"])
-		let blocker = try storedTask(1, "Book the van", workingSetID: 3)
-		let blocked = try storedTask(
-			2,
-			"Move",
-			workingSetID: 2,
-			["dep_\(blocker.id.uuidString.lowercased())": "x"],
-		)
-		let template = try storedTask(3, "Water the plants", status: "recurring", workingSetID: nil)
+		let estimated = storedTask(0, "Estimate the move", workingSetID: 1, ["estimate": "3"])
+		let blocker = storedTask(1, "Book the van", workingSetID: 3)
+		let blocked = storedTask(2, "Move", workingSetID: 2, ["dep_\(blocker.uuid)": "x"])
+		let template = storedTask(3, "Water the plants", status: "recurring", workingSetID: nil)
 		let replica = [blocked, blocker, estimated, template]
 
 		await store.send(.tasksLoaded(replica)) {
 			$0.highestUrgency = 8
 			$0.replica = replica
-			$0.rows = [
+			$0.rows = try [
+				row(blocker, urgency: 8),
 				row(estimated),
 				row(blocked, isBlocked: true, urgency: -5),
-				row(blocker, urgency: 8),
 			]
 		}
 
@@ -284,10 +284,11 @@ struct ReplicaFeatureTests {
 			)
 		}
 		await store.send(.taskrcLoaded(TaskrcClient.Loaded(taskrc: taskrc, url: taskrcFile))) {
-			$0.rows[id: estimated.id]?.task.orphans = [:]
-			$0.rows[id: estimated.id]?.task.udas = ["estimate": .numeric(3)]
-			$0.rows[id: estimated.id]?.urgency = 5
+			$0.rows[id: UUID(0)]?.task.orphans = [:]
+			$0.rows[id: UUID(0)]?.task.udas = ["estimate": .numeric(3)]
+			$0.rows[id: UUID(0)]?.urgency = 5
 			$0.taskrc = TaskrcClient.Loaded(taskrc: taskrc, url: taskrcFile)
+			$0.udaColumns = UDAColumn.all(in: taskrc)
 		}
 	}
 
@@ -309,12 +310,6 @@ struct ReplicaFeatureTests {
 
 		#expect(descriptions(.forward) == ["L", "M", "H", "None"])
 		#expect(descriptions(.reverse) == ["H", "M", "L", "None"])
-	}
-
-	@Test
-	func onlyPendingTasksShowTheirWorkingSetID() throws {
-		#expect(try row(storedTask(0, "Pay rent", workingSetID: 1)).shownID == 1)
-		#expect(try row(storedTask(0, "Pay rent", status: "completed", workingSetID: 1)).shownID == nil)
 	}
 
 	@Test
@@ -355,33 +350,36 @@ extension AsyncStream where Element: Sendable {
 	}
 }
 
-/// `task` as the table shows it on TW's defaults.
-private func row(_ task: Models.Task, isBlocked: Bool = false, urgency: Double = 0) -> TaskRow {
-	TaskRow(
-		task: task,
+/// `stored` as the table shows it on TW's defaults.
+private func row(
+	_ stored: StoredTask,
+	isBlocked: Bool = false,
+	urgency: Double = 0,
+) throws -> TaskRow {
+	let task = Models.Task(stored, udaTypes: Taskrc.defaults.udaTypes)
+	return try TaskRow(
+		task: #require(task),
 		isBlocked: isBlocked,
 		urgency: urgency,
 		udaColumns: UDAColumn.all(in: .defaults),
 	)
 }
 
-/// A task as the Replica stores it, entered at `now`, read with TW's defaults.
+/// A task as the Replica stores it, entered at `now`.
 private func storedTask(
 	_ uuid: Int,
 	_ description: String,
 	status: String = "pending",
 	workingSetID: Int?,
 	_ properties: [String: String] = [:],
-) throws -> Models.Task {
-	let task = Models.Task(
+) -> StoredTask {
+	StoredTask(
 		properties: properties.merging([
 			"description": description,
 			"entry": String(Int(now.timeIntervalSince1970)),
 			"status": status,
 		]) { $1 },
-		udaTypes: Taskrc.defaults.udaTypes,
-		uuid: UUID(uuid).uuidString,
+		uuid: UUID(uuid).uuidString.lowercased(),
 		workingSetID: workingSetID,
 	)
-	return try #require(task)
 }

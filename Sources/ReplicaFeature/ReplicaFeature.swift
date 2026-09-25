@@ -25,14 +25,17 @@ public struct ReplicaFeature {
 		var highestUrgency = 0.0
 		var isTaskrcHintPresented = false
 		/// Every task in the Replica as last read, which the blocked rule and Urgency read.
-		var replica: [Models.Task] = []
-		/// Pending tasks, in working-set order.
+		var replica: [StoredTask] = []
+		/// Pending tasks, in `sortOrder`.
 		var rows: IdentifiedArrayOf<TaskRow> = []
 		/// Kept by UUID, so it survives the CLI renumbering tasks.
 		var selection: Set<Models.Task.ID> = []
+		var sortOrder = [TaskSort(.urgency, order: .reverse)]
 		var taskrc: TaskrcClient.Loaded?
 		/// Why the last Taskrc or grant the user chose couldn't be kept.
 		var taskrcSaveFailure: TaskrcSaveFailure?
+		/// The running Taskrc's UDAs, which the table offers as columns.
+		var udaColumns = UDAColumn.all(in: .defaults)
 
 		/// Whether Grant Access… can fix the Taskrc's problem.
 		public var canGrantAccess: Bool {
@@ -61,10 +64,6 @@ public struct ReplicaFeature {
 				URL(filePath: path, directoryHint: .isDirectory).standardizedFileURL
 			}
 			return folder(location) == folder(directory.path(percentEncoded: false)) ? nil : location
-		}
-
-		var udaColumns: [UDAColumn] {
-			UDAColumn.all(in: runningTaskrc)
 		}
 
 		/// The file panel that fixes the Taskrc's problem: a grant for an include the app can't read,
@@ -119,7 +118,7 @@ public struct ReplicaFeature {
 		case taskrcHintCloseButtonTapped
 		case taskrcLoaded(TaskrcClient.Loaded)
 		case taskrcSaveFailed(TaskrcSaveFailure)
-		case tasksLoaded([Models.Task])
+		case tasksLoaded([StoredTask])
 		case tryAgainButtonTapped
 		case useTaskwarriorDefaultsButtonTapped
 	}
@@ -139,6 +138,10 @@ public struct ReplicaFeature {
 		BindingReducer()
 		Reduce { state, action in
 			switch action {
+			case .binding(\.sortOrder):
+				sortRows(&state)
+				return .none
+
 			case .binding:
 				return .none
 
@@ -280,22 +283,14 @@ public struct ReplicaFeature {
 	/// computing their Urgency again, and drops selected tasks that left the table.
 	private func updateRows(_ state: inout State) {
 		let taskrc = state.runningTaskrc
-		let tasks = state.replica.compactMap { task in
-			Models.Task(
-				properties: task.properties,
-				udaTypes: taskrc.udaTypes,
-				uuid: task.id.uuidString,
-				workingSetID: task.workingSetID,
-			)
-		}
+		let tasks = state.replica.compactMap { Models.Task($0, udaTypes: taskrc.udaTypes) }
 		let blocked = DependencyScan(tasks).blocked
-		let udaColumns = state.udaColumns
 		let urgencies = UrgencyCoefficients(taskrc).urgencies(of: tasks, at: now, in: timeZone)
+		state.udaColumns = UDAColumn.all(in: taskrc)
 		state.rows = IdentifiedArray(
 			uniqueElements: tasks
 				.filter { $0.status == .pending && !$0.isTemplate }
-				.sorted { ($0.workingSetID ?? .max) < ($1.workingSetID ?? .max) }
-				.map { task in
+				.map { [udaColumns = state.udaColumns] task in
 					TaskRow(
 						task: task,
 						isBlocked: blocked.contains(task.id),
@@ -304,8 +299,16 @@ public struct ReplicaFeature {
 					)
 				},
 		)
+		sortRows(&state)
 		state.highestUrgency = state.rows.map(\.urgency).max() ?? 0
 		state.selection.formIntersection(state.rows.ids)
+	}
+
+	/// Sorts the table's rows by `sortOrder`, breaking ties by ID so the order holds still.
+	private func sortRows(_ state: inout State) {
+		state.rows = IdentifiedArray(
+			uniqueElements: state.rows.sorted(using: state.sortOrder + [TaskSort(.id)]),
+		)
 	}
 
 	/// Runs `save` with the Replica's folder, then loads its Taskrc again. A failed save is

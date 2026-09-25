@@ -195,7 +195,8 @@ private enum ExportValue: Decodable, Equatable {
 		for (key, value) in task.udas {
 			switch value {
 			case let .date(date): fields[key] = .string(iso(date))
-			case let .duration(string), let .string(string): fields[key] = .string(string)
+			case let .duration(duration): fields[key] = .string(duration.iso)
+			case let .string(string): fields[key] = .string(string)
 			case let .numeric(number): fields[key] = .number(number)
 			case let .uuid(uuid): fields[key] = .string(uuid.uuidString.lowercased())
 			}

@@ -11,7 +11,7 @@ public struct ReplicaClient: Sendable {
 	/// whenever anything, the CLI included, commits to it. Holds the directory's security scope
 	/// while it reads. Ending iteration closes the Replica once any open or read in flight returns.
 	public var tasks: @Sendable (_ directory: URL)
-		-> AsyncThrowingStream<[Models.Task], any Error> = { _ in .finished() }
+		-> AsyncThrowingStream<[StoredTask], any Error> = { _ in .finished() }
 
 	/// Opens the Replica in `directory` and closes it again, so Open Replica… can refuse a folder
 	/// before a window exists.
@@ -135,7 +135,7 @@ actor Replica {
 
 	/// Yields every task when anything has committed since the last read.
 	func publishTasksIfChanged(
-		to continuation: AsyncThrowingStream<[Models.Task], any Error>.Continuation,
+		to continuation: AsyncThrowingStream<[StoredTask], any Error>.Continuation,
 	) throws {
 		guard try engine.dataVersion() != readVersion else { return }
 		let snapshot = try engine.snapshot()
@@ -144,16 +144,13 @@ actor Replica {
 			snapshot.workingSet.map { ($0.uuid, Int($0.id)) },
 			uniquingKeysWith: { first, _ in first },
 		)
-		let tasks = snapshot.tasks.compactMap { task in
-			// Every UDA reads as an orphan here. The window decodes them again with its Taskrc, which
-			// can change while the Replica doesn't.
-			Models.Task(
+		// Decoded by the window, with its Taskrc's UDAs.
+		continuation.yield(snapshot.tasks.map { task in
+			StoredTask(
 				properties: task.properties,
-				udaTypes: [:],
 				uuid: task.uuid,
 				workingSetID: workingSetIDs[task.uuid],
 			)
-		}
-		continuation.yield(tasks)
+		})
 	}
 }

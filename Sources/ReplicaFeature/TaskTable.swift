@@ -17,12 +17,6 @@ struct TaskRow: Equatable, Identifiable {
 		task.id
 	}
 
-	/// The working-set ID, which only a pending or waiting task shows: a completed one keeps its
-	/// slot until the CLI's next `gc`, and the CLI may renumber it under the window.
-	var shownID: Int? {
-		task.status == .pending ? task.workingSetID : nil
-	}
-
 	var tags: String {
 		task.tags.sorted().joined(separator: " ")
 	}
@@ -53,7 +47,7 @@ struct TaskRow: Equatable, Identifiable {
 			task.due.map(SortKey.date)
 
 		case .id:
-			shownID.map { .number(Double($0)) }
+			task.workingSetID.map { .number(Double($0)) }
 
 		case .project:
 			task.project.map(SortKey.text)
@@ -91,7 +85,7 @@ struct TaskRow: Equatable, Identifiable {
 			return .date(date)
 
 		case let .duration(duration):
-			return TaskDuration(stored: duration).map { .number(Double($0.seconds)) } ?? .text(duration)
+			return .number(Double(duration.seconds))
 
 		case let .numeric(number):
 			return .number(number)
@@ -175,30 +169,27 @@ struct TaskSort: Codable, Hashable, SortComparator {
 }
 
 private enum SortKey {
-	case date(Date)
 	case number(Double)
 	case text(String)
 
+	static func date(_ date: Date) -> Self {
+		.number(date.timeIntervalSinceReferenceDate)
+	}
+
 	func compare(_ other: Self) -> ComparisonResult {
 		switch (self, other) {
-		case let (.date(lhs), .date(rhs)):
-			lhs.compare(rhs)
-
 		case let (.number(lhs), .number(rhs)):
 			lhs == rhs ? .orderedSame : lhs < rhs ? .orderedAscending : .orderedDescending
+
+		// Only a UDA value that doesn't read as its type is text among dates or numbers.
+		case (.number, .text):
+			.orderedAscending
 
 		case let (.text(lhs), .text(rhs)):
 			lhs.localizedStandardCompare(rhs)
 
-		// Only a UDA value that doesn't read as its type is text among dates or numbers.
-		case (.text, _):
+		case (.text, .number):
 			.orderedDescending
-
-		case (_, .text):
-			.orderedAscending
-
-		case (.date, .number), (.number, .date):
-			.orderedSame
 		}
 	}
 }
@@ -206,20 +197,29 @@ private enum SortKey {
 struct TaskTable: View {
 	@Bindable var store: StoreOf<ReplicaFeature>
 
-	/// Visible columns, their order and widths, remembered per window like the sort order.
+	/// Visible columns, their order and widths, as JSON. Remembered per window, like the sort order.
 	@SceneStorage("columns") private var columns: Data?
+	/// The store's sort order as JSON, which the window restores it from.
 	@SceneStorage("sortOrder") private var sortOrder: Data?
 
+	private var columnCustomization: Binding<TableColumnCustomization<TaskRow>> {
+		Binding {
+			columns.flatMap { try? JSONDecoder().decode(TableColumnCustomization.self, from: $0) }
+				?? TableColumnCustomization()
+		} set: {
+			columns = try? JSONEncoder().encode($0)
+		}
+	}
+
 	var body: some View {
-		let sortOrder = json($sortOrder, default: [TaskSort(.urgency, order: .reverse)])
 		Table(
-			store.rows.sorted(using: sortOrder.wrappedValue),
+			store.rows,
 			selection: $store.selection,
-			sortOrder: sortOrder,
-			columnCustomization: json($columns, default: TableColumnCustomization<TaskRow>()),
+			sortOrder: $store.sortOrder,
+			columnCustomization: columnCustomization,
 		) {
 			TableColumn("ID", sortUsing: TaskSort(.id)) { row in
-				Text(row.shownID.map(String.init) ?? "")
+				Text(row.task.workingSetID.map(String.init) ?? "")
 					.monospacedDigit()
 			}
 			.width(min: 32, ideal: 40, max: 64)
@@ -275,6 +275,18 @@ struct TaskTable: View {
 				}
 			}
 			.defaultVisibility(.hidden)
+		}
+		.onAppear {
+			guard
+				let sortOrder,
+				let restored = try? JSONDecoder().decode([TaskSort].self, from: sortOrder)
+			else {
+				return
+			}
+			store.sortOrder = restored
+		}
+		.onChange(of: store.sortOrder) { _, newValue in
+			sortOrder = try? JSONEncoder().encode(newValue)
 		}
 	}
 }
@@ -347,7 +359,7 @@ private func udaText(_ value: UDAValue?) -> Text {
 		dateText(date)
 
 	case let .duration(duration):
-		Text(verbatim: TaskDuration(stored: duration)?.description ?? duration)
+		Text(verbatim: duration.description)
 
 	case let .numeric(number):
 		Text(number, format: .number)
@@ -357,17 +369,5 @@ private func udaText(_ value: UDAValue?) -> Text {
 
 	case let .uuid(uuid):
 		Text(verbatim: uuid.uuidString.lowercased())
-	}
-}
-
-/// `data` read and written as JSON, reading `fallback` while it holds nothing that decodes.
-private func json<Value: Codable & Sendable>(
-	_ data: Binding<Data?>,
-	default fallback: Value,
-) -> Binding<Value> {
-	Binding {
-		data.wrappedValue.flatMap { try? JSONDecoder().decode(Value.self, from: $0) } ?? fallback
-	} set: {
-		data.wrappedValue = try? JSONEncoder().encode($0)
 	}
 }
