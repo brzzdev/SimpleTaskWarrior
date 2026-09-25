@@ -26,6 +26,7 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 			backing: .buffered,
 			defer: false,
 		)
+		window.identifier = NSUserInterfaceItemIdentifier("replica")
 		// The controller owns the window, and ARC releases it.
 		window.isReleasedWhenClosed = false
 		window.toolbarStyle = .unified

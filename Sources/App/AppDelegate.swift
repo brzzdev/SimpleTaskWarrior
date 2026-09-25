@@ -15,10 +15,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
 	/// Each window's controller, by its Replica's resolved folder, kept until the window closes.
 	private var controllers: [URL: ReplicaWindowController] = [:]
 
-	override public init() {
-		super.init()
-	}
-
 	public static func restoreWindow(
 		withIdentifier _: NSUserInterfaceItemIdentifier,
 		state: NSCoder,
@@ -41,9 +37,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
 
 	public func application(_: NSApplication, openFile filename: String) -> Bool {
 		// The Dock's recent Replicas arrive here.
-		_Concurrency.Task {
-			await open(URL(filePath: filename, directoryHint: .isDirectory))
-		}
+		open(URL(filePath: filename, directoryHint: .isDirectory))
 		return true
 	}
 
@@ -60,6 +54,16 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
 
 	public func applicationWillFinishLaunching(_: Notification) {
 		NSApp.mainMenu = mainMenu(openRecent: self)
+	}
+
+	/// None, so a key equivalent search doesn't fill Open Recent: its entries have no shortcuts.
+	public func menuHasKeyEquivalent(
+		_: NSMenu,
+		for _: NSEvent,
+		target _: AutoreleasingUnsafeMutablePointer<AnyObject?>,
+		action _: UnsafeMutablePointer<Selector?>,
+	) -> Bool {
+		false
 	}
 
 	/// Fills Open Recent with the Replicas opened last.
@@ -88,7 +92,48 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
 			guard await panel.begin() == .OK, let directory = panel.url else {
 				return
 			}
-			await open(directory)
+			open(directory)
+		}
+	}
+
+	private func makeController(bookmark: Data, folder: URL) -> ReplicaWindowController {
+		let controller = ReplicaWindowController(bookmark: bookmark) { [weak self] in
+			self?.controllers[folder] = nil
+		}
+		controller.window?.restorationClass = Self.self
+		controllers[folder] = controller
+		return controller
+	}
+
+	/// Brings forward the window on the Replica in `directory`, opening one if it has none, or
+	/// explains why the Replica can't be opened.
+	private func open(_ directory: URL) {
+		@Dependency(\.bookmarkClient) var bookmarkClient
+		@Dependency(\.replicaClient) var replicaClient
+
+		_Concurrency.Task {
+			do {
+				try await replicaClient.validate(directory)
+				let bookmark = try bookmarkClient.create(directory)
+				let folder = try folder(of: bookmark)
+				NSDocumentController.shared.noteNewRecentDocumentURL(folder)
+				if let controller = controllers[folder] {
+					controller.showWindow(nil)
+					return
+				}
+				let controller = makeController(bookmark: bookmark, folder: folder)
+				if let window = controller.window {
+					if cascadePoint == .zero {
+						window.center()
+					}
+					cascadePoint = window.cascadeTopLeft(from: cascadePoint)
+				}
+				controller.showWindow(nil)
+			} catch {
+				let alert = NSAlert()
+				alert.messageText = error.localizedDescription
+				alert.runModal()
+			}
 		}
 	}
 
@@ -97,56 +142,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
 		guard let url = sender.representedObject as? URL else {
 			return
 		}
-		_Concurrency.Task {
-			await open(url)
-		}
-	}
-
-	private func makeController(bookmark: Data, folder: URL) -> ReplicaWindowController {
-		let controller = ReplicaWindowController(bookmark: bookmark) { [weak self] in
-			self?.controllers[folder] = nil
-		}
-		controller.window?.identifier = NSUserInterfaceItemIdentifier("replica")
-		controller.window?.restorationClass = Self.self
-		controllers[folder] = controller
-		return controller
-	}
-
-	/// Brings forward the window on the Replica in `directory`, opening one if it has none, or
-	/// explains why the Replica can't be opened.
-	private func open(_ directory: URL) async {
-		@Dependency(\.bookmarkClient) var bookmarkClient
-		@Dependency(\.replicaClient) var replicaClient
-
-		do {
-			try await replicaClient.validate(directory)
-			let bookmark = try bookmarkClient.create(directory)
-			let folder = try folder(of: bookmark)
-			NSDocumentController.shared.noteNewRecentDocumentURL(folder)
-			if let controller = controllers[folder] {
-				controller.showWindow(nil)
-				return
-			}
-			let controller = makeController(bookmark: bookmark, folder: folder)
-			if let window = controller.window {
-				if cascadePoint == .zero {
-					window.center()
-				}
-				cascadePoint = window.cascadeTopLeft(from: cascadePoint)
-			}
-			controller.showWindow(nil)
-		} catch {
-			let alert = NSAlert()
-			alert.messageText = error.localizedDescription
-			alert.runModal()
-		}
+		open(url)
 	}
 }
 
-/// The folder `bookmark` resolves to, standardized so two spellings of it compare equal.
+/// The Replica folder `bookmark` resolves to.
 private func folder(of bookmark: Data) throws -> URL {
 	@Dependency(\.bookmarkClient) var bookmarkClient
-	let url = try bookmarkClient.resolve(bookmark)
-	return URL(filePath: url.path(percentEncoded: false), directoryHint: .isDirectory)
-		.standardizedFileURL
+	return try standardizedFolder(bookmarkClient.resolve(bookmark))
 }

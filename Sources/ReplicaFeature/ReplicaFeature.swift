@@ -1,20 +1,20 @@
 // One Replica as its window shows it: the tasks, the Taskrc it runs on and the table layout.
 import BookmarkClient
-public import ComposableArchitecture
-public import Foundation
-public import Models
+import ComposableArchitecture
+import Foundation
+import Models
 import ReplicaClient
-public import Sharing
+import Sharing
 import SwiftUI
-public import Taskrc
-public import TaskrcClient
+import Taskrc
+import TaskrcClient
 import UniformTypeIdentifiers
 
 @Reducer
-public struct ReplicaFeature {
+struct ReplicaFeature {
 	@ObservableState
-	public struct State: Equatable {
-		public let bookmark: Data
+	struct State: Equatable {
+		let bookmark: Data
 
 		var directory: URL?
 		var failure: String?
@@ -56,7 +56,9 @@ public struct ReplicaFeature {
 			guard hasTaskrc, let directory, let location = taskrc?.taskrc["data.location"] else {
 				return nil
 			}
-			return folder(location) == folder(directory.path(percentEncoded: false)) ? nil : location
+			return standardizedFolder(URL(filePath: location)) == standardizedFolder(directory)
+				? nil
+				: location
 		}
 
 		/// The Taskrc the window runs on: the last one that loaded, or TW's defaults.
@@ -86,25 +88,25 @@ public struct ReplicaFeature {
 			}
 		}
 
-		public init(bookmark: Data) {
+		init(bookmark: Data) {
 			self.bookmark = bookmark
 		}
 	}
 
-	public struct TaskrcSaveFailure: Equatable, Sendable {
-		public var message: String
+	struct TaskrcSaveFailure: Equatable {
+		var message: String
 		/// The panel that chose the file, which Try Again… opens again.
-		public var retry: FileImporter?
+		var retry: FileImporter?
 	}
 
 	/// What a file panel on screen is choosing.
-	public enum FileImporter: Equatable, Sendable {
+	enum FileImporter: Equatable {
 		/// The file an `include` line names, which the app couldn't read at `file`.
 		case grant(Taskrc.Include, file: URL)
 		case taskrc
 	}
 
-	public enum Action: BindableAction, Sendable {
+	enum Action: BindableAction {
 		case binding(BindingAction<State>)
 		case chooseTaskrcButtonTapped
 		case directoryResolved(URL)
@@ -144,7 +146,7 @@ public struct ReplicaFeature {
 	@Dependency(\.taskrcClient) var taskrcClient
 	@Dependency(\.timeZone) var timeZone
 
-	public var body: some ReducerOf<Self> {
+	var body: some ReducerOf<Self> {
 		BindingReducer()
 		Reduce { state, action in
 			switch action {
@@ -275,7 +277,7 @@ public struct ReplicaFeature {
 		}
 	}
 
-	public init() {}
+	init() {}
 
 	/// Loads the Taskrc paired with the window's Replica, and keeps it current, replacing any load
 	/// already running. Until the Taskrc parses, the window keeps the Taskrc it runs on now.
@@ -360,17 +362,12 @@ public struct ReplicaFeature {
 	}
 }
 
-/// The folder at `path`, standardized so two spellings of it compare equal.
-private func folder(_ path: String) -> URL {
-	URL(filePath: path, directoryHint: .isDirectory).standardizedFileURL
-}
-
 /// The user defaults key of the layout of the Replica in `directory`. Keyed on the folder rather
 /// than the bookmark, since opening the folder again makes a new bookmark, so a moved Replica
 /// starts over. Its dots are percent-encoded, since a key with one can't be observed through
 /// key-value observing, and its percent signs first, so two folders never share a key.
 func layoutKey(for directory: URL) -> String {
-	let path = folder(directory.path(percentEncoded: false)).path(percentEncoded: false)
+	let path = standardizedFolder(directory).path(percentEncoded: false)
 	return "layout:" + path.replacing("%", with: "%25").replacing(".", with: "%2E")
 }
 
