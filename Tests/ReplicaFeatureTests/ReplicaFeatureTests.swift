@@ -255,7 +255,7 @@ struct ReplicaFeatureTests {
 	}
 
 	@Test
-	func ranksTasksAgainEveryMinute() async {
+	func recomputesUrgencyEveryMinute() async {
 		let (tasks, continuation) = AsyncThrowingStream<[StoredTask], any Error>.makeStream()
 		let clock = TestClock()
 		let time = LockIsolated(now)
@@ -274,18 +274,20 @@ struct ReplicaFeatureTests {
 		let call = storedTask(
 			0,
 			"Call the bank",
-			workingSetID: 1,
+			workingSetID: 2,
 			["scheduled": String(Int(now.timeIntervalSince1970) + 30)],
 		)
+		let post = storedTask(1, "Post the letter", workingSetID: 1)
 
 		let task = await store.send(.fetchRequested)
 		await store.receive(\.directoryResolved) {
 			$0.directory = replicaDirectory
 		}
-		continuation.yield([call])
+		// Tied on Urgency, so in ID order.
+		continuation.yield([call, post])
 		await store.receive(\.tasksLoaded) {
-			$0.rows = try [row(call)]
-			$0.storedTasks = [call]
+			$0.rows = try [row(post), row(call)]
+			$0.storedTasks = [call, post]
 		}
 
 		// Past `scheduled`, with nothing committed to the Replica.
@@ -293,7 +295,7 @@ struct ReplicaFeatureTests {
 		await clock.advance(by: .seconds(60))
 		await store.receive(\.timerTicked) {
 			$0.highestUrgency = 5
-			$0.rows[id: UUID(0)]?.urgency = 5
+			$0.rows = try [row(call, urgency: 5), row(post)]
 		}
 
 		continuation.finish()

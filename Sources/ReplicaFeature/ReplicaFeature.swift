@@ -181,7 +181,7 @@ public struct ReplicaFeature {
 					// Urgency moves with the clock too, as due dates near and `scheduled` and `wait` pass,
 					// while the Replica may not change for hours.
 					.run { [clock] send in
-						for await _ in clock.timer(interval: rankInterval) {
+						for await _ in clock.timer(interval: urgencyInterval) {
 							await send(.timerTicked)
 						}
 					},
@@ -351,8 +351,8 @@ public struct ReplicaFeature {
 	}
 }
 
-/// How often an open window ranks its tasks again.
-private let rankInterval = Duration.seconds(60)
+/// How often an open window computes its tasks' Urgency again.
+private let urgencyInterval = Duration.seconds(60)
 
 public struct ReplicaView: View {
 	@Bindable var store: StoreOf<ReplicaFeature>
