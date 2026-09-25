@@ -49,13 +49,24 @@ let project = Project(
 			product: .app,
 			bundleId: "dev.brzz.SimpleTaskWarrior",
 			deploymentTargets: .macOS("27.0"),
-			infoPlist: .extendingDefault(
-				with: [
-					"CFBundleDisplayName": "SimpleTaskWarrior",
-					"CFBundleName": "SimpleTaskWarrior",
-					"LSApplicationCategoryType": "public.app-category.productivity",
-				],
-			),
+			// Tuist's default, spelled out without its `NSMainStoryboardFile`, which `extendingDefault`
+			// can't remove: the app builds its menu bar and windows in code.
+			infoPlist: .dictionary([
+				"CFBundleDevelopmentRegion": "$(DEVELOPMENT_LANGUAGE)",
+				"CFBundleDisplayName": "SimpleTaskWarrior",
+				"CFBundleExecutable": "$(EXECUTABLE_NAME)",
+				"CFBundleIconFile": "",
+				"CFBundleIdentifier": "$(PRODUCT_BUNDLE_IDENTIFIER)",
+				"CFBundleInfoDictionaryVersion": "6.0",
+				"CFBundleName": "SimpleTaskWarrior",
+				"CFBundlePackageType": "APPL",
+				"CFBundleShortVersionString": "1.0",
+				"CFBundleVersion": "1",
+				"LSApplicationCategoryType": "public.app-category.productivity",
+				"LSMinimumSystemVersion": "$(MACOSX_DEPLOYMENT_TARGET)",
+				"NSHumanReadableCopyright": "Copyright ©. All rights reserved.",
+				"NSPrincipalClass": "NSApplication",
+			]),
 			sources: ["AppHost/**"],
 			// Globbed, not bare: Tuist keeps a bare directory resource only if
 			// its extension is a known folder type or LaunchServices knows the

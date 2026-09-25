@@ -1,20 +1,17 @@
 import App
+import AppKit
 import IssueReporting
-import SwiftUI
 
 @main
 enum AppDriver {
+	@MainActor
 	static func main() {
-		if TestContext.current == nil {
-			SimpleTaskWarriorApp.main()
-		} else {
-			TestApp.main()
+		// Tests run hosted in the app, which then opens and restores no windows.
+		let delegate = TestContext.current == nil ? AppDelegate() : nil
+		// The application holds its delegate weakly.
+		withExtendedLifetime(delegate) {
+			NSApplication.shared.delegate = delegate
+			NSApplication.shared.run()
 		}
-	}
-}
-
-private struct TestApp: App {
-	var body: some Scene {
-		WindowGroup {}
 	}
 }

@@ -1,11 +1,11 @@
-// The window over one Replica: sidebar, task table and inspector.
+// One Replica as its window shows it: the tasks, the Taskrc it runs on and the table layout.
 import BookmarkClient
 public import ComposableArchitecture
 public import Foundation
 public import Models
 import ReplicaClient
 public import Sharing
-public import SwiftUI
+import SwiftUI
 public import Taskrc
 public import TaskrcClient
 import UniformTypeIdentifiers
@@ -39,7 +39,7 @@ public struct ReplicaFeature {
 		var udaColumns = UDAColumn.all(in: .defaults)
 
 		/// Whether Grant Access… can fix the Taskrc's problem.
-		public var canGrantAccess: Bool {
+		var canGrantAccess: Bool {
 			if case .grant = taskrcRemedy {
 				return true
 			}
@@ -47,7 +47,7 @@ public struct ReplicaFeature {
 		}
 
 		/// Whether the window has a Taskrc, rather than running on TW's defaults.
-		public var hasTaskrc: Bool {
+		var hasTaskrc: Bool {
 			taskrc?.url != nil
 		}
 
@@ -377,7 +377,9 @@ func layoutKey(for directory: URL) -> String {
 /// How often an open window computes its tasks' Urgency again.
 private let urgencyInterval = Duration.seconds(60)
 
-public struct ReplicaView: View {
+/// The banners over the Replica's task table, or why the Replica can't open, which the window's
+/// content hosts until it moves to AppKit.
+struct ReplicaContentView: View {
 	@Bindable var store: StoreOf<ReplicaFeature>
 
 	/// Where the file panel opens: at the path an include resolved to, or in the home folder, where
@@ -405,14 +407,8 @@ public struct ReplicaView: View {
 		}
 	}
 
-	public init(store: StoreOf<ReplicaFeature>) {
-		self.store = store
-	}
-
-	public var body: some View {
-		NavigationSplitView {
-			List {}
-		} detail: {
+	var body: some View {
+		ZStack {
 			if let failure = store.failure {
 				ContentUnavailableView(
 					"Can't Open Replica",
@@ -425,20 +421,9 @@ public struct ReplicaView: View {
 					.safeAreaInset(edge: .top, spacing: 0) {
 						banners
 					}
-					.inspector(isPresented: Binding(store.$layout.isInspectorPresented)) {
-						if store.selection.isEmpty {
-							ContentUnavailableView("No Selection", systemImage: "sidebar.trailing")
-						}
-					}
-					.toolbar {
-						Button("Inspector", systemImage: "sidebar.trailing") {
-							store.$layout.withLock { $0.isInspectorPresented.toggle() }
-						}
-					}
 			}
 		}
-		.navigationTitle(store.directory?.lastPathComponent ?? "")
-		.navigationSubtitle(store.directory?.path(percentEncoded: false) ?? "")
+		.frame(maxWidth: .infinity, maxHeight: .infinity)
 		.fileImporter(
 			isPresented: Binding($store.fileImporter),
 			// Files, and the symlinks dotfile managers make of them. Folders and packages are neither.
@@ -452,7 +437,6 @@ public struct ReplicaView: View {
 		.fileDialogBrowserOptions(.includeHiddenFiles)
 		.fileDialogDefaultDirectory(fileDialogDirectory)
 		.fileDialogMessage(fileDialogMessage)
-		.task { await store.send(.fetchRequested).finish() }
 	}
 
 	private var banners: some View {
@@ -497,6 +481,17 @@ public struct ReplicaView: View {
 					Text("The Taskrc's data.location is \(location), not this Replica.")
 				} actions: {}
 			}
+		}
+	}
+}
+
+/// What the inspector shows, which it hosts until it moves to AppKit.
+struct InspectorView: View {
+	let store: StoreOf<ReplicaFeature>
+
+	var body: some View {
+		if store.selection.isEmpty {
+			ContentUnavailableView("No Selection", systemImage: "sidebar.trailing")
 		}
 	}
 }
