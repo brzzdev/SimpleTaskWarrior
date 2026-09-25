@@ -272,7 +272,7 @@ private struct UrgencyCalculator {
 
 		case "BLOCKING": return scan.blocking.contains(task.id)
 
-		case "CHILD", "INSTANCE": return task.parent != nil || task.template != nil
+		case "CHILD", "INSTANCE": return task.isInstance
 
 		case "COMPLETED": return task.status == .completed
 

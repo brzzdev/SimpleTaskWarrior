@@ -61,6 +61,12 @@ extension Task {
 		}
 	}
 
+	/// Whether this is a Recurrence instance: TW's `+INSTANCE`, which looks for a template UUID under
+	/// either name.
+	public var isInstance: Bool {
+		parent != nil || template != nil
+	}
+
 	/// Whether this is a Recurrence template, which every view and count leaves out, deleted ones
 	/// included.
 	public var isTemplate: Bool {
