@@ -12,6 +12,40 @@ import TestSupport
 @MainActor
 struct ReplicaFeatureTests {
 	@Test
+	func bookmarkChangesFromAnotherWindowReloadTheTaskrc() async {
+		let (changes, changed) = AsyncStream<Void>.makeStream()
+		let pairedTaskrc = LockIsolated<URL?>(nil)
+		let store = TestStore(initialState: ReplicaFeature.State(bookmark: Data())) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.bookmarkClient.changes = { changes }
+			$0.bookmarkClient.grants = { [:] }
+			$0.bookmarkClient.taskrc = { _ in pairedTaskrc.value }
+			$0.taskrcClient.load = { taskrc, _, _ in
+				.finished(yielding: TaskrcClient.Loaded(taskrc: .defaults, url: taskrc()))
+			}
+		}
+		await store.send(.directoryResolved(replicaDirectory)) {
+			$0.directory = replicaDirectory
+		}
+		await store.receive(\.taskrcLoaded) {
+			$0.$hasShownTaskrcHint.withLock { $0 = true }
+			$0.isTaskrcHintPresented = true
+			$0.taskrc = TaskrcClient.Loaded(taskrc: .defaults, url: nil)
+		}
+
+		pairedTaskrc.setValue(taskrcFile)
+		changed.yield()
+		await store.receive(\.bookmarksChanged)
+		await store.receive(\.taskrcLoaded) {
+			$0.taskrc?.url = taskrcFile
+		}
+
+		changed.finish()
+		await store.finish()
+	}
+
+	@Test
 	func failedSaveIsReportedAndTryAgainReopensThePanel() async {
 		struct Gone: LocalizedError {
 			var errorDescription: String? { "The file is gone." }
@@ -19,6 +53,7 @@ struct ReplicaFeatureTests {
 		let store = TestStore(initialState: ReplicaFeature.State(bookmark: Data())) {
 			ReplicaFeature()
 		} withDependencies: {
+			$0.bookmarkClient.changes = { .finished }
 			$0.bookmarkClient.grants = { [:] }
 			$0.bookmarkClient.saveTaskrc = { _, _ in throw Gone() }
 			$0.taskrcClient.load = { _, _, _ in .finished }
@@ -57,6 +92,7 @@ struct ReplicaFeatureTests {
 		let store = TestStore(initialState: ReplicaFeature.State(bookmark: Data())) {
 			ReplicaFeature()
 		} withDependencies: {
+			$0.bookmarkClient.changes = { .finished }
 			$0.bookmarkClient.grants = { grants.value }
 			$0.bookmarkClient.saveGrant = { file, include in
 				grants.withValue { $0[include] = file }
@@ -120,6 +156,7 @@ struct ReplicaFeatureTests {
 		let store = TestStore(initialState: ReplicaFeature.State(bookmark: Data())) {
 			ReplicaFeature()
 		} withDependencies: {
+			$0.bookmarkClient.changes = { .finished }
 			$0.bookmarkClient.grants = { [:] }
 			$0.bookmarkClient.saveTaskrc = { taskrc, replica in
 				#expect(replica == replicaDirectory)
@@ -166,6 +203,7 @@ struct ReplicaFeatureTests {
 		let store = TestStore(initialState: ReplicaFeature.State(bookmark: Data())) {
 			ReplicaFeature()
 		} withDependencies: {
+			$0.bookmarkClient.changes = { .finished }
 			$0.bookmarkClient.grants = { [:] }
 			$0.bookmarkClient.resolve = { _ in directory }
 			$0.replicaClient.tasks = { _ in tasks }

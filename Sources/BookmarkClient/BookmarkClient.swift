@@ -6,6 +6,9 @@ public import Taskrc
 
 @DependencyClient
 public struct BookmarkClient: Sendable {
+	/// Yields whenever a kept bookmark changes in any window: a Taskrc paired or detached, a grant
+	/// kept, or a stale bookmark re-saved.
+	public var changes: @Sendable () -> AsyncStream<Void> = { .finished }
 	public var create: @Sendable (_ url: URL) throws -> Data
 	/// The kept include grants, by the line each answers. A stale bookmark is re-saved, and one that
 	/// no longer resolves is left out, so its include asks again.
@@ -24,6 +27,15 @@ public struct BookmarkClient: Sendable {
 
 extension BookmarkClient: DependencyKey {
 	public static let liveValue = Self(
+		changes: {
+			AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
+				let id = UUID()
+				observers.withLock { $0[id] = continuation }
+				continuation.onTermination = { _ in
+					observers.withLock { $0[id] = nil }
+				}
+			}
+		},
 		create: { url in
 			try makeBookmark(url)
 		},
@@ -105,6 +117,9 @@ private func makeBookmark(_ url: URL) throws -> Data {
 	)
 }
 
+/// Every live `changes` stream, by an id its termination removes it with.
+private let observers = Mutex<[UUID: AsyncStream<Void>.Continuation]>([:])
+
 /// A Taskrc and the Replica it's paired with, by bookmark on each, so the pairing follows a
 /// Replica that moves and isn't inherited by another later made at its old path.
 private struct Pairing: Codable, Equatable {
@@ -157,6 +172,11 @@ private func update<Result>(_ body: (inout Stored) -> Result) -> Result {
 		let result = body(&stored)
 		if stored != old {
 			UserDefaults.standard.set(try? JSONEncoder().encode(stored), forKey: storedKey)
+			observers.withLock { observers in
+				for observer in observers.values {
+					observer.yield()
+				}
+			}
 		}
 		return result
 	}

@@ -95,6 +95,7 @@ public struct ReplicaFeature {
 
 	public enum Action: BindableAction, Sendable {
 		case binding(BindingAction<State>)
+		case bookmarksChanged
 		case chooseTaskrcButtonTapped
 		case directoryResolved(URL)
 		case fetchRequested
@@ -110,6 +111,7 @@ public struct ReplicaFeature {
 	}
 
 	private enum CancelID {
+		case bookmarkChanges
 		case taskrc
 	}
 
@@ -124,13 +126,25 @@ public struct ReplicaFeature {
 			case .binding:
 				return .none
 
+			case .bookmarksChanged:
+				return loadTaskrc(for: state)
+
 			case .chooseTaskrcButtonTapped:
 				state.fileImporter = .taskrc
 				return .none
 
 			case let .directoryResolved(directory):
 				state.directory = directory
-				return loadTaskrc(for: state)
+				return .merge(
+					loadTaskrc(for: state),
+					// Another window pairing, detaching or granting changes this window's Taskrc too.
+					.run { [bookmarkClient] send in
+						for await _ in bookmarkClient.changes() {
+							await send(.bookmarksChanged)
+						}
+					}
+					.cancellable(id: CancelID.bookmarkChanges, cancelInFlight: true),
+				)
 
 			case .fetchRequested:
 				return .run { [bookmark = state.bookmark, bookmarkClient, replicaClient] send in
@@ -326,7 +340,9 @@ public struct ReplicaView: View {
 		.navigationSubtitle(store.directory?.path(percentEncoded: false) ?? "")
 		.fileImporter(
 			isPresented: Binding($store.fileImporter),
-			allowedContentTypes: [.item],
+			// Regular files only: folders and packages aren't `.data`, and the Taskrc and its includes are
+			// files.
+			allowedContentTypes: [.data],
 		) { [fileImporter = store.fileImporter] result in
 			guard let fileImporter, let file = try? result.get() else {
 				return
