@@ -130,7 +130,7 @@ public struct ReplicaFeature {
 
 			case let .directoryResolved(directory):
 				state.directory = directory
-				return loadTaskrc(pairedWith: directory)
+				return loadTaskrc(for: state)
 
 			case .fetchRequested:
 				return .run { [bookmark = state.bookmark, bookmarkClient, replicaClient] send in
@@ -147,7 +147,7 @@ public struct ReplicaFeature {
 				state.fileImporter = nil
 				state.taskrcSaveFailure = nil
 				return reloadTaskrc(
-					pairedWith: state.directory,
+					for: state,
 					retrying: .grant(include, file: resolved),
 				) { [bookmarkClient] _ in
 					try bookmarkClient.saveGrant(file, include)
@@ -158,7 +158,7 @@ public struct ReplicaFeature {
 				state.isTaskrcHintPresented = false
 				state.taskrcSaveFailure = nil
 				return reloadTaskrc(
-					pairedWith: state.directory,
+					for: state,
 					retrying: .taskrc,
 				) { [bookmarkClient] directory in
 					try bookmarkClient.saveTaskrc(file, directory)
@@ -206,7 +206,7 @@ public struct ReplicaFeature {
 				state.taskrcSaveFailure = nil
 				// Detaching makes no bookmark, so it has nothing to retry.
 				return reloadTaskrc(
-					pairedWith: state.directory,
+					for: state,
 					retrying: nil,
 				) { [bookmarkClient] directory in
 					try bookmarkClient.saveTaskrc(nil, directory)
@@ -217,10 +217,13 @@ public struct ReplicaFeature {
 
 	public init() {}
 
-	/// Loads the Taskrc paired with the Replica in `directory`, and keeps it current, replacing any
-	/// load already running.
-	private func loadTaskrc(pairedWith directory: URL) -> Effect<Action> {
-		.run { [bookmarkClient, taskrcClient] send in
+	/// Loads the Taskrc paired with the window's Replica, and keeps it current, replacing any load
+	/// already running. Until the Taskrc parses, the window keeps the config it runs on now.
+	private func loadTaskrc(for state: State) -> Effect<Action> {
+		guard let directory = state.directory else {
+			return .none
+		}
+		return .run { [bookmarkClient, lastGood = state.taskrc?.taskrc ?? .defaults, taskrcClient] send in
 			// So an include in the Replica folder reads without a grant of its own.
 			let isAccessing = directory.startAccessingSecurityScopedResource()
 			defer {
@@ -228,7 +231,11 @@ public struct ReplicaFeature {
 					directory.stopAccessingSecurityScopedResource()
 				}
 			}
-			let taskrcs = taskrcClient.load({ bookmarkClient.taskrc(directory) }, bookmarkClient.grants())
+			let taskrcs = taskrcClient.load(
+				{ bookmarkClient.taskrc(directory) },
+				{ bookmarkClient.grants() },
+				lastGood,
+			)
 			for await taskrc in taskrcs {
 				await send(.taskrcLoaded(taskrc))
 			}
@@ -239,11 +246,11 @@ public struct ReplicaFeature {
 	/// Runs `save` with the Replica's folder, then loads its Taskrc again. A failed save is
 	/// reported with the panel that would choose the file again.
 	private func reloadTaskrc(
-		pairedWith directory: URL?,
+		for state: State,
 		retrying retry: FileImporter?,
 		after save: @escaping @Sendable (_ directory: URL) throws -> Void,
 	) -> Effect<Action> {
-		guard let directory else {
+		guard let directory = state.directory else {
 			return .none
 		}
 		return .concatenate(
@@ -254,7 +261,7 @@ public struct ReplicaFeature {
 					.taskrcSaveFailed(TaskrcSaveFailure(message: error.localizedDescription, retry: retry)),
 				)
 			},
-			loadTaskrc(pairedWith: directory),
+			loadTaskrc(for: state),
 		)
 	}
 }

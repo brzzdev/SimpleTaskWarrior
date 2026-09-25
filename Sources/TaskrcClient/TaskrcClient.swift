@@ -8,13 +8,16 @@ public import Taskrc
 @DependencyClient
 public struct TaskrcClient: Sendable {
 	/// Parses the Taskrc that `taskrc` returns, or yields TW's defaults when it returns nil, then
-	/// parses it again whenever it or an include it read changes. Calls `taskrc` before every
-	/// parse, so a Taskrc that was moved or replaced is found again. Reads an include through its
-	/// grant where it has one, and holds the scope of every file it reads while it watches.
+	/// parses it again whenever it or an include it read changes. Calls `taskrc` and `grants`
+	/// before every parse, so a Taskrc that was moved or replaced is found again, and a grant made
+	/// in another window is picked up. Reads an include through its grant where it has one, and
+	/// holds the scope of every file it reads while it watches. Until a parse succeeds, a broken
+	/// Taskrc runs on `lastGood`.
 	public var load: @Sendable (
 		_ taskrc: @escaping @Sendable () -> URL?,
-		_ grants: [Taskrc.Include: URL],
-	) -> AsyncStream<Loaded> = { _, _ in .finished }
+		_ grants: @escaping @Sendable () -> [Taskrc.Include: URL],
+		_ lastGood: Taskrc,
+	) -> AsyncStream<Loaded> = { _, _, _ in .finished }
 }
 
 extension TaskrcClient {
@@ -45,16 +48,10 @@ private let missingFilePoll = Duration.seconds(2)
 
 extension TaskrcClient: DependencyKey {
 	public static let liveValue = Self(
-		load: { taskrc, grants in
+		load: { taskrc, grants, lastGood in
 			AsyncStream { continuation in
 				let loading = _Concurrency.Task {
-					let grantsInScope = grants.values.filter { $0.startAccessingSecurityScopedResource() }
-					defer {
-						for grant in grantsInScope {
-							grant.stopAccessingSecurityScopedResource()
-						}
-					}
-					var lastGood = Taskrc.defaults
+					var lastGood = lastGood
 					var lastLoaded: Loaded?
 					// The files the last parse read, which the next is watched over.
 					var watched: [URL] = []
@@ -63,11 +60,14 @@ extension TaskrcClient: DependencyKey {
 							continuation.yield(Loaded(taskrc: .defaults, url: nil))
 							break
 						}
-						// Held until the next parse, since the watchers below reopen the file.
-						let isAccessing = url.startAccessingSecurityScopedResource()
+						// Held until the next parse, since the watchers below reopen the files.
+						let grants = grants()
+						let inScope = ([url] + grants.values).filter {
+							$0.startAccessingSecurityScopedResource()
+						}
 						defer {
-							if isAccessing {
-								url.stopAccessingSecurityScopedResource()
+							for file in inScope {
+								file.stopAccessingSecurityScopedResource()
 							}
 						}
 

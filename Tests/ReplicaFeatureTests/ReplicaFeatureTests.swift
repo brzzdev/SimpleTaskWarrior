@@ -21,7 +21,7 @@ struct ReplicaFeatureTests {
 		} withDependencies: {
 			$0.bookmarkClient.grants = { [:] }
 			$0.bookmarkClient.saveTaskrc = { _, _ in throw Gone() }
-			$0.taskrcClient.load = { _, _ in .finished }
+			$0.taskrcClient.load = { _, _, _ in .finished }
 		}
 		await store.send(.directoryResolved(replicaDirectory)) {
 			$0.directory = replicaDirectory
@@ -41,7 +41,7 @@ struct ReplicaFeatureTests {
 	}
 
 	@Test
-	func grantAccessAsksForTheIncludeAtThePathItResolvedTo() async {
+	func grantAccessAsksForTheIncludeAndReloadsKeepingTheRunningConfig() async {
 		let include = Taskrc.Include(file: taskrcFile.path(), line: "include $DOTFILES/work.rc")
 		let problem = Taskrc.Problem(
 			.unreadable(path: "/work.rc", unsetVariables: ["DOTFILES"]),
@@ -50,6 +50,10 @@ struct ReplicaFeatureTests {
 		)
 		let granted = URL(filePath: "/Users/paul/dotfiles/work.rc")
 		let grants = LockIsolated<[Taskrc.Include: URL]>([:])
+		let running = Taskrc(path: taskrcFile.path(), environment: .fixture) { path, _ in
+			Taskrc.File(contents: "weekstart=monday", realPath: path)
+		}
+		let startingConfigs = LockIsolated<[Taskrc]>([])
 		let store = TestStore(initialState: ReplicaFeature.State(bookmark: Data())) {
 			ReplicaFeature()
 		} withDependencies: {
@@ -57,11 +61,12 @@ struct ReplicaFeatureTests {
 			$0.bookmarkClient.saveGrant = { file, include in
 				grants.withValue { $0[include] = file }
 			}
-			$0.taskrcClient.load = { _, grants in
-				.finished(
+			$0.taskrcClient.load = { _, grants, lastGood in
+				startingConfigs.withValue { $0.append(lastGood) }
+				return .finished(
 					yielding: TaskrcClient.Loaded(
-						problem: grants[include] == nil ? problem : nil,
-						taskrc: .defaults,
+						problem: grants()[include] == nil ? problem : nil,
+						taskrc: running,
 						url: taskrcFile,
 					),
 				)
@@ -72,7 +77,7 @@ struct ReplicaFeatureTests {
 			$0.directory = replicaDirectory
 		}
 		await store.receive(\.taskrcLoaded) {
-			$0.taskrc = TaskrcClient.Loaded(problem: problem, taskrc: .defaults, url: taskrcFile)
+			$0.taskrc = TaskrcClient.Loaded(problem: problem, taskrc: running, url: taskrcFile)
 		}
 
 		await store.send(.grantAccessButtonTapped) {
@@ -85,6 +90,7 @@ struct ReplicaFeatureTests {
 			$0.taskrc?.problem = nil
 		}
 		#expect(grants.value == [include: granted])
+		#expect(startingConfigs.value == [.defaults, running])
 	}
 
 	@Test
@@ -120,7 +126,7 @@ struct ReplicaFeatureTests {
 				pairedTaskrc.setValue(taskrc)
 			}
 			$0.bookmarkClient.taskrc = { _ in pairedTaskrc.value }
-			$0.taskrcClient.load = { taskrc, _ in
+			$0.taskrcClient.load = { taskrc, _, _ in
 				.finished(yielding: TaskrcClient.Loaded(taskrc: .defaults, url: taskrc()))
 			}
 		}
@@ -163,7 +169,7 @@ struct ReplicaFeatureTests {
 			$0.bookmarkClient.grants = { [:] }
 			$0.bookmarkClient.resolve = { _ in directory }
 			$0.replicaClient.tasks = { _ in tasks }
-			$0.taskrcClient.load = { _, _ in .finished }
+			$0.taskrcClient.load = { _, _, _ in .finished }
 		}
 		var milk = Models.Task(
 			description: "Buy milk",
