@@ -222,14 +222,12 @@ struct ReplicaFeatureTests {
 			$0.directory = work
 		}
 		await closed.send(\.binding.sortOrder, sortOrder) {
-			$0.$layout.withLock { $0.sortOrder = sortOrder }
 			$0.sortOrder = sortOrder
 		}
 
 		let reopened = window()
 		await reopened.send(.directoryResolved(work)) {
 			$0.directory = work
-			$0.$layout.withLock { $0.sortOrder = sortOrder }
 			$0.sortOrder = sortOrder
 		}
 
@@ -271,7 +269,6 @@ struct ReplicaFeatureTests {
 			$0.rows = try [row(milk), row(dog)]
 		}
 		await store.send(\.binding.sortOrder, [TaskSort(.description, order: .reverse)]) {
-			$0.$layout.withLock { $0.sortOrder = [TaskSort(.description, order: .reverse)] }
 			$0.rows = try [row(dog), row(milk)]
 			$0.sortOrder = [TaskSort(.description, order: .reverse)]
 		}

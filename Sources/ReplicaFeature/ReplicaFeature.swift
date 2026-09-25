@@ -32,8 +32,6 @@ public struct ReplicaFeature {
 		var rows: IdentifiedArrayOf<TaskRow> = []
 		/// Kept by UUID, so it survives the CLI renumbering tasks.
 		var selection: Set<Models.Task.ID> = []
-		/// The table's binding to `layout.sortOrder`, which re-sorts the rows as it changes.
-		var sortOrder = Layout().sortOrder
 		var taskrc: TaskrcClient.Loaded?
 		/// Why the last Taskrc or grant the user chose couldn't be kept.
 		var taskrcSaveFailure: TaskrcSaveFailure?
@@ -58,10 +56,13 @@ public struct ReplicaFeature {
 			guard hasTaskrc, let directory, let location = taskrc?.taskrc["data.location"] else {
 				return nil
 			}
-			let folder = { (path: String) in
-				URL(filePath: path, directoryHint: .isDirectory).standardizedFileURL
-			}
 			return folder(location) == folder(directory.path(percentEncoded: false)) ? nil : location
+		}
+
+		/// The table's binding to `layout.sortOrder`, through the store so the rows re-sort.
+		var sortOrder: [TaskSort] {
+			get { layout.sortOrder }
+			set { $layout.withLock { $0.sortOrder = newValue } }
 		}
 
 		/// The Taskrc the window runs on: the last one that loaded, or TW's defaults.
@@ -151,7 +152,6 @@ public struct ReplicaFeature {
 		Reduce { state, action in
 			switch action {
 			case .binding(\.sortOrder):
-				state.$layout.withLock { [sortOrder = state.sortOrder] in $0.sortOrder = sortOrder }
 				sortRows(&state)
 				return .none
 
@@ -165,7 +165,6 @@ public struct ReplicaFeature {
 			case let .directoryResolved(directory):
 				state.directory = directory
 				state.$layout = Shared(wrappedValue: Layout(), .appStorage(layoutKey(for: directory)))
-				state.sortOrder = state.layout.sortOrder
 				// Another window pairing, detaching or granting changes this window's Taskrc too. Subscribed
 				// here rather than in the effect, so the subscription exists before the first load reads the
 				// pairing and a change between the two can't be missed.
@@ -364,11 +363,17 @@ public struct ReplicaFeature {
 	}
 }
 
+/// The folder at `path`, standardized so two spellings of it compare equal.
+private func folder(_ path: String) -> URL {
+	URL(filePath: path, directoryHint: .isDirectory).standardizedFileURL
+}
+
 /// The user defaults key of the layout of the Replica in `directory`. Keyed on the folder rather
-/// than the bookmark, since opening the folder again makes a new bookmark. Its dots are encoded,
-/// since a key with one can't be observed through key-value observing.
+/// than the bookmark, since opening the folder again makes a new bookmark, so a moved Replica
+/// starts over. Its dots are encoded, since a key with one can't be observed through key-value
+/// observing.
 private func layoutKey(for directory: URL) -> String {
-	let path = directory.standardizedFileURL.path(percentEncoded: false)
+	let path = folder(directory.path(percentEncoded: false)).path(percentEncoded: false)
 	return "layout:" + path.replacing(".", with: "%2E")
 }
 
