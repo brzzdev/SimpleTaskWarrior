@@ -450,3 +450,9 @@ lint:
 # Remove the SwiftPM build folder, which holds the pinned DerivedData too
 clean:
 	rm -rf .build
+
+# PROTOTYPE (#55): AppKit title bar — pass --sweep to log a resize sweep and quit
+prototype-title-bar *args:
+	mkdir -p .build/prototype
+	swiftc -swift-version 5 -O Prototypes/AppKitTitleBar/main.swift -o .build/prototype/AppKitTitleBar
+	.build/prototype/AppKitTitleBar {{args}}
