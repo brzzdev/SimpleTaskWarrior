@@ -64,7 +64,7 @@ public struct ReplicaFeature {
 			taskrc?.taskrc ?? .defaults
 		}
 
-		/// The table's binding to `layout.sortOrder`, through the store so the rows re-sort.
+		/// The table's binding to `layout.sortOrder`, which any window on the Replica can change.
 		var sortOrder: [TaskSort] {
 			get { layout.sortOrder }
 			set { $layout.withLock { $0.sortOrder = newValue } }
@@ -119,6 +119,8 @@ public struct ReplicaFeature {
 		case grantAccessButtonTapped
 		case openFailed(String)
 		case pairingChanged
+		/// The sort order changed, in this window or another on the Replica.
+		case sortOrderChanged
 		case taskrcHintCloseButtonTapped
 		case taskrcLoaded(TaskrcClient.Loaded)
 		case taskrcSaveFailed(TaskrcSaveFailure)
@@ -152,10 +154,6 @@ public struct ReplicaFeature {
 		BindingReducer()
 		Reduce { state, action in
 			switch action {
-			case .binding(\.sortOrder):
-				sortRows(&state)
-				return .none
-
 			case .binding:
 				return .none
 
@@ -231,6 +229,10 @@ public struct ReplicaFeature {
 
 			case .pairingChanged:
 				return loadTaskrc(for: state)
+
+			case .sortOrderChanged:
+				sortRows(&state)
+				return .none
 
 			case .taskrcHintCloseButtonTapped:
 				state.isTaskrcHintPresented = false
@@ -371,11 +373,11 @@ private func folder(_ path: String) -> URL {
 
 /// The user defaults key of the layout of the Replica in `directory`. Keyed on the folder rather
 /// than the bookmark, since opening the folder again makes a new bookmark, so a moved Replica
-/// starts over. Its dots are encoded, since a key with one can't be observed through key-value
-/// observing.
-private func layoutKey(for directory: URL) -> String {
+/// starts over. Its dots are percent-encoded, since a key with one can't be observed through
+/// key-value observing, and its percent signs first, so two folders never share a key.
+func layoutKey(for directory: URL) -> String {
 	let path = folder(directory.path(percentEncoded: false)).path(percentEncoded: false)
-	return "layout:" + path.replacing(".", with: "%2E")
+	return "layout:" + path.replacing("%", with: "%25").replacing(".", with: "%2E")
 }
 
 /// How often an open window computes its tasks' Urgency again.

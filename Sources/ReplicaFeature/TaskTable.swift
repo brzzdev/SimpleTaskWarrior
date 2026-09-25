@@ -267,6 +267,11 @@ struct TaskTable: View {
 			}
 			.defaultVisibility(.hidden)
 		}
+		// Observed rather than handled as a binding, since another window on the Replica sorts this
+		// one's rows too.
+		.onChange(of: store.sortOrder) {
+			store.send(.sortOrderChanged)
+		}
 	}
 }
 

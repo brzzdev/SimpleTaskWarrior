@@ -238,6 +238,15 @@ struct ReplicaFeatureTests {
 	}
 
 	@Test
+	func layoutKeysDifferForEveryFolder() {
+		let dotted = URL(filePath: "/tmp/acme.prod", directoryHint: .isDirectory)
+		let encoded = URL(filePath: "/tmp/acme%2Eprod", directoryHint: .isDirectory)
+
+		#expect(layoutKey(for: dotted) != layoutKey(for: encoded))
+		#expect(!layoutKey(for: dotted).contains("."))
+	}
+
+	@Test
 	func listsPendingTasksSortedAndDropsSelectedTasksThatLeave() async {
 		let directory = URL(filePath: "/Users/paul/.task")
 		let (tasks, continuation) = AsyncThrowingStream<[StoredTask], any Error>.makeStream()
@@ -269,8 +278,10 @@ struct ReplicaFeatureTests {
 			$0.rows = try [row(milk), row(dog)]
 		}
 		await store.send(\.binding.sortOrder, [TaskSort(.description, order: .reverse)]) {
-			$0.rows = try [row(dog), row(milk)]
 			$0.sortOrder = [TaskSort(.description, order: .reverse)]
+		}
+		await store.send(.sortOrderChanged) {
+			$0.rows = try [row(dog), row(milk)]
 		}
 		await store.send(\.binding.selection, [UUID(0), UUID(1)]) {
 			$0.selection = [UUID(0), UUID(1)]
