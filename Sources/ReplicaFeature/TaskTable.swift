@@ -201,7 +201,7 @@ struct TaskTable: View {
 		Table(
 			store.rows,
 			selection: $store.selection,
-			sortOrder: $store.sortOrder,
+			sortOrder: Binding(store.$layout.sortOrder),
 			columnCustomization: Binding(store.$layout.columns),
 		) {
 			TableColumn("ID", sortUsing: TaskSort(.id)) { row in
@@ -267,9 +267,9 @@ struct TaskTable: View {
 			}
 			.defaultVisibility(.hidden)
 		}
-		// Observed rather than handled as a binding, since another window on the Replica sorts this
+		// Observed rather than sent from the binding, since another window on the Replica sorts this
 		// one's rows too.
-		.onChange(of: store.sortOrder) {
+		.onChange(of: store.layout.sortOrder) {
 			store.send(.sortOrderChanged)
 		}
 	}

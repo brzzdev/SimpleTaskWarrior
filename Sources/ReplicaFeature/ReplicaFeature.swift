@@ -28,7 +28,7 @@ public struct ReplicaFeature {
 		@Shared(value: Layout()) var layout
 		/// Every task in the Replica as last read, which the blocked rule and Urgency read.
 		var storedTasks: [StoredTask] = []
-		/// Pending tasks, in `sortOrder`.
+		/// Pending tasks, in `layout.sortOrder`.
 		var rows: IdentifiedArrayOf<TaskRow> = []
 		/// Kept by UUID, so it survives the CLI renumbering tasks.
 		var selection: Set<Models.Task.ID> = []
@@ -62,12 +62,6 @@ public struct ReplicaFeature {
 		/// The Taskrc the window runs on: the last one that loaded, or TW's defaults.
 		var runningTaskrc: Taskrc {
 			taskrc?.taskrc ?? .defaults
-		}
-
-		/// The table's binding to `layout.sortOrder`, which any window on the Replica can change.
-		var sortOrder: [TaskSort] {
-			get { layout.sortOrder }
-			set { $layout.withLock { $0.sortOrder = newValue } }
 		}
 
 		/// The file panel that fixes the Taskrc's problem: a grant for an include the app can't read,
@@ -130,8 +124,8 @@ public struct ReplicaFeature {
 		case useTaskwarriorDefaultsButtonTapped
 	}
 
-	/// How a window over the Replica arranges its table and inspector. The view binds `columns` and
-	/// `isInspectorPresented` directly, since only a new sort order needs the reducer.
+	/// How a window over the Replica arranges its table and inspector. Every window on the Replica
+	/// shares it, so a new sort order reaches the reducer as `sortOrderChanged` from each of them.
 	struct Layout: Codable, Equatable {
 		var columns = TableColumnCustomization<TaskRow>()
 		var isInspectorPresented = true
@@ -334,10 +328,10 @@ public struct ReplicaFeature {
 		state.selection.formIntersection(state.rows.ids)
 	}
 
-	/// Sorts the table's rows by `sortOrder`, breaking ties by ID so the order holds still.
+	/// Sorts the table's rows by `layout.sortOrder`, breaking ties by ID so the order holds still.
 	private func sortRows(_ state: inout State) {
 		state.rows = IdentifiedArray(
-			uniqueElements: state.rows.sorted(using: state.sortOrder + [TaskSort(.id)]),
+			uniqueElements: state.rows.sorted(using: state.layout.sortOrder + [TaskSort(.id)]),
 		)
 	}
 

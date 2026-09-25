@@ -221,14 +221,12 @@ struct ReplicaFeatureTests {
 		await closed.send(.directoryResolved(work)) {
 			$0.directory = work
 		}
-		await closed.send(\.binding.sortOrder, sortOrder) {
-			$0.sortOrder = sortOrder
-		}
+		closed.state.$layout.withLock { $0.sortOrder = sortOrder }
 
 		let reopened = window()
 		await reopened.send(.directoryResolved(work)) {
 			$0.directory = work
-			$0.sortOrder = sortOrder
+			$0.$layout.withLock { $0.sortOrder = sortOrder }
 		}
 
 		let other = window()
@@ -238,7 +236,7 @@ struct ReplicaFeatureTests {
 	}
 
 	@Test
-	func layoutKeysDifferForEveryFolder() {
+	func layoutKeyKeepsAnEncodedLookingFolderApart() {
 		let dotted = URL(filePath: "/tmp/acme.prod", directoryHint: .isDirectory)
 		let encoded = URL(filePath: "/tmp/acme%2Eprod", directoryHint: .isDirectory)
 
@@ -277,10 +275,9 @@ struct ReplicaFeatureTests {
 			$0.storedTasks = [dog, taxes, milk]
 			$0.rows = try [row(milk), row(dog)]
 		}
-		await store.send(\.binding.sortOrder, [TaskSort(.description, order: .reverse)]) {
-			$0.sortOrder = [TaskSort(.description, order: .reverse)]
-		}
+		store.state.$layout.withLock { $0.sortOrder = [TaskSort(.description, order: .reverse)] }
 		await store.send(.sortOrderChanged) {
+			$0.$layout.withLock { $0.sortOrder = [TaskSort(.description, order: .reverse)] }
 			$0.rows = try [row(dog), row(milk)]
 		}
 		await store.send(\.binding.selection, [UUID(0), UUID(1)]) {
