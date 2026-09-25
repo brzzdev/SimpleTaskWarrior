@@ -5,7 +5,7 @@ The app ships only as a hardened, notarised Developer ID build, and it doesn't r
 ## Consequences
 
 - No Mac App Store release. App Review Guideline 2.4.5(i) requires the sandbox.
-- The app and its engine can read anything the user can read. Folders TCC protects (`~/Documents`, `~/Desktop`, `~/Downloads`, iCloud Drive) still prompt.
+- The app and its engine reach the user's files without a panel, subject to macOS privacy controls. Files & Folders protection prompts before the app reads `~/Documents`, `~/Desktop`, `~/Downloads`, iCloud Drive, or a network or removable volume. Data behind Full Disk Access stays out of reach unless the user grants it. A Replica or Taskrc in any of those can still be denied.
 - With no Taskrc chosen, the app reads the one the CLI would, `$TASKRC` or `~/.taskrc`, by path, and watches a symlink's link node too.
 - Replica bookmarks and Taskrc pairings saved by sandboxed builds must still open after an upgrade.
 
