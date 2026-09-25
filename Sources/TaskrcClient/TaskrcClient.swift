@@ -143,23 +143,28 @@ private func firstChange(in changes: AsyncStream<Void>, orAfter timeout: Duratio
 }
 
 /// Yields when any of `files` is written, renamed or deleted. The CLI's `task config` and
-/// `task context` write in place, and an editor's atomic save arrives as a delete.
+/// `task context` write in place, and an editor's atomic save arrives as a delete. A symlink is
+/// watched as well as its target, since pointing it somewhere new writes nothing to the target.
 private func changes(to files: [URL]) -> AsyncStream<Void> {
 	AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
-		let sources = files.compactMap { file -> (any DispatchSourceFileSystemObject)? in
-			let descriptor = open(file.path(percentEncoded: false), O_EVTONLY)
-			guard descriptor >= 0 else {
-				return nil
+		let sources = files.flatMap { file -> [any DispatchSourceFileSystemObject] in
+			let isSymlink = (try? file.resourceValues(forKeys: [.isSymbolicLinkKey]))?.isSymbolicLink
+			let flags = isSymlink == true ? [O_EVTONLY, O_EVTONLY | O_SYMLINK] : [O_EVTONLY]
+			return flags.compactMap { flags in
+				let descriptor = open(file.path(percentEncoded: false), flags)
+				guard descriptor >= 0 else {
+					return nil
+				}
+				let source = DispatchSource.makeFileSystemObjectSource(
+					fileDescriptor: descriptor,
+					eventMask: [.delete, .extend, .rename, .write],
+					queue: .global(),
+				)
+				source.setEventHandler { continuation.yield() }
+				source.setCancelHandler { close(descriptor) }
+				source.activate()
+				return source
 			}
-			let source = DispatchSource.makeFileSystemObjectSource(
-				fileDescriptor: descriptor,
-				eventMask: [.delete, .extend, .rename, .write],
-				queue: .global(),
-			)
-			source.setEventHandler { continuation.yield() }
-			source.setCancelHandler { close(descriptor) }
-			source.activate()
-			return source
 		}
 		continuation.onTermination = { _ in
 			for source in sources {

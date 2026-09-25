@@ -95,13 +95,13 @@ public struct ReplicaFeature {
 
 	public enum Action: BindableAction, Sendable {
 		case binding(BindingAction<State>)
-		case bookmarksChanged
 		case chooseTaskrcButtonTapped
 		case directoryResolved(URL)
 		case fetchRequested
 		case fileChosen(URL, for: FileImporter)
 		case grantAccessButtonTapped
 		case openFailed(String)
+		case taskrcFetchRequested
 		case taskrcHintCloseButtonTapped
 		case taskrcLoaded(TaskrcClient.Loaded)
 		case taskrcSaveFailed(TaskrcSaveFailure)
@@ -126,21 +126,21 @@ public struct ReplicaFeature {
 			case .binding:
 				return .none
 
-			case .bookmarksChanged:
-				return loadTaskrc(for: state)
-
 			case .chooseTaskrcButtonTapped:
 				state.fileImporter = .taskrc
 				return .none
 
 			case let .directoryResolved(directory):
 				state.directory = directory
+				// Another window pairing, detaching or granting changes this window's Taskrc too. Subscribed
+				// here rather than in the effect, so the subscription exists before the first load reads the
+				// pairing and a change between the two can't be missed.
+				let changes = bookmarkClient.changes()
 				return .merge(
 					loadTaskrc(for: state),
-					// Another window pairing, detaching or granting changes this window's Taskrc too.
-					.run { [bookmarkClient] send in
-						for await _ in bookmarkClient.changes() {
-							await send(.bookmarksChanged)
+					.run { send in
+						for await _ in changes {
+							await send(.taskrcFetchRequested)
 						}
 					}
 					.cancellable(id: CancelID.bookmarkChanges, cancelInFlight: true),
@@ -185,6 +185,9 @@ public struct ReplicaFeature {
 			case let .openFailed(failure):
 				state.failure = failure
 				return .none
+
+			case .taskrcFetchRequested:
+				return loadTaskrc(for: state)
 
 			case .taskrcHintCloseButtonTapped:
 				state.isTaskrcHintPresented = false
