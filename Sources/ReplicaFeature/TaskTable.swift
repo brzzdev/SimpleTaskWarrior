@@ -21,7 +21,7 @@ struct TaskRow: Equatable, Identifiable {
 		task.tags.sorted().joined(separator: " ")
 	}
 
-	init(task: Models.Task, isBlocked: Bool, urgency: Double, udaColumns: [UDAColumn]) {
+	init(isBlocked: Bool, task: Models.Task, udaColumns: [UDAColumn], urgency: Double) {
 		self.isBlocked = isBlocked
 		self.task = task
 		// A value the list doesn't name ranks after every value it does.
@@ -185,11 +185,11 @@ private enum SortKey {
 		case (.number, .text):
 			.orderedAscending
 
-		case let (.text(lhs), .text(rhs)):
-			lhs.localizedStandardCompare(rhs)
-
 		case (.text, .number):
 			.orderedDescending
+
+		case let (.text(lhs), .text(rhs)):
+			lhs.localizedStandardCompare(rhs)
 		}
 	}
 }
@@ -319,7 +319,7 @@ private struct DescriptionCell: View {
 			if row.task.isInstance {
 				Text(verbatim: "↻")
 					.foregroundStyle(.secondary)
-					.accessibilityLabel("Recurring")
+					.accessibilityLabel("Repeats")
 			}
 		}
 	}

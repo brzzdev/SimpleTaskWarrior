@@ -25,7 +25,7 @@ public struct ReplicaFeature {
 		var highestUrgency = 0.0
 		var isTaskrcHintPresented = false
 		/// Every task in the Replica as last read, which the blocked rule and Urgency read.
-		var replica: [StoredTask] = []
+		var storedTasks: [StoredTask] = []
 		/// Pending tasks, in `sortOrder`.
 		var rows: IdentifiedArrayOf<TaskRow> = []
 		/// Kept by UUID, so it survives the CLI renumbering tasks.
@@ -50,11 +50,6 @@ public struct ReplicaFeature {
 			taskrc?.url != nil
 		}
 
-		/// The Taskrc the window runs on: the last one that loaded, or TW's defaults.
-		var runningTaskrc: Taskrc {
-			taskrc?.taskrc ?? .defaults
-		}
-
 		/// The Taskrc's `data.location`, where it names a folder other than the window's Replica.
 		var otherDataLocation: String? {
 			guard hasTaskrc, let directory, let location = taskrc?.taskrc["data.location"] else {
@@ -64,6 +59,11 @@ public struct ReplicaFeature {
 				URL(filePath: path, directoryHint: .isDirectory).standardizedFileURL
 			}
 			return folder(location) == folder(directory.path(percentEncoded: false)) ? nil : location
+		}
+
+		/// The Taskrc the window runs on: the last one that loaded, or TW's defaults.
+		var runningTaskrc: Taskrc {
+			taskrc?.taskrc ?? .defaults
 		}
 
 		/// The file panel that fixes the Taskrc's problem: a grant for an include the app can't read,
@@ -229,7 +229,7 @@ public struct ReplicaFeature {
 				return .none
 
 			case let .tasksLoaded(tasks):
-				state.replica = tasks
+				state.storedTasks = tasks
 				updateRows(&state)
 				return .none
 
@@ -283,7 +283,7 @@ public struct ReplicaFeature {
 	/// computing their Urgency again, and drops selected tasks that left the table.
 	private func updateRows(_ state: inout State) {
 		let taskrc = state.runningTaskrc
-		let tasks = state.replica.compactMap { Models.Task($0, udaTypes: taskrc.udaTypes) }
+		let tasks = state.storedTasks.compactMap { Models.Task($0, udaTypes: taskrc.udaTypes) }
 		let blocked = DependencyScan(tasks).blocked
 		let urgencies = UrgencyCoefficients(taskrc).urgencies(of: tasks, at: now, in: timeZone)
 		state.udaColumns = UDAColumn.all(in: taskrc)
@@ -292,10 +292,10 @@ public struct ReplicaFeature {
 				.filter { $0.status == .pending && !$0.isTemplate }
 				.map { [udaColumns = state.udaColumns] task in
 					TaskRow(
-						task: task,
 						isBlocked: blocked.contains(task.id),
-						urgency: urgencies[task.id] ?? 0,
+						task: task,
 						udaColumns: udaColumns,
+						urgency: urgencies[task.id] ?? 0,
 					)
 				},
 		)

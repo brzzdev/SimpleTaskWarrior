@@ -230,7 +230,7 @@ struct ReplicaFeatureTests {
 		// Tied on Urgency, so in ID order.
 		continuation.yield([dog, taxes, milk])
 		await store.receive(\.tasksLoaded) {
-			$0.replica = [dog, taxes, milk]
+			$0.storedTasks = [dog, taxes, milk]
 			$0.rows = try [row(milk), row(dog)]
 		}
 		await store.send(\.binding.sortOrder, [TaskSort(.description, order: .reverse)]) {
@@ -244,7 +244,7 @@ struct ReplicaFeatureTests {
 		let milkDone = storedTask(0, "Buy milk", status: "completed", workingSetID: 1)
 		continuation.yield([dog, taxes, milkDone])
 		await store.receive(\.tasksLoaded) {
-			$0.replica = [dog, taxes, milkDone]
+			$0.storedTasks = [dog, taxes, milkDone]
 			$0.rows = try [row(dog)]
 			$0.selection = [UUID(1)]
 		}
@@ -265,11 +265,11 @@ struct ReplicaFeatureTests {
 		let blocker = storedTask(1, "Book the van", workingSetID: 3)
 		let blocked = storedTask(2, "Move", workingSetID: 2, ["dep_\(blocker.uuid)": "x"])
 		let template = storedTask(3, "Water the plants", status: "recurring", workingSetID: nil)
-		let replica = [blocked, blocker, estimated, template]
+		let storedTasks = [blocked, blocker, estimated, template]
 
-		await store.send(.tasksLoaded(replica)) {
+		await store.send(.tasksLoaded(storedTasks)) {
 			$0.highestUrgency = 8
-			$0.replica = replica
+			$0.storedTasks = storedTasks
 			$0.rows = try [
 				row(blocker, urgency: 8),
 				row(estimated),
@@ -358,16 +358,16 @@ private func row(
 ) throws -> TaskRow {
 	let task = Models.Task(stored, udaTypes: Taskrc.defaults.udaTypes)
 	return try TaskRow(
-		task: #require(task),
 		isBlocked: isBlocked,
-		urgency: urgency,
+		task: #require(task),
 		udaColumns: UDAColumn.all(in: .defaults),
+		urgency: urgency,
 	)
 }
 
 /// A task as the Replica stores it, entered at `now`.
 private func storedTask(
-	_ uuid: Int,
+	_ seed: Int,
 	_ description: String,
 	status: String = "pending",
 	workingSetID: Int?,
@@ -379,7 +379,7 @@ private func storedTask(
 			"entry": String(Int(now.timeIntervalSince1970)),
 			"status": status,
 		]) { $1 },
-		uuid: UUID(uuid).uuidString.lowercased(),
+		uuid: UUID(seed).uuidString.lowercased(),
 		workingSetID: workingSetID,
 	)
 }
