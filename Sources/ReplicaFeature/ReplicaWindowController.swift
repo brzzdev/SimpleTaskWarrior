@@ -10,7 +10,7 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 	NSToolbarDelegate, NSWindowDelegate
 {
 	private var fetch: _Concurrency.Task<Void, Never>?
-	private var inspectorCollapse: NSKeyValueObservation?
+	private var inspectorCollapseObservation: NSKeyValueObservation?
 	private let onClose: @MainActor () -> Void
 	private let store: StoreOf<ReplicaFeature>
 
@@ -26,7 +26,7 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 			backing: .buffered,
 			defer: false,
 		)
-		window.identifier = NSUserInterfaceItemIdentifier("replica")
+		window.identifier = NSUserInterfaceItemIdentifier(identifier)
 		// The controller owns the window, and ARC releases it.
 		window.isReleasedWhenClosed = false
 		window.toolbarStyle = .unified
@@ -48,7 +48,7 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 		window.setContentSize(windowSize)
 		window.delegate = self
 
-		let toolbar = NSToolbar(identifier: "replica")
+		let toolbar = NSToolbar(identifier: identifier)
 		toolbar.allowsDisplayModeCustomization = false
 		toolbar.delegate = self
 		toolbar.displayMode = .iconOnly
@@ -71,7 +71,7 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 			}
 		}
 		// The toolbar button, the View menu and dragging the divider all collapse the inspector.
-		inspectorCollapse = inspector.observe(\.isCollapsed) { [weak self] inspector, _ in
+		inspectorCollapseObservation = inspector.observe(\.isCollapsed) { [weak self] inspector, _ in
 			guard let self else {
 				return
 			}
@@ -163,6 +163,9 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 }
 
 private let bookmarkKey = "bookmark"
+
+/// Names the window, for restoration, and its toolbar.
+private let identifier = "replica"
 
 /// Hosts `rootView`, leaving its size to the split view rather than to SwiftUI.
 @MainActor
