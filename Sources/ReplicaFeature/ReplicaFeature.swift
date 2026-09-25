@@ -218,7 +218,7 @@ public struct ReplicaFeature {
 	public init() {}
 
 	/// Loads the Taskrc paired with the window's Replica, and keeps it current, replacing any load
-	/// already running. Until the Taskrc parses, the window keeps the config it runs on now.
+	/// already running. Until the Taskrc parses, the window keeps the Taskrc it runs on now.
 	private func loadTaskrc(for state: State) -> Effect<Action> {
 		guard let directory = state.directory else {
 			return .none

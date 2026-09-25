@@ -41,7 +41,7 @@ struct ReplicaFeatureTests {
 	}
 
 	@Test
-	func grantAccessAsksForTheIncludeAndReloadsKeepingTheRunningConfig() async {
+	func grantAccessAsksForTheIncludeAndReloadsKeepingTheRunningTaskrc() async {
 		let include = Taskrc.Include(file: taskrcFile.path(), line: "include $DOTFILES/work.rc")
 		let problem = Taskrc.Problem(
 			.unreadable(path: "/work.rc", unsetVariables: ["DOTFILES"]),
@@ -53,7 +53,7 @@ struct ReplicaFeatureTests {
 		let running = Taskrc(path: taskrcFile.path(), environment: .fixture) { path, _ in
 			Taskrc.File(contents: "weekstart=monday", realPath: path)
 		}
-		let startingConfigs = LockIsolated<[Taskrc]>([])
+		let startingTaskrcs = LockIsolated<[Taskrc]>([])
 		let store = TestStore(initialState: ReplicaFeature.State(bookmark: Data())) {
 			ReplicaFeature()
 		} withDependencies: {
@@ -62,7 +62,7 @@ struct ReplicaFeatureTests {
 				grants.withValue { $0[include] = file }
 			}
 			$0.taskrcClient.load = { _, grants, lastGood in
-				startingConfigs.withValue { $0.append(lastGood) }
+				startingTaskrcs.withValue { $0.append(lastGood) }
 				return .finished(
 					yielding: TaskrcClient.Loaded(
 						problem: grants()[include] == nil ? problem : nil,
@@ -90,7 +90,7 @@ struct ReplicaFeatureTests {
 			$0.taskrc?.problem = nil
 		}
 		#expect(grants.value == [include: granted])
-		#expect(startingConfigs.value == [.defaults, running])
+		#expect(startingTaskrcs.value == [.defaults, running])
 	}
 
 	@Test
