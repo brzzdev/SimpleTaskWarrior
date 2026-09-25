@@ -147,24 +147,12 @@ private func firstChange(in changes: AsyncStream<Void>, orAfter timeout: Duratio
 /// watched as well as its target, since pointing it somewhere new writes nothing to the target.
 private func changes(to files: [URL]) -> AsyncStream<Void> {
 	AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
-		let sources = files.flatMap { file -> [any DispatchSourceFileSystemObject] in
-			let isSymlink = (try? file.resourceValues(forKeys: [.isSymbolicLinkKey]))?.isSymbolicLink
-			let flags = isSymlink == true ? [O_EVTONLY, O_EVTONLY | O_SYMLINK] : [O_EVTONLY]
-			return flags.compactMap { flags in
-				let descriptor = open(file.path(percentEncoded: false), flags)
-				guard descriptor >= 0 else {
-					return nil
-				}
-				let source = DispatchSource.makeFileSystemObjectSource(
-					fileDescriptor: descriptor,
-					eventMask: [.delete, .extend, .rename, .write],
-					queue: .global(),
-				)
-				source.setEventHandler { continuation.yield() }
-				source.setCancelHandler { close(descriptor) }
-				source.activate()
-				return source
-			}
+		let sources = files.flatMap { file in
+			let path = file.path(percentEncoded: false)
+			let isSymlink = (try? file.resourceValues(forKeys: [.isSymbolicLinkKey]))?
+				.isSymbolicLink ?? false
+			let modes = isSymlink ? [O_EVTONLY, O_EVTONLY | O_SYMLINK] : [O_EVTONLY]
+			return modes.compactMap { watch(path, mode: $0) { continuation.yield() } }
 		}
 		continuation.onTermination = { _ in
 			for source in sources {
@@ -172,4 +160,26 @@ private func changes(to files: [URL]) -> AsyncStream<Void> {
 			}
 		}
 	}
+}
+
+/// A source calling `changed` when the file at `path`, opened with `mode`, is written, renamed or
+/// deleted, or nil when it can't be opened.
+private func watch(
+	_ path: String,
+	mode: Int32,
+	changed: @escaping @Sendable () -> Void,
+) -> (any DispatchSourceFileSystemObject)? {
+	let descriptor = open(path, mode)
+	guard descriptor >= 0 else {
+		return nil
+	}
+	let source = DispatchSource.makeFileSystemObjectSource(
+		fileDescriptor: descriptor,
+		eventMask: [.delete, .extend, .rename, .write],
+		queue: .global(),
+	)
+	source.setEventHandler(handler: changed)
+	source.setCancelHandler { close(descriptor) }
+	source.activate()
+	return source
 }

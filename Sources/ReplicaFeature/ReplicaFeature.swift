@@ -101,7 +101,7 @@ public struct ReplicaFeature {
 		case fileChosen(URL, for: FileImporter)
 		case grantAccessButtonTapped
 		case openFailed(String)
-		case taskrcFetchRequested
+		case pairingChanged
 		case taskrcHintCloseButtonTapped
 		case taskrcLoaded(TaskrcClient.Loaded)
 		case taskrcSaveFailed(TaskrcSaveFailure)
@@ -140,7 +140,7 @@ public struct ReplicaFeature {
 					loadTaskrc(for: state),
 					.run { send in
 						for await _ in changes {
-							await send(.taskrcFetchRequested)
+							await send(.pairingChanged)
 						}
 					}
 					.cancellable(id: CancelID.bookmarkChanges, cancelInFlight: true),
@@ -186,7 +186,7 @@ public struct ReplicaFeature {
 				state.failure = failure
 				return .none
 
-			case .taskrcFetchRequested:
+			case .pairingChanged:
 				return loadTaskrc(for: state)
 
 			case .taskrcHintCloseButtonTapped:

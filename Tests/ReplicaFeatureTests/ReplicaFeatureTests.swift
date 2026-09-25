@@ -36,7 +36,7 @@ struct ReplicaFeatureTests {
 
 		pairedTaskrc.setValue(taskrcFile)
 		continuation.yield()
-		await store.receive(\.taskrcFetchRequested)
+		await store.receive(\.pairingChanged)
 		await store.receive(\.taskrcLoaded) {
 			$0.isTaskrcHintPresented = false
 			$0.taskrc?.url = taskrcFile
