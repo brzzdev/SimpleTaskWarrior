@@ -143,16 +143,11 @@ private func firstChange(in changes: AsyncStream<Void>, orAfter timeout: Duratio
 }
 
 /// Yields when any of `files` is written, renamed or deleted. The CLI's `task config` and
-/// `task context` write in place, and an editor's atomic save arrives as a delete. A symlink is
-/// watched as well as its target, since pointing it somewhere new writes nothing to the target.
+/// `task context` write in place, and an editor's atomic save arrives as a delete.
 private func changes(to files: [URL]) -> AsyncStream<Void> {
 	AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
-		let sources = files.flatMap { file in
-			let path = file.path(percentEncoded: false)
-			let isSymlink = (try? file.resourceValues(forKeys: [.isSymbolicLinkKey]))?
-				.isSymbolicLink ?? false
-			let modes = isSymlink ? [O_EVTONLY, O_EVTONLY | O_SYMLINK] : [O_EVTONLY]
-			return modes.compactMap { watch(path, mode: $0) { continuation.yield() } }
+		let sources = files.compactMap { file in
+			watch(file.path(percentEncoded: false)) { continuation.yield() }
 		}
 		continuation.onTermination = { _ in
 			for source in sources {
@@ -162,14 +157,13 @@ private func changes(to files: [URL]) -> AsyncStream<Void> {
 	}
 }
 
-/// A source calling `changed` when the file at `path`, opened with `mode`, is written, renamed or
-/// deleted, or nil when it can't be opened.
+/// A source calling `changed` when the file at `path` is written, renamed or deleted, or nil when
+/// it can't be opened.
 private func watch(
 	_ path: String,
-	mode: Int32,
 	changed: @escaping @Sendable () -> Void,
 ) -> (any DispatchSourceFileSystemObject)? {
-	let descriptor = open(path, mode)
+	let descriptor = open(path, O_EVTONLY)
 	guard descriptor >= 0 else {
 		return nil
 	}
