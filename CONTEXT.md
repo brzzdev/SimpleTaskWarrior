@@ -5,7 +5,7 @@ A native macOS client for Taskwarrior 3 data, where each window works on one rep
 ## Language
 
 **Replica**:
-One Taskwarrior 3 data store: the TaskChampion database directory that `TASKDATA` points at. A window shows exactly one.
+One Taskwarrior 3 data store: the TaskChampion database directory that `TASKDATA` points at. A window shows exactly one, and a Replica shows in at most one window.
 _Avoid_: File, document, database, task list
 
 **Taskrc**:
