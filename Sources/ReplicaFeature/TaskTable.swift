@@ -268,7 +268,12 @@ struct TaskTable: View {
 				}
 				.customizationID("until")
 				TableColumnForEach(store.udaColumns) { uda in
-					TableColumn(Text(verbatim: uda.label), sortUsing: TaskSort(.uda(uda.name))) { row in
+					// Descending first where `values` lists the order, so the first click shows the list as
+					// written, while each direction still sorts as the CLI's `<name>-` and `<name>+` do.
+					TableColumn(
+						Text(verbatim: uda.label),
+						sortUsing: TaskSort(.uda(uda.name), order: uda.values.isEmpty ? .forward : .reverse),
+					) { row in
 						udaText(row.task.udas[uda.name])
 					}
 					.customizationID("uda.\(uda.name)")

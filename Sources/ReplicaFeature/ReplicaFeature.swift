@@ -119,6 +119,7 @@ public struct ReplicaFeature {
 		case taskrcLoaded(TaskrcClient.Loaded)
 		case taskrcSaveFailed(TaskrcSaveFailure)
 		case tasksLoaded([StoredTask])
+		case timerTicked
 		case tryAgainButtonTapped
 		case useTaskwarriorDefaultsButtonTapped
 	}
@@ -129,6 +130,7 @@ public struct ReplicaFeature {
 	}
 
 	@Dependency(\.bookmarkClient) var bookmarkClient
+	@Dependency(\.continuousClock) var clock
 	@Dependency(\.date.now) var now
 	@Dependency(\.replicaClient) var replicaClient
 	@Dependency(\.taskrcClient) var taskrcClient
@@ -166,15 +168,24 @@ public struct ReplicaFeature {
 				)
 
 			case .fetchRequested:
-				return .run { [bookmark = state.bookmark, bookmarkClient, replicaClient] send in
-					let directory = try bookmarkClient.resolve(bookmark)
-					await send(.directoryResolved(directory))
-					for try await tasks in replicaClient.tasks(directory) {
-						await send(.tasksLoaded(tasks))
-					}
-				} catch: { error, send in
-					await send(.openFailed(error.localizedDescription))
-				}
+				return .merge(
+					.run { [bookmark = state.bookmark, bookmarkClient, replicaClient] send in
+						let directory = try bookmarkClient.resolve(bookmark)
+						await send(.directoryResolved(directory))
+						for try await tasks in replicaClient.tasks(directory) {
+							await send(.tasksLoaded(tasks))
+						}
+					} catch: { error, send in
+						await send(.openFailed(error.localizedDescription))
+					},
+					// Urgency moves with the clock too, as due dates near and `scheduled` and `wait` pass,
+					// while the Replica may not change for hours.
+					.run { [clock] send in
+						for await _ in clock.timer(interval: rankInterval) {
+							await send(.timerTicked)
+						}
+					},
+				)
 
 			case let .fileChosen(file, .grant(include, resolved)):
 				state.fileImporter = nil
@@ -230,6 +241,10 @@ public struct ReplicaFeature {
 
 			case let .tasksLoaded(tasks):
 				state.storedTasks = tasks
+				updateRows(&state)
+				return .none
+
+			case .timerTicked:
 				updateRows(&state)
 				return .none
 
@@ -335,6 +350,9 @@ public struct ReplicaFeature {
 		)
 	}
 }
+
+/// How often an open window ranks its tasks again.
+private let rankInterval = Duration.seconds(60)
 
 public struct ReplicaView: View {
 	@Bindable var store: StoreOf<ReplicaFeature>

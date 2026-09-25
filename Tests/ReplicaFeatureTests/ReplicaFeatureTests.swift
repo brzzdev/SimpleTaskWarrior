@@ -213,6 +213,7 @@ struct ReplicaFeatureTests {
 			$0.bookmarkClient.changes = { .finished }
 			$0.bookmarkClient.grants = { [:] }
 			$0.bookmarkClient.resolve = { _ in directory }
+			$0.continuousClock = TestClock()
 			$0.date.now = now
 			$0.replicaClient.tasks = { _ in tasks }
 			$0.taskrcClient.load = { _, _, _ in .finished }
@@ -250,7 +251,53 @@ struct ReplicaFeatureTests {
 		}
 
 		continuation.finish()
-		await task.finish()
+		await task.cancel()
+	}
+
+	@Test
+	func ranksTasksAgainEveryMinute() async {
+		let (tasks, continuation) = AsyncThrowingStream<[StoredTask], any Error>.makeStream()
+		let clock = TestClock()
+		let time = LockIsolated(now)
+		let store = TestStore(initialState: ReplicaFeature.State(bookmark: Data())) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.bookmarkClient.changes = { .finished }
+			$0.bookmarkClient.grants = { [:] }
+			$0.bookmarkClient.resolve = { _ in replicaDirectory }
+			$0.continuousClock = clock
+			$0.date = DateGenerator { time.value }
+			$0.replicaClient.tasks = { _ in tasks }
+			$0.taskrcClient.load = { _, _, _ in .finished }
+			$0.timeZone = .gmt
+		}
+		let call = storedTask(
+			0,
+			"Call the bank",
+			workingSetID: 1,
+			["scheduled": String(Int(now.timeIntervalSince1970) + 30)],
+		)
+
+		let task = await store.send(.fetchRequested)
+		await store.receive(\.directoryResolved) {
+			$0.directory = replicaDirectory
+		}
+		continuation.yield([call])
+		await store.receive(\.tasksLoaded) {
+			$0.rows = try [row(call)]
+			$0.storedTasks = [call]
+		}
+
+		// Past `scheduled`, with nothing committed to the Replica.
+		time.setValue(now.addingTimeInterval(60))
+		await clock.advance(by: .seconds(60))
+		await store.receive(\.timerTicked) {
+			$0.highestUrgency = 5
+			$0.rows[id: UUID(0)]?.urgency = 5
+		}
+
+		continuation.finish()
+		await task.cancel()
 	}
 
 	@Test
