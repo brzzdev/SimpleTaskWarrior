@@ -53,15 +53,45 @@ struct TaskrcTests {
 				Taskrc.Problem(
 					.notFound(path: "/missing.rc", unsetVariables: ["UNSET"]),
 					at: Taskrc.Location(file: "/rc/taskrc", line: 1),
+					include: Taskrc.Include(file: "/rc/taskrc", line: "include $UNSET/missing.rc"),
 				),
 				Taskrc.Problem(
 					.unreadable(path: "/etc/private.rc", unsetVariables: []),
 					at: Taskrc.Location(file: "/rc/taskrc", line: 2),
+					include: Taskrc.Include(file: "/rc/taskrc", line: "include /etc/private.rc"),
 				),
 				Taskrc.Problem(
 					.notFound(path: "/home/fixture/.config/task/holidays.en-GB.rc", unsetVariables: []),
 					at: Taskrc.Location(file: "/rc/taskrc", line: 3),
+					include: Taskrc.Include(
+						file: "/rc/taskrc",
+						line: "include ~/.config/task/holidays.en-GB.rc",
+					),
 				),
+			],
+		)
+	}
+
+	@Test
+	func includeIsReadForItsLineInTheFileItWasReadAt() {
+		let files = [
+			"/home/fixture/extra.rc": "include nested.rc",
+			"/rc/taskrc": "include ~/extra.rc  # mine",
+		]
+		var includes: [Taskrc.Include?] = []
+		_ = Taskrc(path: "/rc/taskrc", environment: .fixture) { path, include throws(Taskrc.ReadError) in
+			includes.append(include)
+			let realPath = path == "/home/fixture/extra.rc" ? "/dotfiles/extra.rc" : path
+			return Taskrc.File(contents: files[path] ?? "", realPath: realPath)
+		}
+
+		// The nested line is kept against the path its file was read at, not the one it resolves
+		// against.
+		#expect(
+			includes == [
+				nil,
+				Taskrc.Include(file: "/rc/taskrc", line: "include ~/extra.rc"),
+				Taskrc.Include(file: "/home/fixture/extra.rc", line: "include nested.rc"),
 			],
 		)
 	}
@@ -98,6 +128,7 @@ struct TaskrcTests {
 				Taskrc.Problem(
 					.notFound(path: "/rc/dakr-256.theme", unsetVariables: []),
 					at: Taskrc.Location(file: "/rc/taskrc", line: 4),
+					include: Taskrc.Include(file: "/rc/taskrc", line: "include dakr-256.theme"),
 				),
 			],
 		)
@@ -226,7 +257,7 @@ struct TaskrcTests {
 		realPaths: [String: String] = [:],
 		unreadable: Set<String> = [],
 	) -> Taskrc {
-		Taskrc(path: "/rc/taskrc", environment: .fixture) { path throws(Taskrc.ReadError) in
+		Taskrc(path: "/rc/taskrc", environment: .fixture) { path, _ throws(Taskrc.ReadError) in
 			guard !unreadable.contains(path) else {
 				throw .unreadable
 			}

@@ -48,6 +48,7 @@ let package = Package(
 		.target(
 			name: "BookmarkClient",
 			dependencies: [
+				"Taskrc",
 				.product(name: "ComposableArchitecture", package: "swift-composable-architecture"),
 			],
 		),
@@ -131,6 +132,8 @@ let package = Package(
 				"Models",
 				"ReplicaClient",
 				"ReplicaFeature",
+				"Taskrc",
+				"TaskrcClient",
 				"TestSupport",
 				.product(name: "ComposableArchitecture", package: "swift-composable-architecture"),
 			],

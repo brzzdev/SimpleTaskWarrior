@@ -92,7 +92,7 @@ struct DateInputTests {
 
 	/// A Taskrc of `contents` over TW's defaults.
 	private func taskrc(_ contents: String) -> Taskrc {
-		Taskrc(path: "/taskrc", environment: .fixture) { path throws(Taskrc.ReadError) in
+		Taskrc(path: "/taskrc", environment: .fixture) { path, _ throws(Taskrc.ReadError) in
 			Taskrc.File(contents: contents, realPath: path)
 		}
 	}

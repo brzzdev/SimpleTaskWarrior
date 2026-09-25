@@ -1,12 +1,20 @@
 // Parses a Taskrc the way Taskwarrior 3.5 does, over its compiled-in defaults.
 import Darwin
-import Foundation
+public import Foundation
 
 /// A parsed Taskrc: TW's compiled-in defaults, overlaid by the Taskrc and the files it includes,
 /// read through the active Context.
 ///
 /// Where TW stops at the first error, this reports every problem and keeps the rest of the file.
 public struct Taskrc: Equatable, Sendable {
+	/// TW refuses a file nested deeper than this, counting the Taskrc as 1.
+	public static let maximumIncludeDepth = 10
+
+	/// TW's compiled-in defaults alone, which the CLI runs on without a Taskrc.
+	public static let defaults = Self(
+		parser: Parser(environment: .live) { _, _ throws(ReadError) in throw .notFound },
+	)
+
 	/// The active Context's write modifications, which new tasks take as defaults.
 	public var contextWrite: ContextWrite
 	public var problems: [Problem]
@@ -19,19 +27,24 @@ public struct Taskrc: Equatable, Sendable {
 	/// Keys set only as `context.<active>.rc.<key>`, which TW reads by name but never enumerates.
 	private var contextOnlyValues: [String: String]
 
-	/// Parses the Taskrc at `path`, an absolute path, reading it and its includes with `readFile`.
+	/// Parses the Taskrc at `path`, an absolute path, reading it and its includes with `readFile`,
+	/// which is told the `include` line it reads for, or nil for the Taskrc itself.
 	public init(
 		path: String,
 		environment: Environment,
-		readFile: @escaping (_ path: String) throws(ReadError) -> File,
+		readFile: @escaping (_ path: String, _ include: Include?) throws(ReadError) -> File,
 	) {
 		var parser = Parser(environment: environment, readFile: readFile)
-		parser.parse(taskwarriorDefaults, file: nil)
 		do throws(ReadError) {
-			try parser.load(path, from: nil, depth: 1)
+			try parser.load(path, for: nil, at: nil, depth: 1)
 		} catch {
 			parser.problems.append(Problem(error.kind(path: path, unsetVariables: []), at: nil))
 		}
+		self.init(parser: parser)
+	}
+
+	/// Reads what `parser` parsed.
+	private init(parser: Parser) {
 		let configuration = Configuration(entries: parser.entries)
 		contextOnlyValues = configuration.contextOnlyValues()
 		contextWrite = ContextWrite(configuration)
@@ -104,6 +117,38 @@ extension Taskrc {
 			self.contents = contents
 			self.realPath = realPath
 		}
+
+		/// Reads the file at `url`.
+		public init(reading url: URL) throws(ReadError) {
+			let data: Data
+			do {
+				data = try Data(contentsOf: url)
+			} catch CocoaError.fileReadNoSuchFile {
+				throw .notFound
+			} catch {
+				throw .unreadable
+			}
+			// Decoded by hand, since `String(contentsOf:encoding:)` drops a BOM the parser must handle.
+			self.init(
+				contents: String(decoding: data, as: UTF8.self),
+				realPath: url.resolvingSymlinksInPath().path(percentEncoded: false),
+			)
+		}
+	}
+
+	/// An `include` line, which a grant of access to the file it names is kept against: the line
+	/// rather than the path it expands to, so the grant holds where the app's expansion differs from
+	/// the CLI's.
+	public struct Include: Codable, Hashable, Sendable {
+		/// The path the including file was read at.
+		public var file: String
+		/// The line as it's written, without a comment or surrounding whitespace.
+		public var line: String
+
+		public init(file: String, line: String) {
+			self.file = file
+			self.line = line
+		}
 	}
 
 	public struct Location: Equatable, Sendable {
@@ -133,11 +178,14 @@ extension Taskrc {
 			case unsetVariables([String], key: String)
 		}
 
+		/// The `include` line naming a file that couldn't be read.
+		public var include: Include?
 		public var kind: Kind
 		/// The line that caused it, or nil when the Taskrc itself can't be read.
 		public var location: Location?
 
-		public init(_ kind: Kind, at location: Location?) {
+		public init(_ kind: Kind, at location: Location?, include: Include? = nil) {
+			self.include = include
 			self.kind = kind
 			self.location = location
 		}
@@ -146,6 +194,20 @@ extension Taskrc {
 	public enum ReadError: Error {
 		case notFound
 		case unreadable
+	}
+}
+
+extension Taskrc.Problem.Kind {
+	/// Whether TW refuses to run on the Taskrc. It runs on a value that used an unset variable.
+	public var isFatal: Bool {
+		switch self {
+		case .includeNestedTooDeeply, .invalidUDAType, .invalidWeekstart, .malformedLine, .notFound,
+		     .unreadable:
+			true
+
+		case .unsetVariables:
+			false
+		}
 	}
 }
 
@@ -276,7 +338,7 @@ private struct Configuration {
 extension Taskrc.Environment {
 	/// The app's environment, with `HOME` and `USER` set to the real user's rather than the sandbox
 	/// container's, so `~` means what it does to the CLI.
-	public static var live: Self {
+	public static let live: Self = {
 		var variables = ProcessInfo.processInfo.environment
 		if let account = getpwuid(getuid()) {
 			variables["HOME"] = String(cString: account.pointee.pw_dir)
@@ -288,5 +350,5 @@ extension Taskrc.Environment {
 			},
 			variables: variables,
 		)
-	}
+	}()
 }
