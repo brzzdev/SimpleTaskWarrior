@@ -13,7 +13,7 @@ import TestSupport
 struct ReplicaFeatureTests {
 	@Test
 	func bookmarkChangesFromAnotherWindowReloadTheTaskrc() async {
-		let (changes, changed) = AsyncStream<Void>.makeStream()
+		let (changes, continuation) = AsyncStream<Void>.makeStream()
 		let pairedTaskrc = LockIsolated<URL?>(nil)
 		let store = TestStore(initialState: ReplicaFeature.State(bookmark: Data())) {
 			ReplicaFeature()
@@ -35,13 +35,14 @@ struct ReplicaFeatureTests {
 		}
 
 		pairedTaskrc.setValue(taskrcFile)
-		changed.yield()
+		continuation.yield()
 		await store.receive(\.bookmarksChanged)
 		await store.receive(\.taskrcLoaded) {
+			$0.isTaskrcHintPresented = false
 			$0.taskrc?.url = taskrcFile
 		}
 
-		changed.finish()
+		continuation.finish()
 		await store.finish()
 	}
 

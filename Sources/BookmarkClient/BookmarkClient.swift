@@ -6,8 +6,8 @@ public import Taskrc
 
 @DependencyClient
 public struct BookmarkClient: Sendable {
-	/// Yields whenever a kept bookmark changes in any window: a Taskrc paired or detached, a grant
-	/// kept, or a stale bookmark re-saved.
+	/// Yields whenever any window pairs or detaches a Taskrc or keeps a grant. A stale bookmark
+	/// re-saved doesn't count, since it resolves where it did before.
 	public var changes: @Sendable () -> AsyncStream<Void> = { .finished }
 	public var create: @Sendable (_ url: URL) throws -> Data
 	/// The kept include grants, by the line each answers. A stale bookmark is re-saved, and one that
@@ -30,9 +30,9 @@ extension BookmarkClient: DependencyKey {
 		changes: {
 			AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
 				let id = UUID()
-				observers.withLock { $0[id] = continuation }
+				changeContinuations.withLock { $0[id] = continuation }
 				continuation.onTermination = { _ in
-					observers.withLock { $0[id] = nil }
+					changeContinuations.withLock { $0[id] = nil }
 				}
 			}
 		},
@@ -55,6 +55,7 @@ extension BookmarkClient: DependencyKey {
 		saveGrant: { file, include in
 			let bookmark = try makeBookmark(file)
 			update { $0.grants[include] = bookmark }
+			notifyChanges()
 		},
 		saveTaskrc: { taskrc, replica in
 			let pairing = try taskrc.map { try Pairing(
@@ -76,6 +77,7 @@ extension BookmarkClient: DependencyKey {
 					break
 				}
 			}
+			notifyChanges()
 		},
 		taskrc: { replica in
 			update { stored -> URL? in
@@ -101,6 +103,9 @@ extension DependencyValues {
 	}
 }
 
+/// Every live `changes` stream, by an id its termination removes it with.
+private let changeContinuations = Mutex<[UUID: AsyncStream<Void>.Continuation]>([:])
+
 /// A security-scoped bookmark on `url`, which it can make only inside the scope of a URL from a
 /// file panel or another bookmark.
 private func makeBookmark(_ url: URL) throws -> Data {
@@ -117,8 +122,14 @@ private func makeBookmark(_ url: URL) throws -> Data {
 	)
 }
 
-/// Every live `changes` stream, by an id its termination removes it with.
-private let observers = Mutex<[UUID: AsyncStream<Void>.Continuation]>([:])
+/// Tells every `changes` stream that a window saved a pairing or grant.
+private func notifyChanges() {
+	changeContinuations.withLock { continuations in
+		for continuation in continuations.values {
+			continuation.yield()
+		}
+	}
+}
 
 /// A Taskrc and the Replica it's paired with, by bookmark on each, so the pairing follows a
 /// Replica that moves and isn't inherited by another later made at its old path.
@@ -172,11 +183,6 @@ private func update<Result>(_ body: (inout Stored) -> Result) -> Result {
 		let result = body(&stored)
 		if stored != old {
 			UserDefaults.standard.set(try? JSONEncoder().encode(stored), forKey: storedKey)
-			observers.withLock { observers in
-				for observer in observers.values {
-					observer.yield()
-				}
-			}
 		}
 		return result
 	}

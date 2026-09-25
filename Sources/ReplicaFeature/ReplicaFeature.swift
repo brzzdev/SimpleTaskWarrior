@@ -192,7 +192,10 @@ public struct ReplicaFeature {
 
 			case let .taskrcLoaded(taskrc):
 				state.taskrc = taskrc
-				if taskrc.url == nil, !state.hasShownTaskrcHint {
+				// Another window may have attached one while this window offered it.
+				if taskrc.url != nil {
+					state.isTaskrcHintPresented = false
+				} else if !state.hasShownTaskrcHint {
 					state.isTaskrcHintPresented = true
 					state.$hasShownTaskrcHint.withLock { $0 = true }
 				}
@@ -267,6 +270,8 @@ public struct ReplicaFeature {
 		guard let directory = state.directory else {
 			return .none
 		}
+		// The save also reaches this window through `bookmarkClient.changes`. Reloading here as well
+		// keeps the reload when a save leaves the bookmarks as they were, and cancels the other.
 		return .concatenate(
 			.run { _ in
 				try save(directory)
@@ -340,9 +345,8 @@ public struct ReplicaView: View {
 		.navigationSubtitle(store.directory?.path(percentEncoded: false) ?? "")
 		.fileImporter(
 			isPresented: Binding($store.fileImporter),
-			// Regular files only: folders and packages aren't `.data`, and the Taskrc and its includes are
-			// files.
-			allowedContentTypes: [.data],
+			// Files, and the symlinks dotfile managers make of them. Folders and packages are neither.
+			allowedContentTypes: [.data, .symbolicLink],
 		) { [fileImporter = store.fileImporter] result in
 			guard let fileImporter, let file = try? result.get() else {
 				return
