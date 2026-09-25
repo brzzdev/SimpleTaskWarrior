@@ -59,15 +59,15 @@ public struct ReplicaFeature {
 			return folder(location) == folder(directory.path(percentEncoded: false)) ? nil : location
 		}
 
+		/// The Taskrc the window runs on: the last one that loaded, or TW's defaults.
+		var runningTaskrc: Taskrc {
+			taskrc?.taskrc ?? .defaults
+		}
+
 		/// The table's binding to `layout.sortOrder`, through the store so the rows re-sort.
 		var sortOrder: [TaskSort] {
 			get { layout.sortOrder }
 			set { $layout.withLock { $0.sortOrder = newValue } }
-		}
-
-		/// The Taskrc the window runs on: the last one that loaded, or TW's defaults.
-		var runningTaskrc: Taskrc {
-			taskrc?.taskrc ?? .defaults
 		}
 
 		/// The file panel that fixes the Taskrc's problem: a grant for an include the app can't read,
@@ -128,7 +128,8 @@ public struct ReplicaFeature {
 		case useTaskwarriorDefaultsButtonTapped
 	}
 
-	/// How a window over the Replica arranges its table and inspector.
+	/// How a window over the Replica arranges its table and inspector. The view binds `columns` and
+	/// `isInspectorPresented` directly, since only a new sort order needs the reducer.
 	struct Layout: Codable, Equatable {
 		var columns = TableColumnCustomization<TaskRow>()
 		var isInspectorPresented = true
@@ -422,7 +423,8 @@ public struct ReplicaView: View {
 					systemImage: "exclamationmark.triangle",
 					description: Text(failure),
 				)
-			} else {
+			} else if store.directory != nil {
+				// Only once `layout` is the Replica's, so the table doesn't draw the default first.
 				TaskTable(store: store)
 					.safeAreaInset(edge: .top, spacing: 0) {
 						banners
