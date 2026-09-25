@@ -100,6 +100,15 @@ public struct TaskDuration: Hashable, Sendable {
 	public init(seconds: Int) {
 		self.seconds = seconds
 	}
+
+	/// Reads a duration as TW stores one, or nil when `stored` isn't one.
+	public init?(stored: String) {
+		let bytes = Array(stored.utf8)
+		guard let (seconds, end) = DurationLiteral.parse(bytes), end == bytes.count else {
+			return nil
+		}
+		self.init(seconds: seconds)
+	}
 }
 
 extension TaskDuration: CustomStringConvertible {

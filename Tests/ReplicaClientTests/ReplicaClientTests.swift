@@ -98,10 +98,12 @@ final class ReplicaClientTests {
 	}
 
 	/// A task `addPendingTask` adds, as the Replica reads it back.
-	private func pendingTask(_ description: String, id: UUID) -> Models.Task {
-		var task = Models.Task(description: description, id: id, status: .pending, workingSetID: 1)
-		task.properties = ["description": description, "status": "pending"]
-		return task
+	private func pendingTask(_ description: String, id: UUID) -> StoredTask {
+		StoredTask(
+			properties: ["description": description, "status": "pending"],
+			uuid: id.uuidString.lowercased(),
+			workingSetID: 1,
+		)
 	}
 
 	/// The engine opens a Replica but never creates one, so this starts from an empty database

@@ -26,6 +26,7 @@ public struct SimpleTaskWarriorApp: App {
 			}
 		}
 		.commands {
+			InspectorCommands()
 			CommandGroup(replacing: .newItem) {
 				OpenReplicaButton()
 				Divider()

@@ -21,13 +21,21 @@ public struct ReplicaFeature {
 		var fileImporter: FileImporter?
 		/// Set once the hint that offers Choose Taskrc… has been shown, in any window.
 		@Shared(.appStorage("hasShownTaskrcHint")) var hasShownTaskrcHint = false
+		/// The highest Urgency in the table, which scales every row's bar.
+		var highestUrgency = 0.0
 		var isTaskrcHintPresented = false
+		/// Every task in the Replica as last read, which the blocked rule and Urgency read.
+		var storedTasks: [StoredTask] = []
+		/// Pending tasks, in `sortOrder`.
+		var rows: IdentifiedArrayOf<TaskRow> = []
 		/// Kept by UUID, so it survives the CLI renumbering tasks.
 		var selection: Set<Models.Task.ID> = []
+		var sortOrder = [TaskSort(.urgency, order: .reverse)]
 		var taskrc: TaskrcClient.Loaded?
 		/// Why the last Taskrc or grant the user chose couldn't be kept.
 		var taskrcSaveFailure: TaskrcSaveFailure?
-		var tasks: IdentifiedArrayOf<Models.Task> = []
+		/// The running Taskrc's UDAs, which the table offers as columns.
+		var udaColumns = UDAColumn.all(in: .defaults)
 
 		/// Whether Grant Access… can fix the Taskrc's problem.
 		public var canGrantAccess: Bool {
@@ -51,6 +59,11 @@ public struct ReplicaFeature {
 				URL(filePath: path, directoryHint: .isDirectory).standardizedFileURL
 			}
 			return folder(location) == folder(directory.path(percentEncoded: false)) ? nil : location
+		}
+
+		/// The Taskrc the window runs on: the last one that loaded, or TW's defaults.
+		var runningTaskrc: Taskrc {
+			taskrc?.taskrc ?? .defaults
 		}
 
 		/// The file panel that fixes the Taskrc's problem: a grant for an include the app can't read,
@@ -105,7 +118,8 @@ public struct ReplicaFeature {
 		case taskrcHintCloseButtonTapped
 		case taskrcLoaded(TaskrcClient.Loaded)
 		case taskrcSaveFailed(TaskrcSaveFailure)
-		case tasksLoaded([Models.Task])
+		case tasksLoaded([StoredTask])
+		case timerTicked
 		case tryAgainButtonTapped
 		case useTaskwarriorDefaultsButtonTapped
 	}
@@ -116,13 +130,20 @@ public struct ReplicaFeature {
 	}
 
 	@Dependency(\.bookmarkClient) var bookmarkClient
+	@Dependency(\.continuousClock) var clock
+	@Dependency(\.date.now) var now
 	@Dependency(\.replicaClient) var replicaClient
 	@Dependency(\.taskrcClient) var taskrcClient
+	@Dependency(\.timeZone) var timeZone
 
 	public var body: some ReducerOf<Self> {
 		BindingReducer()
 		Reduce { state, action in
 			switch action {
+			case .binding(\.sortOrder):
+				sortRows(&state)
+				return .none
+
 			case .binding:
 				return .none
 
@@ -147,15 +168,24 @@ public struct ReplicaFeature {
 				)
 
 			case .fetchRequested:
-				return .run { [bookmark = state.bookmark, bookmarkClient, replicaClient] send in
-					let directory = try bookmarkClient.resolve(bookmark)
-					await send(.directoryResolved(directory))
-					for try await tasks in replicaClient.tasks(directory) {
-						await send(.tasksLoaded(tasks))
-					}
-				} catch: { error, send in
-					await send(.openFailed(error.localizedDescription))
-				}
+				return .merge(
+					.run { [bookmark = state.bookmark, bookmarkClient, replicaClient] send in
+						let directory = try bookmarkClient.resolve(bookmark)
+						await send(.directoryResolved(directory))
+						for try await tasks in replicaClient.tasks(directory) {
+							await send(.tasksLoaded(tasks))
+						}
+					} catch: { error, send in
+						await send(.openFailed(error.localizedDescription))
+					},
+					// Urgency moves with the clock too, as due dates near and `scheduled` and `wait` pass,
+					// while the Replica may not change for hours.
+					.run { [clock] send in
+						for await _ in clock.timer(interval: urgencyInterval) {
+							await send(.timerTicked)
+						}
+					},
+				)
 
 			case let .fileChosen(file, .grant(include, resolved)):
 				state.fileImporter = nil
@@ -195,6 +225,7 @@ public struct ReplicaFeature {
 
 			case let .taskrcLoaded(taskrc):
 				state.taskrc = taskrc
+				updateRows(&state)
 				// Another window may have attached one while this window offered it.
 				if taskrc.url != nil {
 					state.isTaskrcHintPresented = false
@@ -209,12 +240,12 @@ public struct ReplicaFeature {
 				return .none
 
 			case let .tasksLoaded(tasks):
-				state.tasks = IdentifiedArray(
-					uniqueElements: tasks
-						.filter { $0.status == .pending && !$0.isTemplate }
-						.sorted { ($0.workingSetID ?? .max) < ($1.workingSetID ?? .max) },
-				)
-				state.selection.formIntersection(state.tasks.ids)
+				state.storedTasks = tasks
+				updateRows(&state)
+				return .none
+
+			case .timerTicked:
+				updateRows(&state)
 				return .none
 
 			case .tryAgainButtonTapped:
@@ -243,7 +274,7 @@ public struct ReplicaFeature {
 		guard let directory = state.directory else {
 			return .none
 		}
-		return .run { [bookmarkClient, lastGood = state.taskrc?.taskrc ?? .defaults, taskrcClient] send in
+		return .run { [bookmarkClient, lastGood = state.runningTaskrc, taskrcClient] send in
 			// So an include in the Replica folder reads without a grant of its own.
 			let isAccessing = directory.startAccessingSecurityScopedResource()
 			defer {
@@ -261,6 +292,38 @@ public struct ReplicaFeature {
 			}
 		}
 		.cancellable(id: CancelID.taskrc, cancelInFlight: true)
+	}
+
+	/// Ranks the Replica's pending tasks with the Taskrc the window runs on, decoding their UDAs and
+	/// computing their Urgency again, and drops selected tasks that left the table.
+	private func updateRows(_ state: inout State) {
+		let taskrc = state.runningTaskrc
+		let tasks = state.storedTasks.compactMap { Models.Task($0, udaTypes: taskrc.udaTypes) }
+		let blocked = DependencyScan(tasks).blocked
+		let urgencies = UrgencyCoefficients(taskrc).urgencies(of: tasks, at: now, in: timeZone)
+		state.udaColumns = UDAColumn.all(in: taskrc)
+		state.rows = IdentifiedArray(
+			uniqueElements: tasks
+				.filter { $0.status == .pending && !$0.isTemplate }
+				.map { [udaColumns = state.udaColumns] task in
+					TaskRow(
+						isBlocked: blocked.contains(task.id),
+						task: task,
+						udaColumns: udaColumns,
+						urgency: urgencies[task.id] ?? 0,
+					)
+				},
+		)
+		sortRows(&state)
+		state.highestUrgency = state.rows.map(\.urgency).max() ?? 0
+		state.selection.formIntersection(state.rows.ids)
+	}
+
+	/// Sorts the table's rows by `sortOrder`, breaking ties by ID so the order holds still.
+	private func sortRows(_ state: inout State) {
+		state.rows = IdentifiedArray(
+			uniqueElements: state.rows.sorted(using: state.sortOrder + [TaskSort(.id)]),
+		)
 	}
 
 	/// Runs `save` with the Replica's folder, then loads its Taskrc again. A failed save is
@@ -288,8 +351,13 @@ public struct ReplicaFeature {
 	}
 }
 
+/// How often an open window computes its tasks' Urgency again.
+private let urgencyInterval = Duration.seconds(60)
+
 public struct ReplicaView: View {
 	@Bindable var store: StoreOf<ReplicaFeature>
+
+	@SceneStorage("isInspectorPresented") private var isInspectorPresented = true
 
 	/// Where the file panel opens: at the path an include resolved to, or in the home folder, where
 	/// the CLI looks for `.taskrc`.
@@ -331,17 +399,20 @@ public struct ReplicaView: View {
 					description: Text(failure),
 				)
 			} else {
-				Table(store.tasks, selection: $store.selection) {
-					TableColumn("ID") { task in
-						Text(task.workingSetID.map(String.init) ?? "")
-							.monospacedDigit()
+				TaskTable(store: store)
+					.safeAreaInset(edge: .top, spacing: 0) {
+						banners
 					}
-					.width(min: 32, ideal: 40, max: 64)
-					TableColumn("Description", value: \.description)
-				}
-				.safeAreaInset(edge: .top, spacing: 0) {
-					banners
-				}
+					.inspector(isPresented: $isInspectorPresented) {
+						if store.selection.isEmpty {
+							ContentUnavailableView("No Selection", systemImage: "sidebar.trailing")
+						}
+					}
+					.toolbar {
+						Button("Inspector", systemImage: "sidebar.trailing") {
+							isInspectorPresented.toggle()
+						}
+					}
 			}
 		}
 		.navigationTitle(store.directory?.lastPathComponent ?? "")

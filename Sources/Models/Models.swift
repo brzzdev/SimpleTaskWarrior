@@ -39,7 +39,8 @@ public struct Task: Equatable, Identifiable, Sendable {
 	public var udas: [String: UDAValue] = [:]
 	public var until: Date?
 	public var wait: Date?
-	/// The ID `task` shows, absent when the task has left the working set.
+	/// The ID `task` shows, absent when the task has left the working set. A completed or deleted
+	/// task keeps its slot until the CLI's next `gc`, but `task` shows it as 0, so it has none here.
 	public var workingSetID: Int?
 
 	public init(description: String = "", id: UUID, status: Status, workingSetID: Int?) {
@@ -59,6 +60,12 @@ extension Task {
 			self.description = description
 			self.entry = entry
 		}
+	}
+
+	/// Whether this is a Recurrence instance: TW's `+INSTANCE`, which looks for a template UUID under
+	/// either name.
+	public var isInstance: Bool {
+		parent != nil || template != nil
 	}
 
 	/// Whether this is a Recurrence template, which every view and count leaves out, deleted ones
@@ -86,7 +93,7 @@ extension Task {
 		else {
 			return nil
 		}
-		self.init(id: id, status: status, workingSetID: workingSetID)
+		self.init(id: id, status: status, workingSetID: status.isOpen ? workingSetID : nil)
 		self.properties = properties
 		for (key, value) in properties {
 			if let tag = key.dropPrefix("tag_") {
@@ -155,6 +162,31 @@ extension Task {
 	}
 }
 
+/// A task as TaskChampion stores it, before a Taskrc says which of its properties are UDAs.
+public struct StoredTask: Equatable, Sendable {
+	public var properties: [String: String]
+	public var uuid: String
+	public var workingSetID: Int?
+
+	public init(properties: [String: String], uuid: String, workingSetID: Int?) {
+		self.properties = properties
+		self.uuid = uuid
+		self.workingSetID = workingSetID
+	}
+}
+
+extension Task {
+	/// Decodes `stored`, reading the UDAs in `udaTypes`.
+	public init?(_ stored: StoredTask, udaTypes: [String: UDAType]) {
+		self.init(
+			properties: stored.properties,
+			udaTypes: udaTypes,
+			uuid: stored.uuid,
+			workingSetID: stored.workingSetID,
+		)
+	}
+}
+
 public enum Status: String, Sendable {
 	case completed
 	case deleted
@@ -171,8 +203,7 @@ extension Status {
 
 public enum UDAValue: Equatable, Sendable {
 	case date(Date)
-	/// ISO 8601, as TW stores it.
-	case duration(String)
+	case duration(TaskDuration)
 	case numeric(Double)
 	/// A string UDA, or any value that doesn't read as its UDA's type, as stored.
 	case string(String)
@@ -184,7 +215,7 @@ public enum UDAValue: Equatable, Sendable {
 			self = Date(epoch: value).map(Self.date) ?? .string(value)
 
 		case .duration:
-			self = .duration(value)
+			self = TaskDuration(stored: value).map(Self.duration) ?? .string(value)
 
 		case .numeric:
 			self = Double(value).map(Self.numeric) ?? .string(value)
