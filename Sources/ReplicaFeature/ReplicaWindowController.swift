@@ -10,12 +10,16 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 	NSToolbarDelegate, NSWindowDelegate
 {
 	private var fetch: _Concurrency.Task<Void, Never>?
-	private var inspectorCollapseObservation: NSKeyValueObservation?
 	private let onClose: @MainActor () -> Void
 	private let store: StoreOf<ReplicaFeature>
 
-	/// A controller for the Replica `bookmark` locates. It calls `onClose` as its window closes.
-	public init(bookmark: Data, onClose: @escaping @MainActor () -> Void) {
+	/// A controller for the Replica `bookmark` locates, which autosaves the layout of its split
+	/// view and table under `autosaveName`. It calls `onClose` as its window closes.
+	public init(
+		autosaveName: String,
+		bookmark: Data,
+		onClose: @escaping @MainActor () -> Void,
+	) {
 		self.onClose = onClose
 		store = Store(initialState: ReplicaFeature.State(bookmark: bookmark)) {
 			ReplicaFeature()
@@ -42,9 +46,15 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 		let split = NSSplitViewController()
 		split.splitViewItems = [
 			NSSplitViewItem(sidebarWithViewController: sidebarController),
-			NSSplitViewItem(viewController: hostingController(ReplicaContentView(store: store))),
+			NSSplitViewItem(
+				viewController: hostingController(
+					ReplicaContentView(autosaveName: autosaveName, store: store),
+				),
+			),
 			inspector,
 		]
+		// Keeps the divider positions and whether the inspector is collapsed.
+		split.splitView.autosaveName = autosaveName
 		window.contentViewController = split
 		// Setting the content view controller sizes the window to its content, which has no size yet.
 		window.setContentSize(windowSize)
@@ -62,28 +72,6 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 			}
 			window.subtitle = store.directory?.path(percentEncoded: false) ?? ""
 			window.title = store.directory?.lastPathComponent ?? ""
-		}
-		observe { [weak self, weak inspector] in
-			guard let self, let inspector else {
-				return
-			}
-			let isCollapsed = !store.layout.isInspectorPresented
-			if inspector.isCollapsed != isCollapsed {
-				inspector.isCollapsed = isCollapsed
-			}
-		}
-		// The toolbar button, the View menu and dragging the divider all collapse the inspector.
-		inspectorCollapseObservation = inspector.observe(\.isCollapsed) { [weak self] inspector, _ in
-			guard let self else {
-				return
-			}
-			let isPresented = !inspector.isCollapsed
-			MainActor.assumeIsolated {
-				guard self.store.layout.isInspectorPresented != isPresented else {
-					return
-				}
-				self.store.$layout.withLock { $0.isInspectorPresented = isPresented }
-			}
 		}
 		fetch = _Concurrency.Task { [store] in
 			await store.send(.fetchRequested).finish()

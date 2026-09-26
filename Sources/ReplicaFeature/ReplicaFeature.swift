@@ -1,4 +1,4 @@
-// One Replica as its window shows it: the tasks, the Taskrc it runs on and the table layout.
+// One Replica as its window shows it: the tasks, the Taskrc it runs on and their order.
 import BookmarkClient
 import ComposableArchitecture
 import Foundation
@@ -24,14 +24,14 @@ struct ReplicaFeature {
 		/// The highest Urgency in the table, which scales every row's bar.
 		var highestUrgency = 0.0
 		var isTaskrcHintPresented = false
-		/// Kept per Replica once its folder resolves, so it outlives the window.
-		@Shared(value: Layout()) var layout
 		/// Every task in the Replica as last read, which the blocked rule and Urgency read.
 		var storedTasks: [StoredTask] = []
-		/// Pending tasks, in `layout.sortOrder`.
+		/// Pending tasks, in `sortOrder`.
 		var rows: IdentifiedArrayOf<TaskRow> = []
 		/// Kept by UUID, so it survives the CLI renumbering tasks.
 		var selection: Set<Models.Task.ID> = []
+		/// The table's sort, which the table autosaves per Replica and reports once it restores.
+		var sortOrder = [TaskSort(.urgency, order: .reverse)]
 		var taskrc: TaskrcClient.Loaded?
 		/// Why the last Taskrc or grant the user chose couldn't be kept.
 		var taskrcSaveFailure: TaskrcSaveFailure?
@@ -115,8 +115,8 @@ struct ReplicaFeature {
 		case grantAccessButtonTapped
 		case openFailed(String)
 		case pairingChanged
-		/// The sort order changed, in this window or another on the Replica.
-		case sortOrderChanged
+		/// A column header was clicked, or the table restored the Replica's sort.
+		case sortOrderChanged([TaskSort])
 		case taskrcHintCloseButtonTapped
 		case taskrcLoaded(TaskrcClient.Loaded)
 		case taskrcSaveFailed(TaskrcSaveFailure)
@@ -124,14 +124,6 @@ struct ReplicaFeature {
 		case timerTicked
 		case tryAgainButtonTapped
 		case useTaskwarriorDefaultsButtonTapped
-	}
-
-	/// How a window over the Replica arranges its table and inspector. Every window on the Replica
-	/// shares it, so a new sort order reaches the reducer as `sortOrderChanged` from each of them.
-	struct Layout: Codable, Equatable {
-		var columns = TableColumnCustomization<TaskRow>()
-		var isInspectorPresented = true
-		var sortOrder = [TaskSort(.urgency, order: .reverse)]
 	}
 
 	private enum CancelID {
@@ -159,7 +151,6 @@ struct ReplicaFeature {
 
 			case let .directoryResolved(directory):
 				state.directory = directory
-				state.$layout = Shared(wrappedValue: Layout(), .appStorage(layoutKey(for: directory)))
 				// Another window pairing, detaching or granting changes this window's Taskrc too. Subscribed
 				// here rather than in the effect, so the subscription exists before the first load reads the
 				// pairing and a change between the two can't be missed.
@@ -226,7 +217,8 @@ struct ReplicaFeature {
 			case .pairingChanged:
 				return loadTaskrc(for: state)
 
-			case .sortOrderChanged:
+			case let .sortOrderChanged(sortOrder):
+				state.sortOrder = sortOrder
 				sortRows(&state)
 				return .none
 
@@ -330,10 +322,10 @@ struct ReplicaFeature {
 		state.selection.formIntersection(state.rows.ids)
 	}
 
-	/// Sorts the table's rows by `layout.sortOrder`, breaking ties by ID so the order holds still.
+	/// Sorts the table's rows by `sortOrder`, breaking ties by ID so the order holds still.
 	private func sortRows(_ state: inout State) {
 		state.rows = IdentifiedArray(
-			uniqueElements: state.rows.sorted(using: state.layout.sortOrder + [TaskSort(.id)]),
+			uniqueElements: state.rows.sorted(using: state.sortOrder + [TaskSort(.id)]),
 		)
 	}
 
@@ -362,21 +354,15 @@ struct ReplicaFeature {
 	}
 }
 
-/// The user defaults key of the layout of the Replica in `directory`. Keyed on the folder rather
-/// than the bookmark, since opening the folder again makes a new bookmark, so a moved Replica
-/// starts over. Its dots are percent-encoded, since a key with one can't be observed through
-/// key-value observing, and its percent signs first, so two folders never share a key.
-func layoutKey(for directory: URL) -> String {
-	let path = standardizedFolder(directory).path(percentEncoded: false)
-	return "layout:" + path.replacing("%", with: "%25").replacing(".", with: "%2E")
-}
-
 /// How often an open window computes its tasks' Urgency again.
 private let urgencyInterval = Duration.seconds(60)
 
 /// The banners over the Replica's task table, or why the Replica can't open, which the window's
 /// content hosts until it moves to AppKit.
 struct ReplicaContentView: View {
+	/// The Replica's own name, which the table autosaves its layout under.
+	let autosaveName: String
+
 	@Bindable var store: StoreOf<ReplicaFeature>
 
 	/// Where the file panel opens: at the path an include resolved to, or in the home folder, where
@@ -412,9 +398,8 @@ struct ReplicaContentView: View {
 					systemImage: "exclamationmark.triangle",
 					description: Text(failure),
 				)
-			} else if store.directory != nil {
-				// Only once `layout` is the Replica's, so the table doesn't draw the default first.
-				TaskTable(store: store)
+			} else {
+				TaskTable(autosaveName: autosaveName, store: store)
 					.safeAreaInset(edge: .top, spacing: 0) {
 						banners
 					}

@@ -1,8 +1,6 @@
-// The task table: its rows, columns and sort order.
-import ComposableArchitecture
+// What the task table shows: its rows, columns and sort order.
 public import Foundation
 public import Models
-import SwiftUI
 import Taskrc
 
 /// A pending task as the table shows it, ranked with the window's Taskrc.
@@ -124,7 +122,7 @@ struct UDAColumn: Equatable, Identifiable {
 	}
 }
 
-enum TaskColumn: Codable, Hashable {
+enum TaskColumn: Hashable {
 	case age
 	case description
 	case due
@@ -136,16 +134,63 @@ enum TaskColumn: Codable, Hashable {
 	case until
 	case urgency
 	case wait
+
+	/// The table column's identifier, which its autosaved layout and sort descriptors key on.
+	var identifier: String {
+		switch self {
+		case .age: "age"
+		case .description: "description"
+		case .due: "due"
+		case .id: "id"
+		case .project: "project"
+		case .scheduled: "scheduled"
+		case .tags: "tags"
+		case let .uda(name): udaIdentifierPrefix + name
+		case .until: "until"
+		case .urgency: "urgency"
+		case .wait: "wait"
+		}
+	}
+
+	init?(identifier: String) {
+		if identifier.hasPrefix(udaIdentifierPrefix) {
+			self = .uda(String(identifier.dropFirst(udaIdentifierPrefix.count)))
+			return
+		}
+		let builtIn: [Self] = [
+			.age, .description, .due, .id, .project, .scheduled, .tags, .until, .urgency, .wait,
+		]
+		guard let column = builtIn.first(where: { $0.identifier == identifier }) else {
+			return nil
+		}
+		self = column
+	}
 }
 
+private let udaIdentifierPrefix = "uda."
+
 /// Sorts the table by one column. Empty values sort last in either direction.
-struct TaskSort: Codable, Hashable, SortComparator {
+struct TaskSort: Hashable, SortComparator {
 	var column: TaskColumn
 	var order: SortOrder
+
+	/// The descriptor the table's header shows this sort as.
+	var descriptor: NSSortDescriptor {
+		NSSortDescriptor(key: column.identifier, ascending: order == .forward)
+	}
 
 	init(_ column: TaskColumn, order: SortOrder = .forward) {
 		self.column = column
 		self.order = order
+	}
+
+	/// The sort a table header's `descriptor` stands for, or nil for a column the table doesn't
+	/// know.
+	init?(_ descriptor: NSSortDescriptor) {
+		guard let key = descriptor.key, let column = TaskColumn(identifier: key) else {
+			return nil
+		}
+		self.init(column, order: descriptor.ascending ? .forward : .reverse)
 	}
 
 	func compare(_ lhs: TaskRow, _ rhs: TaskRow) -> ComparisonResult {
@@ -191,167 +236,5 @@ private enum SortKey {
 		case let (.text(lhs), .text(rhs)):
 			lhs.localizedStandardCompare(rhs)
 		}
-	}
-}
-
-struct TaskTable: View {
-	@Bindable var store: StoreOf<ReplicaFeature>
-
-	var body: some View {
-		Table(
-			store.rows,
-			selection: $store.selection,
-			sortOrder: Binding(store.$layout.sortOrder),
-			columnCustomization: Binding(store.$layout.columns),
-		) {
-			TableColumn("ID", sortUsing: TaskSort(.id)) { row in
-				Text(row.task.workingSetID.map(String.init) ?? "")
-					.monospacedDigit()
-			}
-			.width(min: 32, ideal: 40, max: 64)
-			.customizationID("id")
-			TableColumn("Urgency", sortUsing: TaskSort(.urgency, order: .reverse)) { row in
-				UrgencyCell(highest: store.highestUrgency, urgency: row.urgency)
-			}
-			.width(min: 48, ideal: 64, max: 96)
-			.customizationID("urgency")
-			TableColumn("Description", sortUsing: TaskSort(.description)) { row in
-				DescriptionCell(row: row)
-			}
-			.customizationID("description")
-			.disabledCustomizationBehavior(.visibility)
-			TableColumn("Project", sortUsing: TaskSort(.project)) { row in
-				Text(verbatim: row.task.project ?? "")
-			}
-			.customizationID("project")
-			TableColumn("Tags", sortUsing: TaskSort(.tags)) { row in
-				Text(verbatim: row.tags)
-			}
-			.customizationID("tags")
-			TableColumn("Due", sortUsing: TaskSort(.due)) { row in
-				dateText(row.task.due)
-			}
-			.customizationID("due")
-			// Grouped because a table takes at most ten columns at one level.
-			Group {
-				TableColumn("Age", sortUsing: TaskSort(.age)) { row in
-					Text(
-						row.task.entry?.formatted(.relative(presentation: .numeric, unitsStyle: .narrow))
-							?? "",
-					)
-				}
-				.customizationID("age")
-				TableColumn("Scheduled", sortUsing: TaskSort(.scheduled)) { row in
-					dateText(row.task.scheduled)
-				}
-				.customizationID("scheduled")
-				TableColumn("Wait", sortUsing: TaskSort(.wait)) { row in
-					dateText(row.task.wait)
-				}
-				.customizationID("wait")
-				TableColumn("Until", sortUsing: TaskSort(.until)) { row in
-					dateText(row.task.until)
-				}
-				.customizationID("until")
-				TableColumnForEach(store.udaColumns) { uda in
-					// Descending first where `values` lists the order, so the first click shows the list as
-					// written, while each direction still sorts as the CLI's `<name>-` and `<name>+` do.
-					TableColumn(
-						Text(verbatim: uda.label),
-						sortUsing: TaskSort(.uda(uda.name), order: uda.values.isEmpty ? .forward : .reverse),
-					) { row in
-						udaText(row.task.udas[uda.name])
-					}
-					.customizationID("uda.\(uda.name)")
-				}
-			}
-			.defaultVisibility(.hidden)
-		}
-		// Observed rather than sent from the binding, since another window on the Replica sorts this
-		// one's rows too.
-		.onChange(of: store.layout.sortOrder) {
-			store.send(.sortOrderChanged)
-		}
-	}
-}
-
-/// The description, with a dot before an active task and markers after it.
-private struct DescriptionCell: View {
-	let row: TaskRow
-
-	var body: some View {
-		HStack(spacing: 6) {
-			if row.task.start != nil {
-				Circle()
-					.fill(.green)
-					.frame(width: 7, height: 7)
-					.accessibilityLabel("Active")
-			}
-			Text(verbatim: row.task.description)
-				.lineLimit(1)
-			if row.isBlocked {
-				Text("Blocked")
-					.font(.caption)
-					.foregroundStyle(.red)
-			}
-			if !row.task.annotations.isEmpty {
-				Label("\(row.task.annotations.count)", systemImage: "text.bubble")
-					.font(.caption)
-					.foregroundStyle(.secondary)
-					.accessibilityLabel(Text("^[\(row.task.annotations.count) annotation](inflect: true)"))
-			}
-			if row.task.isInstance {
-				Text(verbatim: "↻")
-					.foregroundStyle(.secondary)
-					.accessibilityLabel("Repeats")
-			}
-		}
-	}
-}
-
-/// Urgency to one decimal, over a thin bar scaled to the list's highest. Urgency of 0 or less
-/// draws no bar.
-private struct UrgencyCell: View {
-	let highest: Double
-	let urgency: Double
-
-	var body: some View {
-		Text(urgency, format: .number.precision(.fractionLength(1)))
-			.monospacedDigit()
-			.frame(maxWidth: .infinity, alignment: .trailing)
-			.background(alignment: .bottom) {
-				if urgency > 0 {
-					Capsule()
-						.fill(.tint.opacity(0.4))
-						.frame(height: 2)
-						.scaleEffect(x: urgency / highest, anchor: .leading)
-				}
-			}
-	}
-}
-
-private func dateText(_ date: Date?) -> Text {
-	Text(date?.formatted(date: .numeric, time: .omitted) ?? "")
-}
-
-private func udaText(_ value: UDAValue?) -> Text {
-	switch value {
-	case nil:
-		Text(verbatim: "")
-
-	case let .date(date):
-		dateText(date)
-
-	case let .duration(duration):
-		Text(verbatim: duration.description)
-
-	case let .numeric(number):
-		Text(number, format: .number)
-
-	case let .string(string):
-		Text(verbatim: string)
-
-	case let .uuid(uuid):
-		Text(verbatim: uuid.uuidString.lowercased())
 	}
 }
