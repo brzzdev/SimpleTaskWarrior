@@ -341,6 +341,23 @@ struct WritePlannerTests {
 		#expect(plan.operations.contains(.setValue(id, property: "review", value: "1789913600")))
 	}
 
+	/// `task add` refuses a `default.due` or `default.scheduled` it can't parse, and resolves a
+	/// holiday the app doesn't, so neither may create a task without its date.
+	@Test(arguments: [
+		("default.due", "bogus", DateInputError.invalid),
+		("default.scheduled", "easter", DateInputError.holiday("easter")),
+	])
+	func creatingATaskWithAnUnresolvedDefaultThrows(key: String, text: String, error: DateInputError) {
+		let taskrc = Taskrc(path: "/taskrc", environment: .fixture) { path, _ throws(Taskrc.ReadError) in
+			Taskrc.File(contents: "\(key)=\(text)", realPath: path)
+		}
+		let planner = WritePlanner(taskrc: taskrc, timeZone: .gmt)
+
+		#expect(throws: WritePlanError.unresolvedDefault(key: key, error)) {
+			try planner.plan(.create(UUID(), description: "Alpha"), tasks: [:], at: .now)
+		}
+	}
+
 	@Test
 	func creatingATaskInAContextThatWritesAReservedTagThrows() {
 		let planner = WritePlanner(taskrc: pendingContext, timeZone: .gmt)

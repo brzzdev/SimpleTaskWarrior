@@ -38,7 +38,7 @@ public struct WritePlanner: Sendable {
 				throw .reservedTag(tag)
 			}
 			var draft = Draft(id: id, properties: [:], isNew: true)
-			create(&draft, description: description, at: now, epoch: epoch)
+			try create(&draft, description: description, at: now, epoch: epoch)
 			var plan = WritePlan([draft], epoch: epoch)
 			if !plan.operations.isEmpty {
 				plan.skippedContextWrite = taskrc.contextWrite.skipped
@@ -81,7 +81,13 @@ public struct WritePlanner: Sendable {
 
 	/// What `task add <description>` writes: `Task::validate`'s stamps and defaults, after the
 	/// active Context's `project:` and `+tag` modifications, which the CLI applies as if typed.
-	private func create(_ draft: inout Draft, description: String, at now: Date, epoch: String) {
+	/// Throws where `default.due` or `default.scheduled` doesn't resolve.
+	private func create(
+		_ draft: inout Draft,
+		description: String,
+		at now: Date,
+		epoch: String,
+	) throws(WritePlanError) {
 		draft.set("description", description)
 		draft.set("entry", epoch)
 		// Stamped here, not only by `operations(modified:)`, so defaults can refer to it.
@@ -94,13 +100,15 @@ public struct WritePlanner: Sendable {
 			draft.set("project", project)
 		}
 		for attribute in ["due", "scheduled"] {
-			guard
-				let text = nonEmpty("default.\(attribute)"),
-				let date = try? dateInput.date(text, at: now)
-			else {
+			let key = "default.\(attribute)"
+			guard let text = nonEmpty(key) else {
 				continue
 			}
-			draft.set(attribute, UDAValue.date(date).stored)
+			do {
+				try draft.set(attribute, UDAValue.date(dateInput.date(text, at: now)).stored)
+			} catch {
+				throw .unresolvedDefault(key: key, error)
+			}
 		}
 		// Every `uda.<name>…default…` key, as `Task::validate` finds them. A date or duration default
 		// is resolved against the attributes set so far (`due`, `scheduled`, then UDAs by name), where
@@ -308,6 +316,9 @@ public enum WritePlanError: Error, Equatable, Sendable {
 	case reservedTag(String)
 	/// The task would depend on itself.
 	case selfDependency(Task.ID)
+	/// A `default.due` or `default.scheduled` the app can't resolve: `task add` refuses invalid input
+	/// and resolves a holiday, so a New Task without the date would differ either way.
+	case unresolvedDefault(key: String, DateInputError)
 }
 
 public struct WritePlan: Equatable, Sendable {
