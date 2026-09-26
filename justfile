@@ -111,7 +111,10 @@ ensure-generated: engine
 # what `task` reports at `now`: `export.json`, and the UUIDs it counts as
 # blocked, blocking and templates. TW stamps tasks with the time, so every
 # recording differs.
-# Record the golden Taskrc, Models and date input fixtures from real `task` 3.5
+#
+# Each write fixture's `cases.sh` runs one write per case, which
+# `WritePlannerTests` plans against what `task` committed for it.
+# Record the golden Taskrc, Models, write and date input fixtures from real `task` 3.5
 fixtures:
 	#!/usr/bin/env bash
 	set -euo pipefail
@@ -175,28 +178,28 @@ fixtures:
 	# Replica's properties before and after, and the operations the write committed, which
 	# `WritePlannerTests` plans the same write against. A case that straddles a second is retried,
 	# so every stamp the case makes is `now`, or the recording fails.
+	properties() {
+		sqlite3 "$replica/taskchampion.sqlite3" \
+			"SELECT coalesce(json_group_object(uuid, json(data)), '{}') FROM tasks"
+	}
+	act() {
+		if [ -d "$replica" ]; then properties; else echo '{}'; fi > "$scratch/before"
+		task "$@"
+		properties > "$scratch/after"
+		# Everything since the newest Undo point, which the write pushed first.
+		sqlite3 "$replica/taskchampion.sqlite3" "
+			SELECT json_group_array(json(data)) FROM (
+				SELECT data FROM operations
+				WHERE id > (SELECT max(id) FROM operations WHERE data = '\"UndoPoint\"')
+				ORDER BY id
+			)
+		" > "$scratch/operations"
+	}
 	for fixture in "$PWD"/Tests/ModelsTests/WriteFixtures/*/; do
 		replica="$taskdata/writes"
-		properties() {
-			sqlite3 "$replica/taskchampion.sqlite3" \
-				"SELECT coalesce(json_group_object(uuid, json(data)), '{}') FROM tasks"
-		}
-		act() {
-			if [ -d "$replica" ]; then properties; else echo '{}'; fi > "$scratch/before"
-			task "$@"
-			properties > "$scratch/after"
-			# Everything since the newest Undo point, which the write pushed first.
-			sqlite3 "$replica/taskchampion.sqlite3" "
-				SELECT json_group_array(json(data)) FROM (
-					SELECT data FROM operations
-					WHERE id > (SELECT max(id) FROM operations WHERE data = '\"UndoPoint\"')
-					ORDER BY id
-				)
-			" > "$scratch/operations"
-		}
 		source "$fixture/cases.sh"
-		cases="$(declare -F | sed -n 's/^declare -f case_//p')"
-		for case in $cases; do
+		cases=($(declare -F | sed -n 's/^declare -f case_//p'))
+		for case in "${cases[@]}"; do
 			for attempt in {1..5}; do
 				rm -rf "$replica"
 				now="$(date +%s)"
@@ -218,7 +221,7 @@ fixtures:
 				print(json.dumps(recording, indent="\t", sort_keys=True))
 			PYTHON
 		done
-		for case in $cases; do unset -f "case_$case"; done
+		for case in "${cases[@]}"; do unset -f "case_$case"; done
 	done
 
 	# Each line of `DateFixtures/inputs` is one `attribute:value` argument, added to a fresh Replica

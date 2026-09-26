@@ -110,6 +110,19 @@ struct WritePlannerTests {
 	}
 
 	@Test
+	func completingALegacyWaitingTaskCompletesIt() throws {
+		let planner = WritePlanner(taskrc: .defaults, timeZone: .gmt)
+		let id = UUID()
+		let now = Date(timeIntervalSince1970: 1_790_000_000)
+
+		// TW 2 stored `waiting`, which `task done` reads as pending.
+		let plan = try planner.plan(.complete([id]), tasks: [id: ["status": "waiting"]], at: now)
+
+		#expect(plan.operations.contains(.setValue(id, property: "end", value: "1790000000")))
+		#expect(plan.operations.last == .setStatus(id, .completed))
+	}
+
+	@Test
 	func contextWriteReportsWhatItSkips() throws {
 		let recording = try Recording("context/add")
 		let planner = WritePlanner(taskrc: recording.taskrc, timeZone: .gmt)
@@ -278,23 +291,6 @@ private struct Changes: Equatable {
 }
 
 extension WritePlan {
-	fileprivate func changes(from before: [Task.ID: [String: String]]) -> Changes {
-		var changes = Changes()
-		for operation in operations {
-			switch operation {
-			case let .create(id):
-				changes.created.insert(id)
-
-			case let .setStatus(id, status):
-				changes.values[id, default: [:]]["status"] = .some(status.rawValue)
-
-			case let .setValue(id, property, value):
-				changes.values[id, default: [:]][property] = .some(value)
-			}
-		}
-		return changes.dropping(before)
-	}
-
 	/// `tasks` with the plan applied.
 	fileprivate func applied(to tasks: [Task.ID: [String: String]]) -> [Task.ID: [String: String]] {
 		var tasks = tasks
@@ -311,6 +307,23 @@ extension WritePlan {
 			}
 		}
 		return tasks
+	}
+
+	fileprivate func changes(from before: [Task.ID: [String: String]]) -> Changes {
+		var changes = Changes()
+		for operation in operations {
+			switch operation {
+			case let .create(id):
+				changes.created.insert(id)
+
+			case let .setStatus(id, status):
+				changes.values[id, default: [:]]["status"] = .some(status.rawValue)
+
+			case let .setValue(id, property, value):
+				changes.values[id, default: [:]][property] = .some(value)
+			}
+		}
+		return changes.dropping(before)
 	}
 }
 

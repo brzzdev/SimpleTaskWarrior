@@ -32,7 +32,7 @@ public struct WritePlanner: Sendable {
 			}
 			var draft = Draft(id: id, properties: [:], isNew: true)
 			create(&draft, description: description, at: now, epoch: epoch)
-			var plan = WritePlan([draft], now: epoch)
+			var plan = WritePlan([draft], epoch: epoch)
 			if !plan.operations.isEmpty {
 				plan.skippedContextWrite = taskrc.contextWrite.skipped
 			}
@@ -53,26 +53,6 @@ public struct WritePlanner: Sendable {
 		case let .stop(ids):
 			return try plan(ids, tasks: tasks, at: epoch) { $0.stop() }
 		}
-	}
-
-	/// Plans `change` on each task in `ids`, once each, in order.
-	private func plan(
-		_ ids: [Task.ID],
-		tasks: [Task.ID: [String: String]],
-		at epoch: String,
-		change: (inout Draft) -> Void,
-	) throws(WritePlanError) -> WritePlan {
-		var drafts: [Draft] = []
-		var seen: Set<Task.ID> = []
-		for id in ids where seen.insert(id).inserted {
-			guard let properties = tasks[id] else {
-				throw .noSuchTask(id)
-			}
-			var draft = Draft(id: id, properties: properties, isNew: false)
-			change(&draft)
-			drafts.append(draft)
-		}
-		return WritePlan(drafts, now: epoch)
 	}
 
 	/// What `task add <description>` writes: `Task::validate`'s stamps and defaults, after the
@@ -121,6 +101,26 @@ public struct WritePlanner: Sendable {
 
 	private func nonEmpty(_ key: String) -> String? {
 		taskrc[key].flatMap { $0.isEmpty ? nil : $0 }
+	}
+
+	/// Plans `change` on each task in `ids`, once each, in order.
+	private func plan(
+		_ ids: [Task.ID],
+		tasks: [Task.ID: [String: String]],
+		at epoch: String,
+		change: (inout Draft) -> Void,
+	) throws(WritePlanError) -> WritePlan {
+		var drafts: [Draft] = []
+		var seen: Set<Task.ID> = []
+		for id in ids where seen.insert(id).inserted {
+			guard let properties = tasks[id] else {
+				throw .noSuchTask(id)
+			}
+			var draft = Draft(id: id, properties: properties, isNew: false)
+			change(&draft)
+			drafts.append(draft)
+		}
+		return WritePlan(drafts, epoch: epoch)
 	}
 }
 
@@ -172,8 +172,8 @@ public struct WritePlan: Equatable, Sendable {
 	public init() {}
 
 	/// Empty when no draft changed, since a plan that writes nothing needs nothing to hold.
-	fileprivate init(_ drafts: [Draft], now: String) {
-		operations = drafts.flatMap { $0.operations(modified: now) }
+	fileprivate init(_ drafts: [Draft], epoch: String) {
+		operations = drafts.flatMap { $0.operations(modified: epoch) }
 		guard !operations.isEmpty else {
 			return
 		}
@@ -226,37 +226,6 @@ private struct Draft {
 		original = properties
 	}
 
-	/// The changes, stamped with `modified` when there are any.
-	func operations(modified now: String) -> [WritePlan.Operation] {
-		let changed = Set(properties.keys).union(original.keys).filter { properties[$0] != original[$0] }
-		guard !changed.isEmpty else {
-			return []
-		}
-		var operations: [WritePlan.Operation] = isNew ? [.create(id)] : []
-		for property in changed.union(["modified"]).sorted() where property != "status" {
-			let value = property == "modified" ? now : properties[property]
-			operations.append(.setValue(id, property: property, value: value))
-		}
-		if changed.contains("status"), let status = properties["status"].flatMap(Status.init(rawValue:)) {
-			operations.append(.setStatus(id, status))
-		}
-		return operations
-	}
-
-	mutating func read(_ property: String) -> String? {
-		if reads[property] == nil, properties[property] == original[property] {
-			reads[property] = .some(original[property])
-		}
-		return properties[property]
-	}
-
-	/// Sets `property`, or removes it when `value` is nil, having read it: a plan changes a property
-	/// only on the strength of its current value.
-	mutating func set(_ property: String, _ value: String?) {
-		_ = read(property)
-		properties[property] = value
-	}
-
 	mutating func apply(_ edit: TaskEdit) {
 		switch edit {
 		case let .addAnnotation(description, entry):
@@ -290,22 +259,23 @@ private struct Draft {
 		}
 	}
 
-	/// `task done`: only from pending, removing `start`.
-	mutating func complete(at now: String) {
-		guard read("status") == Status.pending.rawValue else {
+	/// `task done`: only from pending, removing `start`. A legacy stored `waiting` is pending too.
+	mutating func complete(at epoch: String) {
+		let status = read("status")
+		guard status == Status.pending.rawValue || status == "waiting" else {
 			return
 		}
-		stampEnd(at: now)
+		stampEnd(at: epoch)
 		set("start", nil)
 		set("status", Status.completed.rawValue)
 	}
 
 	/// `task delete`: from anything but deleted, keeping `start`.
-	mutating func delete(at now: String) {
+	mutating func delete(at epoch: String) {
 		guard read("status") != Status.deleted.rawValue else {
 			return
 		}
-		stampEnd(at: now)
+		stampEnd(at: epoch)
 		set("status", Status.deleted.rawValue)
 	}
 
@@ -319,22 +289,53 @@ private struct Draft {
 		set("status", Status.pending.rawValue)
 	}
 
+	/// The changes, stamped with `modified` when there are any.
+	func operations(modified epoch: String) -> [WritePlan.Operation] {
+		let changed = Set(properties.keys).union(original.keys).filter { properties[$0] != original[$0] }
+		guard !changed.isEmpty else {
+			return []
+		}
+		var operations: [WritePlan.Operation] = isNew ? [.create(id)] : []
+		for property in changed.union(["modified"]).sorted() where property != "status" {
+			let value = property == "modified" ? epoch : properties[property]
+			operations.append(.setValue(id, property: property, value: value))
+		}
+		if changed.contains("status"), let status = properties["status"].flatMap(Status.init(rawValue:)) {
+			operations.append(.setStatus(id, status))
+		}
+		return operations
+	}
+
+	mutating func read(_ property: String) -> String? {
+		if reads[property] == nil, properties[property] == original[property] {
+			reads[property] = .some(original[property])
+		}
+		return properties[property]
+	}
+
+	/// Sets `property`, or removes it when `value` is nil, having read it: a plan changes a property
+	/// only on the strength of its current value.
+	mutating func set(_ property: String, _ value: String?) {
+		_ = read(property)
+		properties[property] = value
+	}
+
+	mutating func setTag(_ tag: String, isPresent: Bool) {
+		setMember(tag, isPresent: isPresent, prefix: "tag_", mirror: "tags")
+	}
+
 	/// `task start`: only when not started, reopening a completed or deleted task.
-	mutating func start(at now: String) {
+	mutating func start(at epoch: String) {
 		guard read("start") == nil else {
 			return
 		}
-		set("start", now)
+		set("start", epoch)
 		markPending()
 	}
 
 	/// `task stop`.
 	mutating func stop() {
 		set("start", nil)
-	}
-
-	mutating func setTag(_ tag: String, isPresent: Bool) {
-		setMember(tag, isPresent: isPresent, prefix: "tag_", mirror: "tags")
 	}
 
 	private mutating func setDependency(_ dependency: Task.ID, isPresent: Bool) {
@@ -364,9 +365,9 @@ private struct Draft {
 		set(mirror, members.isEmpty ? nil : members.joined(separator: ","))
 	}
 
-	private mutating func stampEnd(at now: String) {
+	private mutating func stampEnd(at epoch: String) {
 		if read("end") == nil {
-			set("end", now)
+			set("end", epoch)
 		}
 	}
 }
