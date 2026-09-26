@@ -75,7 +75,11 @@ struct ReplicaFeatureTests {
 		state.selection = [UUID(0), UUID(2)]
 		#expect(state.enabledCommands == [.delete])
 
-		state.write = .running
+		state.isNewTaskRowPresented = true
+		#expect(state.enabledCommands.isEmpty)
+
+		state.isNewTaskRowPresented = false
+		state.writeProgress = .running
 		#expect(state.enabledCommands.isEmpty)
 	}
 
@@ -99,7 +103,7 @@ struct ReplicaFeatureTests {
 		}
 
 		await store.send(.doneButtonTapped) {
-			$0.write = .running
+			$0.writeProgress = .running
 		}
 		await store.receive(\.tasksLoaded) {
 			$0.allRows = try [row(dog), row(milkDone, view: .completed)]
@@ -108,7 +112,7 @@ struct ReplicaFeatureTests {
 			$0.storedTasks = [milkDone, dog]
 		}
 		await store.receive(\.writeCommitted) {
-			$0.write = nil
+			$0.writeProgress = nil
 		}
 		#expect(
 			try plans.value == [
@@ -151,7 +155,7 @@ struct ReplicaFeatureTests {
 		await store.send(.newTaskDescriptionSubmitted("Buy milk")) {
 			$0.creatingTask = UUID(0)
 			$0.isNewTaskRowPresented = false
-			$0.write = .running
+			$0.writeProgress = .running
 		}
 		await store.receive(\.tasksLoaded) {
 			$0.allRows = try [row(milk), row(taxes, view: .completed)]
@@ -163,7 +167,7 @@ struct ReplicaFeatureTests {
 			$0.rows = try [row(milk)]
 			$0.searchText = ""
 			$0.selection = [UUID(0)]
-			$0.write = nil
+			$0.writeProgress = nil
 		}
 		#expect(plans.value.first?.operations.first == .create(UUID(0)))
 		await store.finish()
@@ -191,13 +195,13 @@ struct ReplicaFeatureTests {
 		}
 
 		await store.send(.doneButtonTapped) {
-			$0.write = .running
+			$0.writeProgress = .running
 		}
 		await store.send(.deleteButtonTapped)
 		await clock.advance(by: .milliseconds(499))
 		await clock.advance(by: .milliseconds(1))
 		await store.receive(\.savingDelayElapsed) {
-			$0.write = .saving
+			$0.writeProgress = .saving
 		}
 
 		commit.yield()
@@ -208,7 +212,7 @@ struct ReplicaFeatureTests {
 			$0.storedTasks = [milkDone]
 		}
 		await store.receive(\.writeCommitted) {
-			$0.write = nil
+			$0.writeProgress = nil
 		}
 		await store.finish()
 	}
@@ -240,7 +244,7 @@ struct ReplicaFeatureTests {
 		}
 
 		await store.send(.doneButtonTapped) {
-			$0.write = .running
+			$0.writeProgress = .running
 		}
 		// Active, so the CLI's start raised its Urgency.
 		await store.receive(\.tasksLoaded) {
@@ -257,7 +261,7 @@ struct ReplicaFeatureTests {
 			$0.storedTasks = [milkDone]
 		}
 		await store.receive(\.writeCommitted) {
-			$0.write = nil
+			$0.writeProgress = nil
 		}
 		#expect(
 			try plans.value.last
@@ -284,13 +288,13 @@ struct ReplicaFeatureTests {
 		}
 
 		await store.send(.doneButtonTapped) {
-			$0.write = .running
+			$0.writeProgress = .running
 		}
 		await store.receive(\.tasksLoaded)
 		await store.receive(\.tasksLoaded)
 		await store.receive(\.tasksLoaded)
 		await store.receive(\.writeFailed) {
-			$0.write = nil
+			$0.writeProgress = nil
 		}
 		#expect(attempts.value == 3)
 		await store.finish()

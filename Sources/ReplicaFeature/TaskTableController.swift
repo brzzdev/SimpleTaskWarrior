@@ -90,20 +90,20 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 		column.isHidden.toggle()
 	}
 
-	/// Ends the new-task row with its description, unless Escape ended it first.
-	func controlTextDidEndEditing(_ notification: Notification) {
-		guard store.isNewTaskRowPresented, let field = notification.object as? NSTextField else {
-			return
-		}
-		store.send(.newTaskDescriptionSubmitted(field.stringValue))
-	}
-
 	func control(_: NSControl, textView _: NSTextView, doCommandBy selector: Selector) -> Bool {
 		guard selector == #selector(cancelOperation(_:)) else {
 			return false
 		}
 		store.send(.newTaskEditingCancelled)
 		return true
+	}
+
+	/// Ends the new-task row with its description, unless Escape ended it first.
+	func controlTextDidEndEditing(_ notification: Notification) {
+		guard store.isNewTaskRowPresented, let field = notification.object as? NSTextField else {
+			return
+		}
+		store.send(.newTaskDescriptionSubmitted(field.stringValue))
 	}
 
 	func menuNeedsUpdate(_ menu: NSMenu) {
@@ -194,6 +194,19 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 		table.addTableColumn(tableColumn)
 	}
 
+	/// Scrolls to the new-task row and puts the cursor in it.
+	private func beginNewTask() {
+		table.scrollRowToVisible(0)
+		let column = table.column(withIdentifier: NSUserInterfaceItemIdentifier(descriptionIdentifier))
+		guard
+			column >= 0,
+			let cell = table.view(atColumn: column, row: 0, makeIfNecessary: true) as? NewTaskCell
+		else {
+			return
+		}
+		view.window?.makeFirstResponder(cell.textField)
+	}
+
 	/// The task a table row shows, or nil for the new-task row.
 	private func row(at index: Int) -> TaskRow? {
 		let index = index - rowOffset
@@ -281,6 +294,19 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 		sendSortOrder()
 	}
 
+	/// Acts on the right-clicked row, selecting it first where it isn't already, as Finder does. Lists
+	/// the commands the toolbar does.
+	private func updateRowMenu() {
+		let clicked = table.clickedRow
+		if row(at: clicked) != nil, !table.selectedRowIndexes.contains(clicked) {
+			table.selectRowIndexes(IndexSet(integer: clicked), byExtendingSelection: false)
+		}
+		for item in rowMenu.items {
+			let command = ReplicaFeature.TaskCommand(action: item.action)
+			item.isHidden = command.map { !store.state.isOffered($0) } ?? false
+		}
+	}
+
 	/// Shows the store's rows and selection, reloading only when the rows changed. Scrolls to a task
 	/// the store selects, such as one New Task created, and to the new-task row as it opens.
 	private func updateRows() {
@@ -311,32 +337,6 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 		}
 		if opensNewTaskRow {
 			beginNewTask()
-		}
-	}
-
-	/// Scrolls to the new-task row and puts the cursor in it.
-	private func beginNewTask() {
-		table.scrollRowToVisible(0)
-		let column = table.column(withIdentifier: NSUserInterfaceItemIdentifier(descriptionIdentifier))
-		guard
-			column >= 0,
-			let cell = table.view(atColumn: column, row: 0, makeIfNecessary: true) as? NewTaskCell
-		else {
-			return
-		}
-		view.window?.makeFirstResponder(cell.textField)
-	}
-
-	/// Acts on the right-clicked row, selecting it first where it isn't already, as Finder does. Lists
-	/// the commands the toolbar does.
-	private func updateRowMenu() {
-		let clicked = table.clickedRow
-		if row(at: clicked) != nil, !table.selectedRowIndexes.contains(clicked) {
-			table.selectRowIndexes(IndexSet(integer: clicked), byExtendingSelection: false)
-		}
-		for item in rowMenu.items {
-			let command = ReplicaFeature.TaskCommand(action: item.action)
-			item.isHidden = command.map { !store.state.isOffered($0) } ?? false
 		}
 	}
 
@@ -607,7 +607,7 @@ private final class NewTaskCell: NSTableCellView {
 		super.init(frame: .zero)
 		let field = NSTextField()
 		field.cell?.isScrollable = true
-		field.placeholderString = String(localized: "New Task")
+		field.placeholderString = newTaskTitle
 		field.translatesAutoresizingMaskIntoConstraints = false
 		addSubview(field)
 		NSLayoutConstraint.activate([

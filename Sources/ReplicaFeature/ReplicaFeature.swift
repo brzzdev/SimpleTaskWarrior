@@ -44,7 +44,7 @@ struct ReplicaFeature {
 		/// The running Taskrc's UDAs, which the table offers as columns.
 		var udaColumns = UDAColumn.all(in: .defaults)
 		/// The write in progress, which disables every other.
-		var write: WriteProgress?
+		var writeProgress: WriteProgress?
 
 		/// The active Context's name, where there is one.
 		var activeContext: String? {
@@ -59,13 +59,14 @@ struct ReplicaFeature {
 			return false
 		}
 
-		/// The commands that apply to every selected task, none while a write is in progress. Read
-		/// once for all of them, since the selection is looked up for each read.
+		/// The commands that apply to every selected task. None applies while a write is in progress,
+		/// or while the new-task row is open, whose Return would find the write in the way. Read once
+		/// for all of them, since the selection is looked up for each read.
 		var enabledCommands: Set<TaskCommand> {
-			guard write == nil else {
+			guard writeProgress == nil, !isNewTaskRowPresented else {
 				return []
 			}
-			let tasks = selection.compactMap { rows[id: $0]?.task }
+			let tasks = selectedTasks()
 			guard !tasks.isEmpty else {
 				return []
 			}
@@ -86,19 +87,14 @@ struct ReplicaFeature {
 			return commands
 		}
 
-		/// Whether Start/Stop stops, which it does when every selected task is active.
-		var isStopping: Bool {
-			isStopping(selection.compactMap { rows[id: $0]?.task })
-		}
-
-		/// The selected tasks' IDs, in the table's order.
-		var selectedIDs: [Models.Task.ID] {
-			rows.ids.filter(selection.contains)
-		}
-
 		/// Whether the window has a Taskrc, rather than running on TW's defaults.
 		var hasTaskrc: Bool {
 			taskrc?.url != nil
+		}
+
+		/// Whether Start/Stop stops, which it does when every selected task is active.
+		var isStopping: Bool {
+			isStopping(selectedTasks())
 		}
 
 		/// The Taskrc's `data.location`, where it names a folder other than the window's Replica.
@@ -114,6 +110,11 @@ struct ReplicaFeature {
 		/// The Taskrc the window runs on: the last one that loaded, or TW's defaults.
 		var runningTaskrc: Taskrc {
 			taskrc?.taskrc ?? .defaults
+		}
+
+		/// The selected tasks' IDs, in the table's order.
+		var selectedIDs: [Models.Task.ID] {
+			rows.ids.filter(selection.contains)
 		}
 
 		var sidebar: Sidebar {
@@ -158,6 +159,11 @@ struct ReplicaFeature {
 		private func isStopping(_ tasks: [Models.Task]) -> Bool {
 			!tasks.isEmpty && tasks.allSatisfy { $0.start != nil }
 		}
+
+		/// The selected tasks, in no particular order.
+		private func selectedTasks() -> [Models.Task] {
+			selection.compactMap { rows[id: $0]?.task }
+		}
 	}
 
 	/// A command on the selected tasks, from the toolbar, the menu bar or a row's context menu.
@@ -168,16 +174,16 @@ struct ReplicaFeature {
 		case startStop
 	}
 
-	enum WriteProgress: Equatable {
-		case running
-		/// Running long enough for the subtitle to say so.
-		case saving
-	}
-
 	struct TaskrcSaveFailure: Equatable {
 		var message: String
 		/// The panel that chose the file, which Try Again… opens again.
 		var retry: FileImporter?
+	}
+
+	enum WriteProgress: Equatable {
+		case running
+		/// Running long enough for the subtitle to say so.
+		case saving
 	}
 
 	/// What a file panel on screen is choosing.
@@ -318,7 +324,7 @@ struct ReplicaFeature {
 				return perform(.markPending, &state)
 
 			case .newTaskButtonTapped:
-				guard state.write == nil else {
+				guard state.writeProgress == nil else {
 					return .none
 				}
 				state.isNewTaskRowPresented = true
@@ -351,8 +357,8 @@ struct ReplicaFeature {
 
 			case .savingDelayElapsed:
 				// The delay can elapse just as the write ends.
-				if state.write != nil {
-					state.write = .saving
+				if state.writeProgress != nil {
+					state.writeProgress = .saving
 				}
 				return .none
 
@@ -452,10 +458,10 @@ struct ReplicaFeature {
 	/// engine refuses the plan as stale, plans it again against the tasks it read instead, up to
 	/// `planAttempts` times. Every other write waits until it finishes.
 	private func write(_ action: WriteAction, _ state: inout State) -> Effect<Action> {
-		guard state.write == nil, let directory = state.directory else {
+		guard state.writeProgress == nil, let directory = state.directory else {
 			return .none
 		}
-		state.write = .running
+		state.writeProgress = .running
 		let planner = WritePlanner(taskrc: state.runningTaskrc, timeZone: timeZone)
 		return .run { [clock, now, replicaClient, storedTasks = state.storedTasks] send in
 			// A child of the write, so it's cancelled as the write ends, however it ends.
@@ -484,7 +490,7 @@ struct ReplicaFeature {
 	/// Ends the write in progress, whatever became of it.
 	private func finishWrite(_ state: inout State) {
 		state.creatingTask = nil
-		state.write = nil
+		state.writeProgress = nil
 	}
 
 	/// Writes `command` over the selected tasks, where it applies to every one.

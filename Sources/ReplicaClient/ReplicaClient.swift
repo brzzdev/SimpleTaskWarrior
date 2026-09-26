@@ -205,6 +205,17 @@ actor Replica {
 	}
 }
 
+extension Engine.Status {
+	fileprivate init(_ status: Models.Status) {
+		switch status {
+		case .completed: self = .completed
+		case .deleted: self = .deleted
+		case .pending: self = .pending
+		case .recurring: self = .recurring
+		}
+	}
+}
+
 extension Expectation {
 	fileprivate init(_ expectation: WritePlan.Expectation) {
 		self.init(
@@ -226,17 +237,6 @@ extension PlannedOperation {
 
 		case let .setValue(uuid, property, value):
 			self = .setValue(uuid: uuid.uuidString.lowercased(), property: property, value: value)
-		}
-	}
-}
-
-extension Engine.Status {
-	fileprivate init(_ status: Models.Status) {
-		switch status {
-		case .completed: self = .completed
-		case .deleted: self = .deleted
-		case .pending: self = .pending
-		case .recurring: self = .recurring
 		}
 	}
 }
