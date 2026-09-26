@@ -161,6 +161,12 @@ extension Task {
 		annotations.sort { $0.entry < $1.entry }
 	}
 
+	/// Whether the task is in `project` or one of its subprojects, matching whole dotted segments, so
+	/// `Homework` isn't in `Home`.
+	public func isIn(project: String) -> Bool {
+		self.project.map { $0 == project || $0.hasPrefix(project + ".") } ?? false
+	}
+
 	/// TW's `is_waiting`: pending, with a `wait` still ahead of `now`.
 	public func isWaiting(at now: Date) -> Bool {
 		status == .pending && wait.map { $0 > now } == true

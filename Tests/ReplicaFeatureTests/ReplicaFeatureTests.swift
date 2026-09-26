@@ -231,11 +231,12 @@ struct ReplicaFeatureTests {
 		// Tied on Urgency, so in ID order.
 		continuation.yield([dog, taxes, milk])
 		await store.receive(\.tasksLoaded) {
-			$0.allRows = try [row(dog), row(taxes, view: .completed), row(milk)]
+			$0.allRows = try [row(milk), row(dog), row(taxes, view: .completed)]
 			$0.storedTasks = [dog, taxes, milk]
 			$0.rows = try [row(milk), row(dog)]
 		}
 		await store.send(.sortOrderChanged([TaskSort(.description, order: .reverse)])) {
+			$0.allRows = try [row(dog), row(taxes, view: .completed), row(milk)]
 			$0.rows = try [row(dog), row(milk)]
 			$0.sortOrder = [TaskSort(.description, order: .reverse)]
 		}
@@ -288,7 +289,7 @@ struct ReplicaFeatureTests {
 		// Tied on Urgency, so in ID order.
 		continuation.yield([call, post])
 		await store.receive(\.tasksLoaded) {
-			$0.allRows = try [row(call), row(post)]
+			$0.allRows = try [row(post), row(call)]
 			$0.rows = try [row(post), row(call)]
 			$0.storedTasks = [call, post]
 		}
@@ -297,7 +298,7 @@ struct ReplicaFeatureTests {
 		time.setValue(now.addingTimeInterval(60))
 		await clock.advance(by: .seconds(60))
 		await store.receive(\.timerTicked) {
-			$0.allRows[0].urgency = 5
+			$0.allRows = try [row(call, urgency: 5), row(post)]
 			$0.highestUrgency = 5
 			$0.rows = try [row(call, urgency: 5), row(post)]
 		}
@@ -322,9 +323,9 @@ struct ReplicaFeatureTests {
 
 		await store.send(.tasksLoaded(storedTasks)) {
 			$0.allRows = try [
-				row(blocked, isBlocked: true, urgency: -5),
 				row(blocker, urgency: 8),
 				row(estimated),
+				row(blocked, isBlocked: true, urgency: -5),
 			]
 			$0.highestUrgency = 8
 			$0.storedTasks = storedTasks
@@ -342,9 +343,9 @@ struct ReplicaFeatureTests {
 			)
 		}
 		await store.send(.taskrcLoaded(TaskrcClient.Loaded(taskrc: taskrc, url: taskrcFile))) {
-			$0.allRows[2].task.orphans = [:]
-			$0.allRows[2].task.udas = ["estimate": .numeric(3)]
-			$0.allRows[2].urgency = 5
+			$0.allRows[1].task.orphans = [:]
+			$0.allRows[1].task.udas = ["estimate": .numeric(3)]
+			$0.allRows[1].urgency = 5
 			$0.rows[id: UUID(0)]?.task.orphans = [:]
 			$0.rows[id: UUID(0)]?.task.udas = ["estimate": .numeric(3)]
 			$0.rows[id: UUID(0)]?.urgency = 5

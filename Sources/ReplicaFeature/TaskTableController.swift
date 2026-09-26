@@ -118,17 +118,17 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 		let row = rows.elements[row]
 		switch column {
 		case .age, .due, .id, .project, .scheduled, .tags, .uda, .until, .wait:
-			let cell = reusedCell(TextCell.init)
+			let cell = table.reusedCell(TextCell.init)
 			cell.configure(column, of: row)
 			return cell
 
 		case .description:
-			let cell = reusedCell(DescriptionCell.init)
+			let cell = table.reusedCell(DescriptionCell.init)
 			cell.configure(row)
 			return cell
 
 		case .urgency:
-			let cell = reusedCell(UrgencyCell.init)
+			let cell = table.reusedCell(UrgencyCell.init)
 			cell.configure(urgency: row.urgency, highest: highestUrgency)
 			return cell
 		}
@@ -149,17 +149,6 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 			tableColumn.width = tableColumn.minWidth
 		}
 		table.addTableColumn(tableColumn)
-	}
-
-	/// A cell the table can reuse, or a new one from `make`.
-	private func reusedCell<Cell: NSView>(_ make: () -> Cell) -> Cell {
-		let identifier = NSUserInterfaceItemIdentifier(String(describing: Cell.self))
-		if let cell = table.makeView(withIdentifier: identifier, owner: nil) as? Cell {
-			return cell
-		}
-		let cell = make()
-		cell.identifier = identifier
-		return cell
 	}
 
 	/// Tells the reducer the sort the table shows.
@@ -417,8 +406,21 @@ private func udaText(_ value: UDAValue?) -> String {
 	}
 }
 
+extension NSTableView {
+	/// A cell the table can reuse, or a new one from `make`.
+	func reusedCell<Cell: NSView>(_ make: () -> Cell) -> Cell {
+		let identifier = NSUserInterfaceItemIdentifier(String(describing: Cell.self))
+		if let cell = makeView(withIdentifier: identifier, owner: nil) as? Cell {
+			return cell
+		}
+		let cell = make()
+		cell.identifier = identifier
+		return cell
+	}
+}
+
 /// A label that tail-truncates.
-private func truncatingLabel() -> NSTextField {
+func truncatingLabel() -> NSTextField {
 	let label = NSTextField(labelWithString: "")
 	label.lineBreakMode = .byTruncatingTail
 	label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)

@@ -9,7 +9,7 @@ enum TaskView: Hashable {
 	case pending
 	case waiting
 
-	/// In sidebar order, which ⌘1 to ⌘4 follow.
+	/// In sidebar order.
 	static let all: [Self] = [.pending, .waiting, .completed, .deleted]
 
 	/// The view `task` shows in at `now`, or nil for a Recurrence template, which none shows.
@@ -49,9 +49,8 @@ struct Sidebar: Equatable {
 		var name: String
 	}
 
-	/// Named and counted from the selected views' tasks, or Pending's when none is selected.
+	// Both named and counted from the selected views' tasks.
 	var projects: [Project]
-	/// Named and counted from the selected views' tasks, or Pending's when none is selected.
 	var tags: [Count]
 	var views: [Count]
 
@@ -61,28 +60,20 @@ struct Sidebar: Equatable {
 		views = TaskView.all.map { view in
 			Count(count: rows.count { $0.view == view }, item: .view(view))
 		}
-		let listed = rows.filter { selection.views.contains($0.view) }
+		let filter = SidebarFilter(selection)
+		let listed = rows.filter { filter.views.contains($0.view) }
 
-		var projectCounts: [String: Int] = [:]
-		for project in selection.projects {
-			for name in project.ancestry {
-				projectCounts[name, default: 0] += 0
-			}
-		}
-		for project in listed.compactMap(\.task.project) {
-			for name in project.ancestry {
-				projectCounts[name, default: 0] += 1
-			}
+		var projectCounts = zeroCounts(filter.projects.flatMap(\.ancestry))
+		for name in listed.compactMap(\.task.project).flatMap(\.ancestry) {
+			projectCounts[name, default: 0] += 1
 		}
 		projects = Project.children(of: nil, in: projectCounts)
 
-		var tagCounts = Dictionary(uniqueKeysWithValues: selection.tags.map { ($0, 0) })
+		var tagCounts = zeroCounts(filter.tags)
 		for tag in listed.flatMap(\.task.tags) {
 			tagCounts[tag, default: 0] += 1
 		}
-		tags = tagCounts.keys
-			.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
-			.map { Count(count: tagCounts[$0] ?? 0, item: .tag($0)) }
+		tags = sorted(tagCounts).map { Count(count: $0.value, item: .tag($0.key)) }
 	}
 }
 
@@ -90,59 +81,38 @@ extension Sidebar.Project {
 	/// The projects in `counts` one segment below `parent`, or the top-level ones for nil, with
 	/// theirs below them.
 	fileprivate static func children(of parent: String?, in counts: [String: Int]) -> [Self] {
-		counts.keys
-			.filter { $0.parentProject == parent }
-			.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
-			.map { name in
-				Self(children: children(of: name, in: counts), count: counts[name] ?? 0, name: name)
-			}
+		sorted(counts.filter { $0.key.parentProject == parent }).map { name, count in
+			Self(children: children(of: name, in: counts), count: count, name: name)
+		}
 	}
 }
 
-extension Set<SidebarItem> {
+/// The sidebar's selection, split by section once rather than for every row it narrows.
+struct SidebarFilter {
+	var projects: [String] = []
+	var tags: [String] = []
 	/// The selected fixed views, or Pending when none is selected.
-	var views: Set<TaskView> {
-		let views = Set<TaskView>(compactMap {
-			guard case let .view(view) = $0 else {
-				return nil
-			}
-			return view
-		})
-		return views.isEmpty ? [.pending] : views
-	}
+	var views: Set<TaskView> = []
 
-	fileprivate var projects: [String] {
-		compactMap {
-			guard case let .project(project) = $0 else {
-				return nil
+	init(_ selection: Set<SidebarItem>) {
+		for item in selection {
+			switch item {
+			case let .project(project): projects.append(project)
+			case let .tag(tag): tags.append(tag)
+			case let .view(view): views.insert(view)
 			}
-			return project
+		}
+		if views.isEmpty {
+			views = [.pending]
 		}
 	}
 
-	fileprivate var tags: [String] {
-		compactMap {
-			guard case let .tag(tag) = $0 else {
-				return nil
-			}
-			return tag
-		}
-	}
-
-	/// Whether `row` shows under this selection: in any selected view, and in any selected project
-	/// and with any selected tag where the sections have some selected.
+	/// Whether `row` shows: in any selected view, and in any selected project and with any selected
+	/// tag where those sections have some selected.
 	func includes(_ row: TaskRow) -> Bool {
-		guard views.contains(row.view) else {
-			return false
-		}
-		let projects = projects
-		if !projects.isEmpty {
-			guard let project = row.task.project, projects.contains(where: project.isWithin) else {
-				return false
-			}
-		}
-		let tags = tags
-		return tags.isEmpty || tags.contains(where: row.task.tags.contains)
+		views.contains(row.view)
+			&& (projects.isEmpty || projects.contains(where: row.task.isIn(project:)))
+			&& (tags.isEmpty || tags.contains(where: row.task.tags.contains))
 	}
 }
 
@@ -170,10 +140,14 @@ extension String {
 	fileprivate var parentProject: String? {
 		lastIndex(of: ".").map { String(self[..<$0]) }
 	}
+}
 
-	/// Whether this project is `project` or one of its subprojects, matching whole segments, so
-	/// `Homework` isn't within `Home`.
-	fileprivate func isWithin(_ project: String) -> Bool {
-		self == project || hasPrefix(project + ".")
-	}
+/// A count of 0 for each of `names`.
+private func zeroCounts(_ names: [String]) -> [String: Int] {
+	Dictionary(names.map { ($0, 0) }, uniquingKeysWith: { first, _ in first })
+}
+
+/// `counts` in the order Finder sorts names.
+private func sorted(_ counts: [String: Int]) -> [(key: String, value: Int)] {
+	counts.sorted { $0.key.localizedStandardCompare($1.key) == .orderedAscending }
 }

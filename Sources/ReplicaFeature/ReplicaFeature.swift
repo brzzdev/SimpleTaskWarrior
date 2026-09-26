@@ -12,7 +12,8 @@ import TaskrcClient
 struct ReplicaFeature {
 	@ObservableState
 	struct State: Equatable {
-		/// Every task a fixed view shows, ranked, which the sidebar and search narrow to `rows`.
+		/// Every task a fixed view shows, ranked and in `sortOrder`, which the sidebar and search narrow
+		/// to `rows`.
 		var allRows: [TaskRow] = []
 		let bookmark: Data
 
@@ -314,7 +315,7 @@ struct ReplicaFeature {
 	}
 
 	/// Ranks the Replica's tasks with the Taskrc the window runs on, decoding their UDAs, computing
-	/// their Urgency and sorting them into fixed views again, then narrows them to the table.
+	/// their Urgency and sorting them into fixed views again, then sorts and narrows them.
 	private func updateRows(_ state: inout State) {
 		let taskrc = state.runningTaskrc
 		let tasks = state.storedTasks.compactMap { Models.Task($0, udaTypes: taskrc.udaTypes) }
@@ -332,30 +333,30 @@ struct ReplicaFeature {
 				)
 			}
 		}
-		filterRows(&state)
+		sortRows(&state)
 	}
 
 	/// Narrows the ranked rows by the sidebar, then the search, and drops selected tasks that left
 	/// the table.
 	private func filterRows(_ state: inout State) {
+		// Filtering keeps `allRows`' order, so the table needs no sort of its own.
 		state.rows = IdentifiedArray(
 			uniqueElements: state.allRows.filter { [
+				filter = SidebarFilter(state.sidebarSelection),
 				search = state.searchText,
-				sidebar = state.sidebarSelection,
 			] in
-				sidebar.includes($0) && $0.matches(search: search)
+				filter.includes($0) && $0.matches(search: search)
 			},
 		)
-		sortRows(&state)
 		state.highestUrgency = state.rows.map(\.urgency).max() ?? 0
 		state.selection.formIntersection(state.rows.ids)
 	}
 
-	/// Sorts the table's rows by `sortOrder`, breaking ties by ID so the order holds still.
+	/// Sorts the ranked rows by `sortOrder`, breaking ties by ID so the order holds still, then
+	/// narrows them to the table.
 	private func sortRows(_ state: inout State) {
-		state.rows = IdentifiedArray(
-			uniqueElements: state.rows.sorted(using: state.sortOrder + [TaskSort(.id)]),
-		)
+		state.allRows.sort(using: state.sortOrder + [TaskSort(.id)])
+		filterRows(&state)
 	}
 
 	/// Runs `save` with the Replica's folder, then loads its Taskrc again. A failed save is

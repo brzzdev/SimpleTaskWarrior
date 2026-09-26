@@ -8,7 +8,7 @@ import Taskrc
 /// active Context.
 final class SidebarController: NSViewController, NSOutlineViewDataSource, NSOutlineViewDelegate {
 	private let contextFooter = NSStackView()
-	private let contextLabel = NSTextField(labelWithString: "")
+	private let contextLabel = truncatingLabel()
 	/// Kept here, since a reload makes new nodes and forgets which were expanded.
 	private var expandedProjects: Set<String> = []
 	/// Set while the outline follows the store, so the changes it makes aren't sent back.
@@ -41,8 +41,6 @@ final class SidebarController: NSViewController, NSOutlineViewDataSource, NSOutl
 		)
 		info.isBordered = false
 		info.setAccessibilityLabel(String(localized: "About the Context"))
-		contextLabel.lineBreakMode = .byTruncatingTail
-		contextLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 		contextLabel.textColor = .secondaryLabelColor
 		contextFooter.edgeInsets = NSEdgeInsets(top: 8, left: 16, bottom: 8, right: 16)
 		contextFooter.setViews([contextLabel, info], in: .leading)
@@ -136,13 +134,13 @@ final class SidebarController: NSViewController, NSOutlineViewDataSource, NSOutl
 		guard let node = item as? SidebarNode else {
 			return nil
 		}
-		guard node.item != nil else {
-			let cell = reusedCell(HeaderCell.init)
+		guard let item = node.item else {
+			let cell = outline.reusedCell(HeaderCell.init)
 			cell.textField?.stringValue = node.title
 			return cell
 		}
-		let cell = reusedCell(ItemCell.init)
-		cell.configure(node)
+		let cell = outline.reusedCell(ItemCell.init)
+		cell.configure(item, count: node.count)
 		return cell
 	}
 
@@ -182,17 +180,6 @@ final class SidebarController: NSViewController, NSOutlineViewDataSource, NSOutl
 		notification.userInfo?["NSObject"] as? SidebarNode
 	}
 
-	/// A cell the outline can reuse, or a new one from `make`.
-	private func reusedCell<Cell: NSView>(_ make: () -> Cell) -> Cell {
-		let identifier = NSUserInterfaceItemIdentifier(String(describing: Cell.self))
-		if let cell = outline.makeView(withIdentifier: identifier, owner: nil) as? Cell {
-			return cell
-		}
-		let cell = make()
-		cell.identifier = identifier
-		return cell
-	}
-
 	/// Shows the store's sidebar and its selection, reloading only when the sidebar changed, and
 	/// keeping expanded the projects that were, and those above a selected one.
 	private func updateOutline() {
@@ -210,26 +197,24 @@ final class SidebarController: NSViewController, NSOutlineViewDataSource, NSOutl
 		for case let .project(name) in selection {
 			expandedProjects.formUnion(name.ancestry.dropLast())
 		}
-		for node in nodes {
-			node.forEach { node in
-				guard node.item == nil || expandedProjects.contains(node.projectName ?? "") else {
-					return
+		var rows = IndexSet()
+		// Top down, so a node's parent is expanded, and the node has a row, by the time it's reached.
+		func follow(_ nodes: [SidebarNode]) {
+			for node in nodes {
+				if let item = node.item, selection.contains(item) {
+					let row = outline.row(forItem: node)
+					if row >= 0 {
+						rows.insert(row)
+					}
+				}
+				if case let .project(name)? = node.item, !expandedProjects.contains(name) {
+					continue
 				}
 				outline.expandItem(node)
+				follow(node.children)
 			}
 		}
-		var rows = IndexSet()
-		for node in nodes {
-			node.forEach { node in
-				guard let item = node.item, selection.contains(item) else {
-					return
-				}
-				let row = outline.row(forItem: node)
-				if row >= 0 {
-					rows.insert(row)
-				}
-			}
-		}
+		follow(nodes)
 		if outline.selectedRowIndexes != rows {
 			outline.selectRowIndexes(rows, byExtendingSelection: false)
 		}
@@ -240,64 +225,39 @@ final class SidebarController: NSViewController, NSOutlineViewDataSource, NSOutl
 /// its rows apart by identity.
 private final class SidebarNode {
 	let children: [SidebarNode]
-	let count: Int?
-	/// Whether the count reads dimmer, as a project's or tag's does.
-	let isCountDimmed: Bool
+	/// 0 for a section header, which shows none.
+	let count: Int
 	let item: SidebarItem?
-	let symbolName: String?
 	let title: String
 
-	var projectName: String? {
-		guard case let .project(name)? = item else {
-			return nil
-		}
-		return name
+	/// A section header.
+	init(title: String, children: [SidebarNode]) {
+		self.children = children
+		count = 0
+		item = nil
+		self.title = title
 	}
 
-	init(
-		children: [SidebarNode] = [],
-		count: Int? = nil,
-		isCountDimmed: Bool = false,
-		item: SidebarItem? = nil,
-		symbolName: String? = nil,
-		title: String,
-	) {
+	init(_ item: SidebarItem, count: Int, children: [SidebarNode] = []) {
 		self.children = children
 		self.count = count
-		self.isCountDimmed = isCountDimmed
 		self.item = item
-		self.symbolName = symbolName
-		self.title = title
+		title = item.title
 	}
 
 	/// The fixed views, then a Projects and a Tags section where either has any.
 	static func sections(of sidebar: Sidebar) -> [SidebarNode] {
-		var sections = sidebar.views.map { count in
-			SidebarNode(
-				count: count.count,
-				item: count.item,
-				symbolName: count.item.symbolName,
-				title: count.item.title,
-			)
-		}
+		var sections = sidebar.views.map { SidebarNode($0.item, count: $0.count) }
 		if !sidebar.projects.isEmpty {
 			sections.append(
-				SidebarNode(children: sidebar.projects.map(project), title: String(localized: "Projects")),
+				SidebarNode(title: String(localized: "Projects"), children: sidebar.projects.map(project)),
 			)
 		}
 		if !sidebar.tags.isEmpty {
 			sections.append(
 				SidebarNode(
-					children: sidebar.tags.map { tag in
-						SidebarNode(
-							count: tag.count,
-							isCountDimmed: true,
-							item: tag.item,
-							symbolName: tag.item.symbolName,
-							title: tag.item.title,
-						)
-					},
 					title: String(localized: "Tags"),
+					children: sidebar.tags.map { SidebarNode($0.item, count: $0.count) },
 				),
 			)
 		}
@@ -305,23 +265,11 @@ private final class SidebarNode {
 	}
 
 	private static func project(_ project: Sidebar.Project) -> SidebarNode {
-		let item = SidebarItem.project(project.name)
-		return SidebarNode(
-			children: project.children.map(Self.project),
+		SidebarNode(
+			.project(project.name),
 			count: project.count,
-			isCountDimmed: true,
-			item: item,
-			symbolName: item.symbolName,
-			title: item.title,
+			children: project.children.map(Self.project),
 		)
-	}
-
-	/// Calls `body` with this node and every node below it.
-	func forEach(_ body: (SidebarNode) -> Void) {
-		body(self)
-		for child in children {
-			child.forEach(body)
-		}
 	}
 }
 
@@ -378,9 +326,7 @@ private final class ItemCell: NSTableCellView {
 	init() {
 		super.init(frame: .zero)
 		let symbol = NSImageView()
-		let title = NSTextField(labelWithString: "")
-		title.lineBreakMode = .byTruncatingTail
-		title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+		let title = truncatingLabel()
 		// So the title takes the row's spare width, and the count sits at its trailing edge.
 		title.setContentHuggingPriority(.defaultLow, for: .horizontal)
 		countLabel.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
@@ -406,14 +352,16 @@ private final class ItemCell: NSTableCellView {
 		fatalError("init(coder:) has not been implemented")
 	}
 
-	func configure(_ node: SidebarNode) {
-		countLabel.isHidden = node.count == nil
-		countLabel.stringValue = node.count.map(String.init) ?? ""
-		countLabel.textColor = node.isCountDimmed ? .tertiaryLabelColor : .secondaryLabelColor
-		imageView?.image = node.symbolName.flatMap {
-			NSImage(systemSymbolName: $0, accessibilityDescription: nil)
+	func configure(_ item: SidebarItem, count: Int) {
+		countLabel.stringValue = String(count)
+		// A fixed view's count reads brighter than a project's or tag's.
+		if case .view = item {
+			countLabel.textColor = .secondaryLabelColor
+		} else {
+			countLabel.textColor = .tertiaryLabelColor
 		}
-		textField?.stringValue = node.title
+		imageView?.image = NSImage(systemSymbolName: item.symbolName, accessibilityDescription: nil)
+		textField?.stringValue = item.title
 	}
 }
 
