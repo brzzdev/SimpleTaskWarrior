@@ -45,6 +45,9 @@ public struct WritePlanner: Sendable {
 			return try plan(ids, tasks: tasks, at: epoch) { $0.delete(at: epoch) }
 
 		case let .edit(ids, edit):
+			if case let .addDependency(dependency) = edit {
+				try refuseCycle(dependingOn: dependency, from: ids, tasks: tasks)
+			}
 			return try plan(ids, tasks: tasks, at: epoch) { $0.apply(edit) }
 
 		case let .markPending(ids):
@@ -102,6 +105,11 @@ public struct WritePlanner: Sendable {
 		}
 	}
 
+	/// The tasks `properties` depend on, from its `dep_*` keys.
+	private func dependencies(_ properties: [String: String]) -> [Task.ID] {
+		properties.keys.compactMap { $0.dropPrefix("dep_").flatMap(UUID.init(uuidString:)) }
+	}
+
 	private func nonEmpty(_ key: String) -> String? {
 		taskrc[key].flatMap { $0.isEmpty ? nil : $0 }
 	}
@@ -124,6 +132,40 @@ public struct WritePlanner: Sendable {
 			drafts.append(draft)
 		}
 		return WritePlan(drafts, epoch: epoch)
+	}
+
+	/// Refuses a dependency `task modify depends:` refuses, as `Task::addDependency` does: on the
+	/// task itself, or one that makes the task reachable from itself through `dep_*` keys, which
+	/// `dependencyIsCircular` follows through tasks of any status. A dependency the task already has
+	/// is left for the plan, since TW returns before searching. A task missing from the snapshot is
+	/// left for the plan to report.
+	private func refuseCycle(
+		dependingOn dependency: Task.ID,
+		from ids: [Task.ID],
+		tasks: [Task.ID: [String: String]],
+	) throws(WritePlanError) {
+		for id in ids {
+			guard let properties = tasks[id] else {
+				continue
+			}
+			if id == dependency {
+				throw .selfDependency(id)
+			}
+			guard properties["dep_\(dependency.uuidString.lowercased())"] == nil else {
+				continue
+			}
+			var visited: Set<Task.ID> = []
+			var unvisited = [dependency] + dependencies(properties)
+			while let next = unvisited.popLast() {
+				if next == id {
+					throw .circularDependency(id)
+				}
+				guard visited.insert(next).inserted else {
+					continue
+				}
+				unvisited += dependencies(tasks[next] ?? [:])
+			}
+		}
 	}
 }
 
@@ -162,8 +204,12 @@ public enum WritePlanError: Error, Equatable, Sendable {
 	/// A New Task with no description, or only whitespace, which `task add` refuses. `task modify`
 	/// accepts removing one, so an edit may remove it.
 	case blankDescription
+	/// The task would depend, through others, on a task that depends on it.
+	case circularDependency(Task.ID)
 	/// The task isn't in the snapshot, as after a `task undo` of its creation, or a purge.
 	case noSuchTask(Task.ID)
+	/// The task would depend on itself.
+	case selfDependency(Task.ID)
 }
 
 public struct WritePlan: Equatable, Sendable {

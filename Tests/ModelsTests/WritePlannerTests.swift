@@ -158,6 +158,51 @@ struct WritePlannerTests {
 		}
 	}
 
+	/// A cycle already in the snapshot, which only another client could have written. TW returns
+	/// before its search when the dependency is already there, so a re-plan plans nothing.
+	@Test
+	func addingADependencyAlreadyInACyclePlansNothing() throws {
+		let planner = WritePlanner(taskrc: .defaults, timeZone: .gmt)
+		let (alpha, beta) = (UUID(), UUID())
+		let tasks = [
+			alpha: ["dep_\(beta.uuidString.lowercased())": "x", "status": "pending"],
+			beta: ["dep_\(alpha.uuidString.lowercased())": "x", "status": "pending"],
+		]
+
+		let plan = try planner.plan(.edit([alpha], .addDependency(beta)), tasks: tasks, at: .now)
+
+		#expect(plan == WritePlan())
+	}
+
+	/// `task modify depends:` refuses both, writing nothing.
+	@Test
+	func addingADependencyOnItselfThrows() {
+		let planner = WritePlanner(taskrc: .defaults, timeZone: .gmt)
+		let id = UUID()
+
+		#expect(throws: WritePlanError.selfDependency(id)) {
+			try planner.plan(.edit([id], .addDependency(id)), tasks: [id: [:]], at: .now)
+		}
+	}
+
+	/// Alpha depends on Beta, which depends on Gamma. TW follows a chain through tasks of any status,
+	/// so Beta being completed doesn't break it.
+	@Test(arguments: ["Beta", "Gamma"])
+	func addingADependencyThatClosesACycleThrows(dependent: String) {
+		let planner = WritePlanner(taskrc: .defaults, timeZone: .gmt)
+		let (alpha, beta, gamma) = (UUID(), UUID(), UUID())
+		let tasks = [
+			alpha: ["dep_\(beta.uuidString.lowercased())": "x", "status": "pending"],
+			beta: ["dep_\(gamma.uuidString.lowercased())": "x", "status": "completed"],
+			gamma: ["status": "pending"],
+		]
+		let id = dependent == "Beta" ? beta : gamma
+
+		#expect(throws: WritePlanError.circularDependency(id)) {
+			try planner.plan(.edit([id], .addDependency(alpha)), tasks: tasks, at: .now)
+		}
+	}
+
 	@Test
 	func addingATagExpectsTheOtherTags() throws {
 		let planner = WritePlanner(taskrc: .defaults, timeZone: .gmt)
