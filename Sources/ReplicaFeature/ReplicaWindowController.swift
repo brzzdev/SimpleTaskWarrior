@@ -36,6 +36,9 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 		let inspector = NSSplitViewItem(
 			inspectorWithViewController: hostingController(InspectorView(store: store)),
 		)
+		// An inspector's maximum defaults to its minimum, which leaves its divider nothing to drag. The
+		// cap leaves the table room at the default window size.
+		inspector.maximumThickness = 400
 		let split = NSSplitViewController()
 		split.splitViewItems = [
 			NSSplitViewItem(sidebarWithViewController: sidebarController),
