@@ -16,7 +16,8 @@ struct ReplicaFeature {
 		/// to `rows`.
 		var allRows: [TaskRow] = []
 		let bookmark: Data
-
+		/// The task a New Task is creating, which is selected once it commits.
+		var creatingTask: Models.Task.ID?
 		var directory: URL?
 		var failure: String?
 		var fileImporter: FileImporter?
@@ -24,7 +25,12 @@ struct ReplicaFeature {
 		@Shared(.appStorage("hasShownTaskrcHint")) var hasShownTaskrcHint = false
 		/// The highest Urgency in the table, which scales every row's bar.
 		var highestUrgency = 0.0
+		var isNewTaskRowPresented = false
+		/// Set once a write has run long enough for the subtitle to say so.
+		var isSaving = false
 		var isTaskrcHintPresented = false
+		/// Set while a write is in progress, which disables every other write.
+		var isWriting = false
 		/// The tasks the sidebar and search leave, in `sortOrder`.
 		var rows: IdentifiedArrayOf<TaskRow> = []
 		/// Narrows the table after the sidebar.
@@ -53,6 +59,23 @@ struct ReplicaFeature {
 				return true
 			}
 			return false
+		}
+
+		/// Whether Start/Stop stops, which it does when every selected task is active.
+		var isStopping: Bool {
+			let tasks = selectedTasks
+			return !tasks.isEmpty && tasks.allSatisfy { $0.start != nil }
+		}
+
+		/// Whether the toolbar offers Mark Pending in place of Start/Stop, Done and Delete, which it
+		/// does when every selected fixed view is Completed or Deleted.
+		var offersMarkPending: Bool {
+			SidebarFilter(sidebarSelection).views.isSubset(of: [.completed, .deleted])
+		}
+
+		/// The selected tasks, in the table's order.
+		var selectedTasks: [Models.Task] {
+			rows.filter { selection.contains($0.id) }.map(\.task)
 		}
 
 		/// Whether the window has a Taskrc, rather than running on TW's defaults.
@@ -104,6 +127,42 @@ struct ReplicaFeature {
 		init(bookmark: Data) {
 			self.bookmark = bookmark
 		}
+
+		/// Whether `command` applies to every selected task, while no write is in progress.
+		func isEnabled(_ command: TaskCommand) -> Bool {
+			guard !isWriting else {
+				return false
+			}
+			let tasks = selectedTasks
+			guard command == .newTask || !tasks.isEmpty else {
+				return false
+			}
+			switch command {
+			case .delete:
+				return tasks.allSatisfy { $0.status != .deleted }
+
+			case .done:
+				return tasks.allSatisfy { $0.status == .pending }
+
+			case .markPending:
+				return tasks.allSatisfy { $0.status == .completed || $0.status == .deleted }
+
+			case .newTask:
+				return true
+
+			case .startStop:
+				return isStopping || tasks.allSatisfy { $0.status == .pending }
+			}
+		}
+	}
+
+	/// A command on the selected tasks, from the toolbar, the menu bar or a row's context menu.
+	enum TaskCommand {
+		case delete
+		case done
+		case markPending
+		case newTask
+		case startStop
 	}
 
 	struct TaskrcSaveFailure: Equatable {
@@ -122,14 +181,24 @@ struct ReplicaFeature {
 	enum Action: BindableAction {
 		case binding(BindingAction<State>)
 		case chooseTaskrcButtonTapped
+		case deleteButtonTapped
 		case directoryResolved(URL)
+		case doneButtonTapped
 		case fetchRequested
 		case fileChosen(URL, for: FileImporter)
 		case grantAccessButtonTapped
+		case markPendingButtonTapped
+		case newTaskButtonTapped
+		/// Return in the new-task row, or clicking away from it.
+		case newTaskDescriptionSubmitted(String)
+		/// Escape in the new-task row.
+		case newTaskEditingCancelled
 		case openFailed(String)
 		case pairingChanged
+		case savingDelayElapsed
 		/// A column header was clicked, or the table restored the Replica's sort.
 		case sortOrderChanged([TaskSort])
+		case startStopButtonTapped
 		case taskrcHintCloseButtonTapped
 		case taskrcLoaded(TaskrcClient.Loaded)
 		case taskrcSaveFailed(TaskrcSaveFailure)
@@ -137,6 +206,8 @@ struct ReplicaFeature {
 		case timerTicked
 		case tryAgainButtonTapped
 		case useTaskwarriorDefaultsButtonTapped
+		case writeCommitted([StoredTask])
+		case writeFailed
 	}
 
 	private enum CancelID {
@@ -150,6 +221,7 @@ struct ReplicaFeature {
 	@Dependency(\.replicaClient) var replicaClient
 	@Dependency(\.taskrcClient) var taskrcClient
 	@Dependency(\.timeZone) var timeZone
+	@Dependency(\.uuid) var uuid
 
 	var body: some ReducerOf<Self> {
 		BindingReducer()
@@ -166,6 +238,12 @@ struct ReplicaFeature {
 				state.fileImporter = .taskrc
 				return .none
 
+			case .deleteButtonTapped:
+				guard state.isEnabled(.delete) else {
+					return .none
+				}
+				return write(.delete(selectedIDs(state)), &state)
+
 			case let .directoryResolved(directory):
 				state.directory = directory
 				// Another window pairing, detaching or granting changes this window's Taskrc too. Subscribed
@@ -181,6 +259,12 @@ struct ReplicaFeature {
 					}
 					.cancellable(id: CancelID.bookmarkChanges, cancelInFlight: true),
 				)
+
+			case .doneButtonTapped:
+				guard state.isEnabled(.done) else {
+					return .none
+				}
+				return write(.complete(selectedIDs(state)), &state)
 
 			case .fetchRequested:
 				return .merge(
@@ -227,6 +311,37 @@ struct ReplicaFeature {
 				state.fileImporter = state.taskrcRemedy
 				return .none
 
+			case .markPendingButtonTapped:
+				guard state.isEnabled(.markPending) else {
+					return .none
+				}
+				return write(.markPending(selectedIDs(state)), &state)
+
+			case .newTaskButtonTapped:
+				guard state.isEnabled(.newTask) else {
+					return .none
+				}
+				state.isNewTaskRowPresented = true
+				if !sidebarShowsNewTask(state) {
+					state.sidebarSelection = [.view(.pending)]
+					filterRows(&state)
+				}
+				return .none
+
+			case let .newTaskDescriptionSubmitted(description):
+				state.isNewTaskRowPresented = false
+				// Spaces alone are what the planner refuses as blank, so they cancel instead.
+				guard !description.allSatisfy({ $0 == " " }) else {
+					return .none
+				}
+				let id = uuid()
+				state.creatingTask = id
+				return write(.create(id, description: description), &state)
+
+			case .newTaskEditingCancelled:
+				state.isNewTaskRowPresented = false
+				return .none
+
 			case let .openFailed(failure):
 				state.failure = failure
 				return .none
@@ -234,10 +349,22 @@ struct ReplicaFeature {
 			case .pairingChanged:
 				return loadTaskrc(for: state)
 
+			case .savingDelayElapsed:
+				// The delay can elapse just as the write ends.
+				state.isSaving = state.isWriting
+				return .none
+
 			case let .sortOrderChanged(sortOrder):
 				state.sortOrder = sortOrder
 				sortRows(&state)
 				return .none
+
+			case .startStopButtonTapped:
+				guard state.isEnabled(.startStop) else {
+					return .none
+				}
+				let ids = selectedIDs(state)
+				return write(state.isStopping ? .stop(ids) : .start(ids), &state)
 
 			case .taskrcHintCloseButtonTapped:
 				state.isTaskrcHintPresented = false
@@ -282,6 +409,26 @@ struct ReplicaFeature {
 				) { [bookmarkClient] directory in
 					try bookmarkClient.saveTaskrc(nil, directory)
 				}
+
+			case let .writeCommitted(tasks):
+				state.storedTasks = tasks
+				updateRows(&state)
+				if let created = state.creatingTask {
+					// Only a search can hide a new task: New Task already showed the sidebar it lands in.
+					if state.rows[id: created] == nil, !state.searchText.isEmpty {
+						state.searchText = ""
+						filterRows(&state)
+					}
+					if state.rows[id: created] != nil {
+						state.selection = [created]
+					}
+				}
+				finishWrite(&state)
+				return .none
+
+			case .writeFailed:
+				finishWrite(&state)
+				return .none
 			}
 		}
 	}
@@ -312,6 +459,81 @@ struct ReplicaFeature {
 			}
 		}
 		.cancellable(id: CancelID.taskrc, cancelInFlight: true)
+	}
+
+	/// The one path every write takes. Plans `action` against the tasks as last read, and while the
+	/// engine refuses the plan as stale, plans it again against the tasks it read instead, up to
+	/// `planAttempts` times. Every other write waits until it finishes.
+	private func write(_ action: WriteAction, _ state: inout State) -> Effect<Action> {
+		guard !state.isWriting, let directory = state.directory else {
+			return .none
+		}
+		state.isWriting = true
+		let planner = WritePlanner(taskrc: state.runningTaskrc, timeZone: timeZone)
+		return .run { [clock, now, replicaClient, storedTasks = state.storedTasks] send in
+			// A child of the write, so it's cancelled as the write ends, however it ends.
+			async let _: Void = {
+				try await clock.sleep(for: savingDelay)
+				await send(.savingDelayElapsed)
+			}()
+			var tasks = storedTasks
+			for _ in 1 ... planAttempts {
+				let plan = try planner.plan(action, tasks: properties(of: tasks), at: now)
+				switch try await replicaClient.apply(plan, directory) {
+				case let .committed(committed):
+					await send(.writeCommitted(committed))
+					return
+
+				case let .conflict(fresh):
+					// The stream won't yield these, having been read already.
+					await send(.tasksLoaded(fresh))
+					tasks = fresh
+				}
+			}
+			await send(.writeFailed)
+		} catch: { _, send in
+			await send(.writeFailed)
+		}
+	}
+
+	/// Ends the write in progress, whatever became of it.
+	private func finishWrite(_ state: inout State) {
+		state.creatingTask = nil
+		state.isSaving = false
+		state.isWriting = false
+	}
+
+	/// The selected tasks' IDs, in the table's order.
+	private func selectedIDs(_ state: State) -> [Models.Task.ID] {
+		state.selectedTasks.map(\.id)
+	}
+
+	/// Whether the sidebar shows a task New Task would create now, with only the Context's and the
+	/// Taskrc's defaults, never the sidebar's project or tag. A New Task that can't be planned shows
+	/// nowhere, so it changes nothing.
+	private func sidebarShowsNewTask(_ state: State) -> Bool {
+		let taskrc = state.runningTaskrc
+		let id = UUID()
+		guard
+			let plan = try? WritePlanner(taskrc: taskrc, timeZone: timeZone)
+				.plan(.create(id, description: "New Task"), tasks: [:], at: now)
+		else {
+			return true
+		}
+		// The plan writes `status` with its own operation.
+		var properties = ["status": Status.pending.rawValue]
+		for case let .setValue(_, property, value?) in plan.operations {
+			properties[property] = value
+		}
+		let stored = StoredTask(properties: properties, uuid: id.uuidString, workingSetID: nil)
+		guard
+			let task = Models.Task(stored, udaTypes: taskrc.udaTypes),
+			let view = TaskView(task, at: now)
+		else {
+			return true
+		}
+		let row = TaskRow(isBlocked: false, task: task, udaColumns: [], urgency: 0, view: view)
+		return SidebarFilter(state.sidebarSelection).includes(row)
 	}
 
 	/// Ranks the Replica's tasks with the Taskrc the window runs on, decoding their UDAs, computing
@@ -394,5 +616,19 @@ struct ReplicaFeature {
 	}
 }
 
+/// How many times a write is planned before a plan the engine keeps refusing as stale fails it.
+private let planAttempts = 3
+
+/// How long a write runs before the subtitle says it's saving.
+private let savingDelay = Duration.milliseconds(500)
+
 /// How often an open window computes its tasks' Urgency again.
 private let urgencyInterval = Duration.seconds(60)
+
+/// Every task's properties, as the planner reads them.
+private func properties(of tasks: [StoredTask]) -> [Models.Task.ID: [String: String]] {
+	Dictionary(
+		tasks.compactMap { task in UUID(uuidString: task.uuid).map { ($0, task.properties) } },
+		uniquingKeysWith: { first, _ in first },
+	)
+}

@@ -3,6 +3,7 @@ import Foundation
 import Models
 import ReplicaClient
 import SQLite3
+import Taskrc
 import Testing
 
 /// End to end across the Swift/Rust seam, on a Replica in a temporary folder. A second engine
@@ -22,6 +23,54 @@ final class ReplicaClientTests {
 
 	deinit {
 		try? FileManager.default.removeItem(at: directory)
+	}
+
+	@Test
+	func applyCommitsOneActionAsOneUndoPoint() async throws {
+		let cli = try createReplica()
+		var tasks = replicaClient.tasks(directory).makeAsyncIterator()
+		_ = try await tasks.next()
+		let uuid = UUID()
+		let plan = try WritePlanner(taskrc: .defaults, timeZone: .gmt)
+			.plan(.create(uuid, description: "Buy milk"), tasks: [:], at: .now)
+
+		let outcome = try await replicaClient.apply(plan, directory)
+
+		guard case let .committed(committed) = outcome else {
+			Issue.record("expected a commit, got \(outcome)")
+			return
+		}
+		#expect(committed.map(\.uuid) == [uuid.uuidString.lowercased()])
+		let undoOperations = try cli.getUndoOperations()
+		#expect(undoOperations.first == .undoPoint)
+		#expect(undoOperations.count { $0 == .undoPoint } == 1)
+		#expect(undoOperations.count == plan.operations.count + 1)
+	}
+
+	@Test
+	func applyRefusesAStalePlanAndCommitsNothing() async throws {
+		let cli = try createReplica()
+		let uuid = try addPendingTask("Buy milk", with: cli)
+		var tasks = replicaClient.tasks(directory).makeAsyncIterator()
+		let stored = try #require(try await tasks.next()?.first)
+		let plan = try WritePlanner(taskrc: .defaults, timeZone: .gmt)
+			.plan(.complete([uuid]), tasks: [uuid: stored.properties], at: .now)
+		let cliChange = try cli.apply(
+			operations: [.setValue(uuid: uuid.uuidString, property: "start", value: "1790000000")],
+			expectations: [],
+		)
+		try #require(cliChange == .committed)
+		let before = try cli.getUndoOperations()
+
+		let outcome = try await replicaClient.apply(plan, directory)
+
+		guard case let .conflict(fresh) = outcome else {
+			Issue.record("expected a conflict, got \(outcome)")
+			return
+		}
+		#expect(fresh.first?.properties["start"] == "1790000000")
+		#expect(fresh.first?.properties["status"] == "pending")
+		#expect(try cli.getUndoOperations() == before)
 	}
 
 	@Test

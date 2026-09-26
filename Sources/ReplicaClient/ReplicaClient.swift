@@ -4,9 +4,15 @@ import Dispatch
 import Engine
 public import Foundation
 public import Models
+import Synchronization
 
 @DependencyClient
 public struct ReplicaClient: Sendable {
+	/// Commits `plan` as one Undo point to the Replica a `tasks` stream has open in `directory`,
+	/// unless a value it read has changed since, then reads every task again. Those tasks don't
+	/// reach the stream, which yields only what changes after them.
+	public var apply: @Sendable (_ plan: WritePlan, _ directory: URL) async throws -> ApplyOutcome
+
 	/// Opens the Replica in `directory` for one window, yielding its tasks at once and again
 	/// whenever anything, the CLI included, commits to it. Holds the directory's security scope
 	/// while it reads. Ending iteration closes the Replica once any open or read in flight returns.
@@ -18,9 +24,17 @@ public struct ReplicaClient: Sendable {
 	public var validate: @Sendable (_ directory: URL) async throws -> Void
 }
 
+public enum ApplyOutcome: Equatable, Sendable {
+	case committed([StoredTask])
+	/// Nothing was committed, because a value the plan read had changed.
+	case conflict([StoredTask])
+}
+
 public enum ReplicaError: Equatable, LocalizedError {
 	case failed(String)
 	case notAReplica
+	/// No window has the Replica open.
+	case notOpen
 	case unsupportedSchema
 
 	public var errorDescription: String? {
@@ -31,17 +45,29 @@ public enum ReplicaError: Equatable, LocalizedError {
 		case .notAReplica:
 			"This folder isn't a Taskwarrior 3 Replica"
 
+		case .notOpen:
+			"The Replica isn't open"
+
 		case .unsupportedSchema:
 			"This Replica needs a newer version of SimpleTaskWarrior"
 		}
 	}
 }
 
+/// Each window's Replica, by the folder its `tasks` stream opened, which `apply` writes through.
+private let openReplicas = Mutex<[URL: Replica]>([:])
+
 /// How often a window checks whether anything has committed to its Replica.
 private let pollInterval = Duration.milliseconds(500)
 
 extension ReplicaClient: DependencyKey {
 	public static let liveValue = Self(
+		apply: { plan, directory in
+			guard let replica = openReplicas.withLock({ $0[directory] }) else {
+				throw ReplicaError.notOpen
+			}
+			return try await replica.apply(plan)
+		},
 		tasks: { directory in
 			AsyncThrowingStream { continuation in
 				let polling = _Concurrency.Task {
@@ -55,6 +81,10 @@ extension ReplicaClient: DependencyKey {
 					}
 					do {
 						let replica = try await Replica.open(directory: directory)
+						openReplicas.withLock { $0[directory] = replica }
+						defer {
+							openReplicas.withLock { $0[directory] = nil }
+						}
 						while true {
 							// Before every read too: cancelling doesn't interrupt a blocked `open`, and
 							// once it returns, a read would start a fresh wait on the lock.
@@ -133,24 +163,81 @@ actor Replica {
 		return try replica.get()
 	}
 
+	/// Commits `plan` unless the engine refuses it as stale, then reads every task again.
+	func apply(_ plan: WritePlan) throws -> ApplyOutcome {
+		let outcome = try engine.apply(
+			operations: plan.operations.map(PlannedOperation.init),
+			expectations: plan.expectations.map(Expectation.init),
+		)
+		let tasks = try readTasks()
+		switch outcome {
+		case .committed:
+			return .committed(tasks)
+
+		case .conflict:
+			return .conflict(tasks)
+		}
+	}
+
 	/// Yields every task when anything has committed since the last read.
 	func publishTasksIfChanged(
 		to continuation: AsyncThrowingStream<[StoredTask], any Error>.Continuation,
 	) throws {
 		guard try engine.dataVersion() != readVersion else { return }
+		// Decoded by the window, with its Taskrc's UDAs.
+		try continuation.yield(readTasks())
+	}
+
+	/// Every task, recording the `data_version` they were read at.
+	private func readTasks() throws -> [StoredTask] {
 		let snapshot = try engine.snapshot()
 		readVersion = snapshot.dataVersion
 		let workingSetIDs = Dictionary(
 			snapshot.workingSet.map { ($0.uuid, Int($0.id)) },
 			uniquingKeysWith: { first, _ in first },
 		)
-		// Decoded by the window, with its Taskrc's UDAs.
-		continuation.yield(snapshot.tasks.map { task in
+		return snapshot.tasks.map { task in
 			StoredTask(
 				properties: task.properties,
 				uuid: task.uuid,
 				workingSetID: workingSetIDs[task.uuid],
 			)
-		})
+		}
+	}
+}
+
+extension Expectation {
+	fileprivate init(_ expectation: WritePlan.Expectation) {
+		self.init(
+			uuid: expectation.uuid.uuidString.lowercased(),
+			property: expectation.property,
+			value: expectation.value,
+		)
+	}
+}
+
+extension PlannedOperation {
+	fileprivate init(_ operation: WritePlan.Operation) {
+		switch operation {
+		case let .create(uuid):
+			self = .create(uuid: uuid.uuidString.lowercased())
+
+		case let .setStatus(uuid, status):
+			self = .setStatus(uuid: uuid.uuidString.lowercased(), status: Engine.Status(status))
+
+		case let .setValue(uuid, property, value):
+			self = .setValue(uuid: uuid.uuidString.lowercased(), property: property, value: value)
+		}
+	}
+}
+
+extension Engine.Status {
+	fileprivate init(_ status: Models.Status) {
+		switch status {
+		case .completed: self = .completed
+		case .deleted: self = .deleted
+		case .pending: self = .pending
+		case .recurring: self = .recurring
+		}
 	}
 }

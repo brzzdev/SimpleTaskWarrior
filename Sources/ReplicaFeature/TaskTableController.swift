@@ -5,10 +5,11 @@ import Models
 import SwiftNavigation
 import Taskrc
 
-/// Shows the rows in the reducer's order, and sends back the selection and the sort. AppKit
-/// autosaves the columns' widths, order and visibility, and the sort, under the Replica's name.
+/// Shows the rows in the reducer's order, under the new-task row while New Task has it open, and
+/// sends back the selection and the sort. AppKit autosaves the columns' widths, order and
+/// visibility, and the sort, under the Replica's name.
 final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDataSource,
-	NSTableViewDelegate
+	NSTableViewDelegate, NSTextFieldDelegate
 {
 	private let autosaveName: String
 	private var highestUrgency = 0.0
@@ -17,9 +18,16 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 	private let initialSortOrder: [TaskSort]
 	/// Set while the table follows the store, so the changes it makes aren't sent back.
 	private var isFollowingStore = false
+	private var isNewTaskRowPresented = false
+	private let rowMenu = NSMenu()
 	private var rows: IdentifiedArrayOf<TaskRow> = []
 	private let store: StoreOf<ReplicaFeature>
 	private let table = NSTableView()
+
+	/// How many rows the new-task row puts above the tasks.
+	private var rowOffset: Int {
+		isNewTaskRowPresented ? 1 : 0
+	}
 
 	init(autosaveName: String, store: StoreOf<ReplicaFeature>) {
 		self.autosaveName = autosaveName
@@ -57,6 +65,9 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 		let headerMenu = NSMenu()
 		headerMenu.delegate = self
 		table.headerView?.menu = headerMenu
+		rowMenu.items = ReplicaWindowController.taskCommandMenuItems()
+		rowMenu.delegate = self
+		table.menu = rowMenu
 		table.dataSource = self
 		table.delegate = self
 
@@ -79,7 +90,27 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 		column.isHidden.toggle()
 	}
 
+	/// Ends the new-task row with its description, unless Escape ended it first.
+	func controlTextDidEndEditing(_ notification: Notification) {
+		guard store.isNewTaskRowPresented, let field = notification.object as? NSTextField else {
+			return
+		}
+		store.send(.newTaskDescriptionSubmitted(field.stringValue))
+	}
+
+	func control(_: NSControl, textView _: NSTextView, doCommandBy selector: Selector) -> Bool {
+		guard selector == #selector(cancelOperation(_:)) else {
+			return false
+		}
+		store.send(.newTaskEditingCancelled)
+		return true
+	}
+
 	func menuNeedsUpdate(_ menu: NSMenu) {
+		guard menu !== rowMenu else {
+			updateRowMenu()
+			return
+		}
 		menu.removeAllItems()
 		for column in table.tableColumns where column.identifier.rawValue != descriptionIdentifier {
 			let item = NSMenuItem(
@@ -95,7 +126,11 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 	}
 
 	func numberOfRows(in _: NSTableView) -> Int {
-		rows.count
+		rows.count + rowOffset
+	}
+
+	func tableView(_: NSTableView, shouldSelectRow row: Int) -> Bool {
+		self.row(at: row) != nil
 	}
 
 	func tableView(
@@ -115,7 +150,15 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 		else {
 			return nil
 		}
-		let row = rows.elements[row]
+		guard let row = self.row(at: row) else {
+			guard column == .description else {
+				return nil
+			}
+			let cell = table.reusedCell(NewTaskCell.init)
+			cell.textField?.delegate = self
+			cell.textField?.stringValue = ""
+			return cell
+		}
 		switch column {
 		case .age, .due, .id, .project, .scheduled, .tags, .uda, .until, .wait:
 			let cell = table.reusedCell(TextCell.init)
@@ -138,7 +181,7 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 		guard !isFollowingStore else {
 			return
 		}
-		let selection = Set(table.selectedRowIndexes.map { rows.elements[$0].id })
+		let selection = Set(table.selectedRowIndexes.compactMap { row(at: $0)?.id })
 		store.send(.binding(.set(\.selection, selection)))
 	}
 
@@ -149,6 +192,12 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 			tableColumn.width = tableColumn.minWidth
 		}
 		table.addTableColumn(tableColumn)
+	}
+
+	/// The task a table row shows, or nil for the new-task row.
+	private func row(at index: Int) -> TaskRow? {
+		let index = index - rowOffset
+		return rows.indices.contains(index) ? rows.elements[index] : nil
 	}
 
 	/// Tells the reducer the sort the table shows.
@@ -232,22 +281,63 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 		sendSortOrder()
 	}
 
-	/// Shows the store's rows and selection, reloading only when the rows changed.
+	/// Shows the store's rows and selection, reloading only when the rows changed. Scrolls to a task
+	/// the store selects, such as one New Task created, and to the new-task row as it opens.
 	private func updateRows() {
 		let rows = store.rows
 		let highestUrgency = store.highestUrgency
-		let selection = IndexSet(store.selection.compactMap { rows.index(id: $0) })
+		let isNewTaskRowPresented = store.isNewTaskRowPresented
 		isFollowingStore = true
 		defer {
 			isFollowingStore = false
 		}
-		if rows != self.rows || highestUrgency != self.highestUrgency {
+		let opensNewTaskRow = isNewTaskRowPresented && !self.isNewTaskRowPresented
+		if
+			rows != self.rows || highestUrgency != self.highestUrgency
+			|| isNewTaskRowPresented != self.isNewTaskRowPresented
+		{
 			self.rows = rows
 			self.highestUrgency = highestUrgency
+			self.isNewTaskRowPresented = isNewTaskRowPresented
 			table.reloadData()
 		}
+		let selection = IndexSet(store.selection.compactMap { rows.index(id: $0).map { $0 + rowOffset } })
 		if table.selectedRowIndexes != selection {
+			let added = selection.subtracting(table.selectedRowIndexes)
 			table.selectRowIndexes(selection, byExtendingSelection: false)
+			if let first = added.first {
+				table.scrollRowToVisible(first)
+			}
+		}
+		if opensNewTaskRow {
+			beginNewTask()
+		}
+	}
+
+	/// Scrolls to the new-task row and puts the cursor in it.
+	private func beginNewTask() {
+		table.scrollRowToVisible(0)
+		let column = table.column(withIdentifier: NSUserInterfaceItemIdentifier(descriptionIdentifier))
+		guard
+			column >= 0,
+			let cell = table.view(atColumn: column, row: 0, makeIfNecessary: true) as? NewTaskCell
+		else {
+			return
+		}
+		view.window?.makeFirstResponder(cell.textField)
+	}
+
+	/// Acts on the right-clicked row, selecting it first where it isn't already, as Finder does. Lists
+	/// Mark Pending in place of Start/Stop, Done and Delete as the toolbar does.
+	private func updateRowMenu() {
+		let clicked = table.clickedRow
+		if row(at: clicked) != nil, !table.selectedRowIndexes.contains(clicked) {
+			table.selectRowIndexes(IndexSet(integer: clicked), byExtendingSelection: false)
+		}
+		let offersMarkPending = store.offersMarkPending
+		for item in rowMenu.items {
+			let isMarkPending = item.action == #selector(ReplicaWindowController.markPending(_:))
+			item.isHidden = isMarkPending != offersMarkPending
 		}
 	}
 
@@ -511,6 +601,29 @@ private final class DescriptionCell: NSTableCellView {
 }
 
 private let activeDotSize: CGFloat = 7
+
+/// The new-task row's description, which takes the cursor as the row opens.
+private final class NewTaskCell: NSTableCellView {
+	init() {
+		super.init(frame: .zero)
+		let field = NSTextField()
+		field.cell?.isScrollable = true
+		field.placeholderString = String(localized: "New Task")
+		field.translatesAutoresizingMaskIntoConstraints = false
+		addSubview(field)
+		NSLayoutConstraint.activate([
+			field.centerYAnchor.constraint(equalTo: centerYAnchor),
+			field.leadingAnchor.constraint(equalTo: leadingAnchor),
+			field.trailingAnchor.constraint(equalTo: trailingAnchor),
+		])
+		textField = field
+	}
+
+	@available(*, unavailable)
+	required init?(coder: NSCoder) {
+		fatalError("init(coder:) has not been implemented")
+	}
+}
 
 /// Urgency to one decimal, over a thin bar scaled to the list's highest. Urgency of 0 or less
 /// draws no bar.

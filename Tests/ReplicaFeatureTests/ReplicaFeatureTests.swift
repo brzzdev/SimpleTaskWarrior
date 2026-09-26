@@ -49,6 +49,248 @@ struct ReplicaFeatureTests {
 	}
 
 	@Test
+	func commandsAreEnabledOnlyWhenTheyApplyToEverySelectedTask() throws {
+		let pending = storedTask(0, "Buy milk", workingSetID: 1)
+		let active = storedTask(
+			1,
+			"Walk the dog",
+			workingSetID: 2,
+			["start": String(Int(now.timeIntervalSince1970))],
+		)
+		let completed = storedTask(2, "File taxes", status: "completed", workingSetID: nil)
+		var state = try loadedState([pending, active, completed])
+		func enabled() -> Set<ReplicaFeature.TaskCommand> {
+			Set([.delete, .done, .markPending, .newTask, .startStop].filter(state.isEnabled))
+		}
+
+		#expect(enabled() == [.newTask])
+
+		state.selection = [UUID(0), UUID(1)]
+		#expect(enabled() == [.delete, .done, .newTask, .startStop])
+		#expect(!state.isStopping)
+
+		state.selection = [UUID(1)]
+		#expect(state.isStopping)
+
+		state.selection = [UUID(2)]
+		#expect(enabled() == [.delete, .markPending, .newTask])
+
+		state.selection = [UUID(0), UUID(2)]
+		#expect(enabled() == [.delete, .newTask])
+
+		state.isWriting = true
+		#expect(enabled().isEmpty)
+	}
+
+	@Test
+	func doneCompletesTheSelectedTaskAndItLeavesTheList() async throws {
+		let milk = storedTask(0, "Buy milk", workingSetID: 1)
+		let dog = storedTask(1, "Walk the dog", workingSetID: 2)
+		let milkDone = storedTask(0, "Buy milk", status: "completed", workingSetID: 1)
+		let plans = LockIsolated<[WritePlan]>([])
+		let initialState = try loadedState([milk, dog], selection: [UUID(0)])
+		let store = TestStore(initialState: initialState) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.continuousClock = TestClock()
+			$0.date.now = now
+			$0.replicaClient.apply = { plan, _ in
+				plans.withValue { $0.append(plan) }
+				return .committed([milkDone, dog])
+			}
+			$0.timeZone = .gmt
+		}
+
+		await store.send(.doneButtonTapped) {
+			$0.isWriting = true
+		}
+		await store.receive(\.writeCommitted) {
+			$0.allRows = try [row(dog), row(milkDone, view: .completed)]
+			$0.isWriting = false
+			$0.rows = try [row(dog)]
+			$0.selection = []
+			$0.storedTasks = [milkDone, dog]
+		}
+		#expect(
+			try plans.value == [
+				planner.plan(
+					.complete([UUID(0)]),
+					tasks: [UUID(0): milk.properties, UUID(1): dog.properties],
+					at: now,
+				),
+			],
+		)
+		await store.finish()
+	}
+
+	@Test
+	func newTaskShowsInPendingAndIsSelectedOnceItsCreated() async throws {
+		let taxes = storedTask(1, "File taxes", status: "completed", workingSetID: nil)
+		let milk = storedTask(0, "Buy milk", workingSetID: 1)
+		let plans = LockIsolated<[WritePlan]>([])
+		var initialState = try loadedState([taxes])
+		initialState.searchText = "taxes"
+		initialState.sidebarSelection = [.view(.completed)]
+		let store = TestStore(initialState: initialState) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.continuousClock = TestClock()
+			$0.date.now = now
+			$0.replicaClient.apply = { plan, _ in
+				plans.withValue { $0.append(plan) }
+				return .committed([taxes, milk])
+			}
+			$0.timeZone = .gmt
+			$0.uuid = .incrementing
+		}
+
+		await store.send(.newTaskButtonTapped) {
+			$0.isNewTaskRowPresented = true
+			$0.rows = []
+			$0.sidebarSelection = [.view(.pending)]
+		}
+		await store.send(.newTaskDescriptionSubmitted("Buy milk")) {
+			$0.creatingTask = UUID(0)
+			$0.isNewTaskRowPresented = false
+			$0.isWriting = true
+		}
+		// The search would hide it, so it's cleared.
+		await store.receive(\.writeCommitted) {
+			$0.allRows = try [row(milk), row(taxes, view: .completed)]
+			$0.creatingTask = nil
+			$0.isWriting = false
+			$0.rows = try [row(milk)]
+			$0.searchText = ""
+			$0.selection = [UUID(0)]
+			$0.storedTasks = [taxes, milk]
+		}
+		#expect(plans.value.first?.operations.first == .create(UUID(0)))
+		await store.finish()
+	}
+
+	@Test
+	func savingShowsAfterHalfASecondAndOtherWritesWaitUntilTheWriteEnds() async throws {
+		let milk = storedTask(0, "Buy milk", workingSetID: 1)
+		let milkDone = storedTask(0, "Buy milk", status: "completed", workingSetID: 1)
+		let (commits, commit) = AsyncStream<Void>.makeStream()
+		let clock = TestClock()
+		let initialState = try loadedState([milk], selection: [UUID(0)])
+		let store = TestStore(initialState: initialState) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.continuousClock = clock
+			$0.date.now = now
+			$0.replicaClient.apply = { _, _ in
+				for await _ in commits {
+					break
+				}
+				return .committed([milkDone])
+			}
+			$0.timeZone = .gmt
+		}
+
+		await store.send(.doneButtonTapped) {
+			$0.isWriting = true
+		}
+		await store.send(.deleteButtonTapped)
+		await clock.advance(by: .milliseconds(499))
+		await clock.advance(by: .milliseconds(1))
+		await store.receive(\.savingDelayElapsed) {
+			$0.isSaving = true
+		}
+
+		commit.yield()
+		await store.receive(\.writeCommitted) {
+			$0.allRows = try [row(milkDone, view: .completed)]
+			$0.isSaving = false
+			$0.isWriting = false
+			$0.rows = []
+			$0.selection = []
+			$0.storedTasks = [milkDone]
+		}
+		await store.finish()
+	}
+
+	@Test
+	func stalePlanIsPlannedAgainAgainstTheTasksTheEngineRead() async throws {
+		let milk = storedTask(0, "Buy milk", workingSetID: 1)
+		let milkStarted = storedTask(
+			0,
+			"Buy milk",
+			workingSetID: 1,
+			["start": String(Int(now.timeIntervalSince1970))],
+		)
+		let milkDone = storedTask(0, "Buy milk", status: "completed", workingSetID: 1)
+		let plans = LockIsolated<[WritePlan]>([])
+		let initialState = try loadedState([milk], selection: [UUID(0)])
+		let store = TestStore(initialState: initialState) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.continuousClock = TestClock()
+			$0.date.now = now
+			$0.replicaClient.apply = { plan, _ in
+				plans.withValue { $0.append(plan) }
+				return plans.value.count == 1 ? .conflict([milkStarted]) : .committed([milkDone])
+			}
+			$0.timeZone = .gmt
+		}
+
+		await store.send(.doneButtonTapped) {
+			$0.isWriting = true
+		}
+		// Active, so the CLI's start raised its Urgency.
+		await store.receive(\.tasksLoaded) {
+			$0.allRows = try [row(milkStarted, urgency: 4)]
+			$0.highestUrgency = 4
+			$0.rows = try [row(milkStarted, urgency: 4)]
+			$0.storedTasks = [milkStarted]
+		}
+		await store.receive(\.writeCommitted) {
+			$0.allRows = try [row(milkDone, view: .completed)]
+			$0.highestUrgency = 0
+			$0.isWriting = false
+			$0.rows = []
+			$0.selection = []
+			$0.storedTasks = [milkDone]
+		}
+		#expect(
+			try plans.value.last
+				== planner.plan(.complete([UUID(0)]), tasks: [UUID(0): milkStarted.properties], at: now),
+		)
+		await store.finish()
+	}
+
+	@Test
+	func stalePlanFailsTheWriteAfterThreeAttempts() async throws {
+		let milk = storedTask(0, "Buy milk", workingSetID: 1)
+		let attempts = LockIsolated(0)
+		let initialState = try loadedState([milk], selection: [UUID(0)])
+		let store = TestStore(initialState: initialState) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.continuousClock = TestClock()
+			$0.date.now = now
+			$0.replicaClient.apply = { _, _ in
+				attempts.withValue { $0 += 1 }
+				return .conflict([milk])
+			}
+			$0.timeZone = .gmt
+		}
+
+		await store.send(.doneButtonTapped) {
+			$0.isWriting = true
+		}
+		await store.receive(\.tasksLoaded)
+		await store.receive(\.tasksLoaded)
+		await store.receive(\.tasksLoaded)
+		await store.receive(\.writeFailed) {
+			$0.isWriting = false
+		}
+		#expect(attempts.value == 3)
+		await store.finish()
+	}
+
+	@Test
 	func failedSaveIsReportedAndTryAgainReopensThePanel() async {
 		struct Gone: LocalizedError {
 			var errorDescription: String? { "The file is gone." }
@@ -590,6 +832,26 @@ extension AsyncStream where Element: Sendable {
 		}
 	}
 }
+
+/// A window on the Replica, showing `tasks` in the order given, as the table shows them on TW's
+/// defaults.
+private func loadedState(
+	_ tasks: [StoredTask],
+	selection: Set<UUID> = [],
+) throws -> ReplicaFeature.State {
+	var state = ReplicaFeature.State(bookmark: Data())
+	state.allRows = try tasks.map { task in
+		try row(task, view: task.properties["status"] == "completed" ? .completed : .pending)
+	}
+	state.directory = replicaDirectory
+	state.rows = IdentifiedArray(uniqueElements: state.allRows)
+	state.selection = selection
+	state.storedTasks = tasks
+	return state
+}
+
+/// The planner a window on TW's defaults writes with.
+private let planner = WritePlanner(taskrc: .defaults, timeZone: .gmt)
 
 /// `stored` as the table shows it on TW's defaults.
 private func row(
