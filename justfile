@@ -450,3 +450,20 @@ lint:
 # Remove the SwiftPM build folder, which holds the pinned DerivedData too
 clean:
 	rm -rf .build
+
+# PROTOTYPE (#65): per-Replica AppKit autosave — pass --check to run every scenario and quit
+prototype-autosave *args:
+	#!/usr/bin/env bash
+	set -euo pipefail
+	mkdir -p .build/prototype
+	swiftc -swift-version 5 -O Prototypes/AppKitAutosave/main.swift -o .build/prototype/AppKitAutosave
+	binary=.build/prototype/AppKitAutosave
+	if [ "{{args}}" != "--check" ]; then
+		exec "$binary" {{args}}
+	fi
+	# `--readd` only changes the read, so it writes like its scenario does without it.
+	for scenario in "" "--reapply" "--early" "--name-after-columns" "--name-after-columns --readd"; do
+		echo "=== scenario: ${scenario:-late}"
+		timeout -k 1 20 "$binary" --phase write ${scenario/--readd/}
+		timeout -k 1 20 "$binary" --phase read $scenario
+	done
