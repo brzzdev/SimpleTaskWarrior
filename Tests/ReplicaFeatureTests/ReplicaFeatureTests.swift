@@ -231,10 +231,12 @@ struct ReplicaFeatureTests {
 		// Tied on Urgency, so in ID order.
 		continuation.yield([dog, taxes, milk])
 		await store.receive(\.tasksLoaded) {
+			$0.allRows = try [row(milk), row(dog), row(taxes, view: .completed)]
 			$0.storedTasks = [dog, taxes, milk]
 			$0.rows = try [row(milk), row(dog)]
 		}
 		await store.send(.sortOrderChanged([TaskSort(.description, order: .reverse)])) {
+			$0.allRows = try [row(dog), row(taxes, view: .completed), row(milk)]
 			$0.rows = try [row(dog), row(milk)]
 			$0.sortOrder = [TaskSort(.description, order: .reverse)]
 		}
@@ -245,6 +247,7 @@ struct ReplicaFeatureTests {
 		let milkDone = storedTask(0, "Buy milk", status: "completed", workingSetID: 1)
 		continuation.yield([dog, taxes, milkDone])
 		await store.receive(\.tasksLoaded) {
+			$0.allRows = try [row(dog), row(taxes, view: .completed), row(milkDone, view: .completed)]
 			$0.storedTasks = [dog, taxes, milkDone]
 			$0.rows = try [row(dog)]
 			$0.selection = [UUID(1)]
@@ -286,6 +289,7 @@ struct ReplicaFeatureTests {
 		// Tied on Urgency, so in ID order.
 		continuation.yield([call, post])
 		await store.receive(\.tasksLoaded) {
+			$0.allRows = try [row(post), row(call)]
 			$0.rows = try [row(post), row(call)]
 			$0.storedTasks = [call, post]
 		}
@@ -294,6 +298,7 @@ struct ReplicaFeatureTests {
 		time.setValue(now.addingTimeInterval(60))
 		await clock.advance(by: .seconds(60))
 		await store.receive(\.timerTicked) {
+			$0.allRows = try [row(call, urgency: 5), row(post)]
 			$0.highestUrgency = 5
 			$0.rows = try [row(call, urgency: 5), row(post)]
 		}
@@ -317,6 +322,11 @@ struct ReplicaFeatureTests {
 		let storedTasks = [blocked, blocker, estimated, template]
 
 		await store.send(.tasksLoaded(storedTasks)) {
+			$0.allRows = try [
+				row(blocker, urgency: 8),
+				row(estimated),
+				row(blocked, isBlocked: true, urgency: -5),
+			]
 			$0.highestUrgency = 8
 			$0.storedTasks = storedTasks
 			$0.rows = try [
@@ -333,12 +343,119 @@ struct ReplicaFeatureTests {
 			)
 		}
 		await store.send(.taskrcLoaded(TaskrcClient.Loaded(taskrc: taskrc, url: taskrcFile))) {
+			$0.allRows[1].task.orphans = [:]
+			$0.allRows[1].task.udas = ["estimate": .numeric(3)]
+			$0.allRows[1].urgency = 5
 			$0.rows[id: UUID(0)]?.task.orphans = [:]
 			$0.rows[id: UUID(0)]?.task.udas = ["estimate": .numeric(3)]
 			$0.rows[id: UUID(0)]?.urgency = 5
 			$0.taskrc = TaskrcClient.Loaded(taskrc: taskrc, url: taskrcFile)
 			$0.udaColumns = UDAColumn.all(in: taskrc)
 		}
+	}
+
+	@Test
+	func searchMatchesDescriptionsAndAnnotationsInAnyCaseAndWithoutDiacritics() async {
+		let store = TestStore(initialState: ReplicaFeature.State(bookmark: Data())) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.date.now = now
+			$0.timeZone = .gmt
+		}
+		store.exhaustivity = .off
+		let book = storedTask(0, "Book the Café", workingSetID: 1)
+		let call = storedTask(
+			1,
+			"Call Bob",
+			workingSetID: 2,
+			["annotation_\(Int(now.timeIntervalSince1970))": "about the cafe"],
+		)
+		await store.send(.tasksLoaded([book, call]))
+
+		// TW's defaults set `search.case.sensitive`, which the search ignores.
+		await store.send(\.binding.searchText, "CAFE")
+		#expect(Set(store.state.rows.map(\.id)) == [UUID(0), UUID(1)])
+		await store.send(\.binding.searchText, "bob")
+		#expect(store.state.rows.map(\.id) == [UUID(1)])
+	}
+
+	@Test
+	func sidebarListsProjectsAndTagsFromTheSelectedViewsAndKeepsSelectedOnes() throws {
+		let rows = try [
+			row(storedTask(0, "Dig", workingSetID: 1, ["project": "Home.Garden", "tag_phone": "x"])),
+			row(storedTask(1, "Sweep", workingSetID: 2, ["project": "Home"])),
+			row(
+				storedTask(
+					2,
+					"Fix",
+					status: "completed",
+					workingSetID: nil,
+					["project": "Work", "tag_bug": "x"],
+				),
+				view: .completed,
+			),
+		]
+
+		let sidebar = Sidebar(rows: rows, selection: [.project("Errands"), .tag("bug")])
+
+		#expect(sidebar.views.map(\.count) == [2, 0, 1, 0])
+		#expect(
+			sidebar.projects == [
+				Sidebar.Project(children: [], count: 0, name: "Errands"),
+				Sidebar.Project(
+					children: [Sidebar.Project(children: [], count: 1, name: "Home.Garden")],
+					count: 2,
+					name: "Home",
+				),
+			],
+		)
+		#expect(
+			sidebar.tags == [
+				Sidebar.Count(count: 0, item: .tag("bug")),
+				Sidebar.Count(count: 1, item: .tag("phone")),
+			],
+		)
+	}
+
+	@Test
+	func sidebarNarrowsWithOrInASectionAndAndAcrossThem() async {
+		let store = TestStore(initialState: ReplicaFeature.State(bookmark: Data())) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.date.now = now
+			$0.timeZone = .gmt
+		}
+		store.exhaustivity = .off
+		let later = String(Int(now.timeIntervalSince1970) + 3_600)
+		await store.send(
+			.tasksLoaded([
+				storedTask(0, "Call the plumber", workingSetID: 1, ["project": "Home", "tag_phone": "x"]),
+				storedTask(1, "Dig the beds", workingSetID: 2, ["project": "Home.Garden"]),
+				storedTask(2, "Essay", workingSetID: 3, ["project": "Homework", "tag_phone": "x"]),
+				storedTask(3, "Fix the build", workingSetID: 4, ["project": "Work", "tag_bug": "x"]),
+				storedTask(
+					4,
+					"Ring the client",
+					workingSetID: 5,
+					["project": "Work", "tag_phone": "x", "wait": later],
+				),
+				storedTask(5, "Paint", status: "completed", workingSetID: nil, ["project": "Home"]),
+			]),
+		)
+		let descriptions = { store.state.rows.map(\.task.description).sorted() }
+
+		// No fixed view selected means Pending, and a project takes in its subprojects, by segment.
+		await store.send(\.binding.sidebarSelection, [.project("Home")])
+		#expect(descriptions() == ["Call the plumber", "Dig the beds"])
+
+		await store.send(\.binding.sidebarSelection, [.project("Home"), .project("Work")])
+		#expect(descriptions() == ["Call the plumber", "Dig the beds", "Fix the build"])
+
+		await store.send(
+			\.binding.sidebarSelection,
+			[.project("Home"), .project("Work"), .tag("phone"), .view(.pending), .view(.waiting)],
+		)
+		#expect(descriptions() == ["Call the plumber", "Ring the client"])
 	}
 
 	@Test
@@ -373,6 +490,67 @@ struct ReplicaFeatureTests {
 
 		#expect(descriptions(.forward) == ["L", "M", "H", "None"])
 		#expect(descriptions(.reverse) == ["H", "M", "L", "None"])
+	}
+
+	@Test
+	func tiedTasksWithoutAnIDHoldTheirOrderAcrossSnapshots() async {
+		let store = TestStore(initialState: ReplicaFeature.State(bookmark: Data())) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.date.now = now
+			$0.timeZone = .gmt
+		}
+		store.exhaustivity = .off
+		let paint = storedTask(0, "Paint the fence", status: "completed", workingSetID: nil)
+		let sweep = storedTask(1, "Sweep the yard", status: "completed", workingSetID: nil)
+		await store.send(\.binding.sidebarSelection, [.view(.completed)])
+
+		// Tied on Urgency and without IDs, so in UUID order whichever order the Replica reads them in.
+		await store.send(.tasksLoaded([sweep, paint]))
+		#expect(store.state.rows.map(\.id) == [UUID(0), UUID(1)])
+		await store.send(.tasksLoaded([paint, sweep]))
+		#expect(store.state.rows.map(\.id) == [UUID(0), UUID(1)])
+	}
+
+	@Test
+	func waitingTaskMovesToPendingAsItsWaitPasses() async {
+		let (tasks, continuation) = AsyncThrowingStream<[StoredTask], any Error>.makeStream()
+		let clock = TestClock()
+		let time = LockIsolated(now)
+		let store = TestStore(initialState: ReplicaFeature.State(bookmark: Data())) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.bookmarkClient.changes = { .finished }
+			$0.bookmarkClient.grants = { [:] }
+			$0.bookmarkClient.resolve = { _ in replicaDirectory }
+			$0.continuousClock = clock
+			$0.date = DateGenerator { time.value }
+			$0.replicaClient.tasks = { _ in tasks }
+			$0.taskrcClient.load = { _, _, _ in .finished }
+			$0.timeZone = .gmt
+		}
+		store.exhaustivity = .off
+		let call = storedTask(
+			0,
+			"Call the bank",
+			workingSetID: 1,
+			["wait": String(Int(now.timeIntervalSince1970) + 30)],
+		)
+
+		let task = await store.send(.fetchRequested)
+		continuation.yield([call])
+		await store.receive(\.tasksLoaded)
+		#expect(store.state.rows.isEmpty)
+		#expect(store.state.sidebar.views.map(\.count) == [0, 1, 0, 0])
+
+		// Past `wait`, with nothing committed to the Replica.
+		time.setValue(now.addingTimeInterval(60))
+		await clock.advance(by: .seconds(60))
+		await store.receive(\.timerTicked)
+		#expect(store.state.rows.map(\.id) == [UUID(0)])
+
+		continuation.finish()
+		await task.cancel()
 	}
 
 	@Test
@@ -418,6 +596,7 @@ private func row(
 	_ stored: StoredTask,
 	isBlocked: Bool = false,
 	urgency: Double = 0,
+	view: TaskView = .pending,
 ) throws -> TaskRow {
 	let task = Models.Task(stored, udaTypes: Taskrc.defaults.udaTypes)
 	return try TaskRow(
@@ -425,6 +604,7 @@ private func row(
 		task: #require(task),
 		udaColumns: UDAColumn.all(in: .defaults),
 		urgency: urgency,
+		view: view,
 	)
 }
 

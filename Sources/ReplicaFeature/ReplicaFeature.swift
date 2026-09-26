@@ -12,6 +12,9 @@ import TaskrcClient
 struct ReplicaFeature {
 	@ObservableState
 	struct State: Equatable {
+		/// Every task a fixed view shows, ranked and in `sortOrder`, which the sidebar and search narrow
+		/// to `rows`.
+		var allRows: [TaskRow] = []
 		let bookmark: Data
 
 		var directory: URL?
@@ -22,19 +25,27 @@ struct ReplicaFeature {
 		/// The highest Urgency in the table, which scales every row's bar.
 		var highestUrgency = 0.0
 		var isTaskrcHintPresented = false
-		/// Every task in the Replica as last read, which the blocked rule and Urgency read.
-		var storedTasks: [StoredTask] = []
-		/// Pending tasks, in `sortOrder`.
+		/// The tasks the sidebar and search leave, in `sortOrder`.
 		var rows: IdentifiedArrayOf<TaskRow> = []
+		/// Narrows the table after the sidebar.
+		var searchText = ""
 		/// Kept by UUID, so it survives the CLI renumbering tasks.
 		var selection: Set<Models.Task.ID> = []
+		var sidebarSelection: Set<SidebarItem> = []
 		/// The table's sort, which the table autosaves per Replica and reports once it restores.
 		var sortOrder = [TaskSort(.urgency, order: .reverse)]
+		/// Every task in the Replica as last read, which the blocked rule and Urgency read.
+		var storedTasks: [StoredTask] = []
 		var taskrc: TaskrcClient.Loaded?
 		/// Why the last Taskrc or grant the user chose couldn't be kept.
 		var taskrcSaveFailure: TaskrcSaveFailure?
 		/// The running Taskrc's UDAs, which the table offers as columns.
 		var udaColumns = UDAColumn.all(in: .defaults)
+
+		/// The active Context's name, where there is one.
+		var activeContext: String? {
+			runningTaskrc["context"].flatMap { $0.isEmpty ? nil : $0 }
+		}
 
 		/// Whether Grant Access… can fix the Taskrc's problem.
 		var canGrantAccess: Bool {
@@ -62,6 +73,10 @@ struct ReplicaFeature {
 		/// The Taskrc the window runs on: the last one that loaded, or TW's defaults.
 		var runningTaskrc: Taskrc {
 			taskrc?.taskrc ?? .defaults
+		}
+
+		var sidebar: Sidebar {
+			Sidebar(rows: allRows, selection: sidebarSelection)
 		}
 
 		/// The file panel that fixes the Taskrc's problem: a grant for an include the app can't read,
@@ -140,6 +155,10 @@ struct ReplicaFeature {
 		BindingReducer()
 		Reduce { state, action in
 			switch action {
+			case .binding(\.searchText), .binding(\.sidebarSelection):
+				filterRows(&state)
+				return .none
+
 			case .binding:
 				return .none
 
@@ -295,36 +314,59 @@ struct ReplicaFeature {
 		.cancellable(id: CancelID.taskrc, cancelInFlight: true)
 	}
 
-	/// Ranks the Replica's pending tasks with the Taskrc the window runs on, decoding their UDAs and
-	/// computing their Urgency again, and drops selected tasks that left the table.
+	/// Ranks the Replica's tasks with the Taskrc the window runs on, decoding their UDAs, computing
+	/// their Urgency and sorting them into fixed views again, then sorts and narrows them.
 	private func updateRows(_ state: inout State) {
 		let taskrc = state.runningTaskrc
 		let tasks = state.storedTasks.compactMap { Models.Task($0, udaTypes: taskrc.udaTypes) }
 		let blocked = DependencyScan(tasks).blocked
 		let urgencies = UrgencyCoefficients(taskrc).urgencies(of: tasks, at: now, in: timeZone)
 		state.udaColumns = UDAColumn.all(in: taskrc)
-		state.rows = IdentifiedArray(
-			uniqueElements: tasks
-				.filter { $0.status == .pending && !$0.isTemplate }
-				.map { [udaColumns = state.udaColumns] task in
-					TaskRow(
-						isBlocked: blocked.contains(task.id),
-						task: task,
-						udaColumns: udaColumns,
-						urgency: urgencies[task.id] ?? 0,
-					)
-				},
-		)
+		state.allRows = tasks.compactMap { [now, udaColumns = state.udaColumns] task in
+			TaskView(task, at: now).map { view in
+				TaskRow(
+					isBlocked: blocked.contains(task.id),
+					task: task,
+					udaColumns: udaColumns,
+					urgency: urgencies[task.id] ?? 0,
+					view: view,
+				)
+			}
+		}
 		sortRows(&state)
+	}
+
+	/// Narrows the ranked rows by the sidebar, then the search, and drops selected tasks that left
+	/// the table.
+	private func filterRows(_ state: inout State) {
+		// Filtering keeps `allRows`' order, so the table needs no sort of its own.
+		state.rows = IdentifiedArray(
+			uniqueElements: state.allRows.filter { [
+				filter = SidebarFilter(state.sidebarSelection),
+				search = state.searchText,
+			] in
+				filter.includes($0) && $0.matches(search: search)
+			},
+		)
 		state.highestUrgency = state.rows.map(\.urgency).max() ?? 0
 		state.selection.formIntersection(state.rows.ids)
 	}
 
-	/// Sorts the table's rows by `sortOrder`, breaking ties by ID so the order holds still.
+	/// Sorts the ranked rows by `sortOrder`, then narrows them to the table. Ties break by ID, then
+	/// by UUID for the completed and deleted tasks that have no ID, so the order holds still whatever
+	/// order the Replica reads them in.
 	private func sortRows(_ state: inout State) {
-		state.rows = IdentifiedArray(
-			uniqueElements: state.rows.sorted(using: state.sortOrder + [TaskSort(.id)]),
-		)
+		let comparators = state.sortOrder + [TaskSort(.id)]
+		state.allRows.sort { lhs, rhs in
+			for comparator in comparators {
+				let order = comparator.compare(lhs, rhs)
+				if order != .orderedSame {
+					return order == .orderedAscending
+				}
+			}
+			return lhs.id < rhs.id
+		}
+		filterRows(&state)
 	}
 
 	/// Runs `save` with the Replica's folder, then loads its Taskrc again. A failed save is

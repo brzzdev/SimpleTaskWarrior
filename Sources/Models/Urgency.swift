@@ -184,7 +184,7 @@ private struct UrgencyCalculator {
 			(task.project != nil ? 1 : 0, coefficients.project),
 			(task.start != nil ? 1 : 0, coefficients.active),
 			(task.scheduled.map { $0 < now } == true ? 1 : 0, coefficients.scheduled),
-			(isWaiting(task) ? 1 : 0, coefficients.waiting),
+			(task.isWaiting(at: now) ? 1 : 0, coefficients.waiting),
 			(scan.blocked.contains(task.id) ? 1 : 0, coefficients.blocked),
 			(countTerm(task.annotations.count), coefficients.annotations),
 			(countTerm(task.tags.count), coefficients.tags),
@@ -295,7 +295,7 @@ private struct UrgencyCalculator {
 
 		case "PARENT", "TEMPLATE": return task.hasTemplateTag
 
-		case "PENDING": return task.status == .pending && !isWaiting(task)
+		case "PENDING": return task.status == .pending && !task.isWaiting(at: now)
 
 		case "PRIORITY": return task.attribute("priority") != nil
 
@@ -304,7 +304,7 @@ private struct UrgencyCalculator {
 		case "QUARTER": return isOpen && isDue(task, within: .quarter)
 
 		case "READY":
-			return task.status == .pending && !isWaiting(task) && !scan.blocked.contains(task.id)
+			return task.status == .pending && !task.isWaiting(at: now) && !scan.blocked.contains(task.id)
 				&& task.scheduled.map { now > $0 } != false
 
 		case "SCHEDULED": return task.scheduled != nil
@@ -319,7 +319,7 @@ private struct UrgencyCalculator {
 
 		case "UNTIL": return task.until != nil
 
-		case "WAITING": return isWaiting(task)
+		case "WAITING": return task.isWaiting(at: now)
 
 		case "WEEK": return isOpen && isDue(task, within: .weekOfYear)
 
@@ -346,18 +346,13 @@ private struct UrgencyCalculator {
 		return interval.start <= due && due < interval.end
 	}
 
-	/// TW's `is_waiting`: pending, with a `wait` still ahead.
-	private func isWaiting(_ task: Task) -> Bool {
-		task.status == .pending && task.wait.map { $0 > now } == true
-	}
-
 	private func matches(_ task: Task, _ match: UrgencyCoefficients.UserCoefficient.Match) -> Bool {
 		switch match {
 		case let .keyword(keyword):
 			task.description.contains(keyword)
 
 		case let .project(project):
-			task.project.map { $0 == project || $0.hasPrefix(project + ".") } ?? false
+			task.isIn(project: project)
 
 		case let .tag(tag):
 			hasTag(task, tag)
