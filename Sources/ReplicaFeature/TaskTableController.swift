@@ -318,6 +318,7 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 			isFollowingStore = false
 		}
 		let opensNewTaskRow = isNewTaskRowPresented && !self.isNewTaskRowPresented
+		let keepsNewTaskRow = isNewTaskRowPresented && self.isNewTaskRowPresented
 		if
 			rows != self.rows || highestUrgency != self.highestUrgency
 			|| isNewTaskRowPresented != self.isNewTaskRowPresented
@@ -325,7 +326,16 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 			self.rows = rows
 			self.highestUrgency = highestUrgency
 			self.isNewTaskRowPresented = isNewTaskRowPresented
-			table.reloadData()
+			if keepsNewTaskRow {
+				// Reloading the new-task row would end its editing and submit the draft early.
+				table.noteNumberOfRowsChanged()
+				table.reloadData(
+					forRowIndexes: IndexSet(integersIn: rowOffset ..< table.numberOfRows),
+					columnIndexes: IndexSet(integersIn: 0 ..< table.numberOfColumns),
+				)
+			} else {
+				table.reloadData()
+			}
 		}
 		let selection = IndexSet(store.selection.compactMap { rows.index(id: $0).map { $0 + rowOffset } })
 		if table.selectedRowIndexes != selection {
