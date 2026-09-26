@@ -266,10 +266,10 @@ final class EmptyStateView: NSView {
 		addSubview(stack)
 		// Short enough lines to read where the view is wide, and as wide as that where it's not, since
 		// a wrapping label would otherwise keep whatever narrow width it first wrapped at.
-		let readableWidth = messageLabel.widthAnchor.constraint(equalToConstant: 360)
+		let readableWidth = messageLabel.widthAnchor.constraint(equalToConstant: readableMessageWidth)
 		readableWidth.priority = NSLayoutConstraint.Priority(500)
 		NSLayoutConstraint.activate([
-			messageLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 360),
+			messageLabel.widthAnchor.constraint(lessThanOrEqualToConstant: readableMessageWidth),
 			readableWidth,
 			stack.centerXAnchor.constraint(equalTo: centerXAnchor),
 			stack.centerYAnchor.constraint(equalTo: centerYAnchor),
@@ -283,6 +283,9 @@ final class EmptyStateView: NSView {
 		fatalError("init(coder:) has not been implemented")
 	}
 }
+
+/// The widest an empty state's message runs, for lines short enough to read.
+private let readableMessageWidth: CGFloat = 360
 
 /// The banner's text for `problem`: where it is, what's wrong, and, when the window keeps running
 /// on an earlier parse, what that risks.
