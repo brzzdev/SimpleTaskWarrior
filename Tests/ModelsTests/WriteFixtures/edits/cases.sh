@@ -1,5 +1,5 @@
 # Sourced by `just fixtures`. Each `case_<name>` builds a fresh Replica with `task`, then runs the
-# write under test with `act`, all within one second.
+# write under test with `act`, or `refuse` where `task` must refuse it, all within one second.
 
 case_add() {
 	act add Alpha
@@ -153,6 +153,13 @@ case_start_deleted() {
 	task add Alpha
 	task 1 delete
 	act "$(task +LATEST _uuids)" start
+}
+
+case_start_deleted_while_started() {
+	task add Alpha
+	task 1 start
+	task 1 delete
+	refuse "$(task +LATEST _uuids)" start
 }
 
 case_stop() {

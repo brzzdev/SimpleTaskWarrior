@@ -44,6 +44,8 @@ struct WritePlannerTests {
 		"edits/start": { try .start([$0.id("Alpha")]) },
 		"edits/start_completed": { try .start([$0.id("Alpha")]) },
 		"edits/start_deleted": { try .start([$0.id("Alpha")]) },
+		// `task start` refuses a task that kept its `start` when deleted: it's already started.
+		"edits/start_deleted_while_started": { try .start([$0.id("Alpha")]) },
 		"edits/stop": { try .stop([$0.id("Alpha")]) },
 	]
 

@@ -174,26 +174,48 @@ fixtures:
 	done
 
 	# Each `case_<name>` in a write fixture's `cases.sh` builds a fresh Replica under its `taskrc`,
-	# in UTC, then runs one write with `act`. `<name>.json` records the second it ran in, the
-	# Replica's properties before and after, and the operations the write committed, which
-	# `WritePlannerTests` plans the same write against. A case that straddles a second is retried,
-	# so every stamp the case makes is `now`, or the recording fails.
+	# in UTC, then runs one write with `act`, or with `refuse` where `task` must refuse it.
+	# `<name>.json` records the second it ran in, the Replica's properties before and after, and the
+	# operations the write committed, which `WritePlannerTests` plans the same write against. A case
+	# that straddles a second is retried, so every stamp the case makes is `now`, or the recording
+	# fails.
 	properties() {
 		sqlite3 "$replica/taskchampion.sqlite3" \
 			"SELECT coalesce(json_group_object(uuid, json(data)), '{}') FROM tasks"
 	}
-	act() {
-		if [ -d "$replica" ]; then properties; else echo '{}'; fi > "$scratch/before"
-		task "$@"
+	snapshot() {
+		last=0
+		if [ ! -d "$replica" ]; then
+			echo '{}' > "$scratch/before"
+			return
+		fi
+		properties > "$scratch/before"
+		last="$(sqlite3 "$replica/taskchampion.sqlite3" "SELECT coalesce(max(id), 0) FROM operations")"
+	}
+	# The operations after the snapshot's, rather than since the newest Undo point: a refused write
+	# pushes none, so that would record the previous command's. The Undo point itself is left out.
+	record() {
 		properties > "$scratch/after"
-		# Everything since the newest Undo point, which the write pushed first.
 		sqlite3 "$replica/taskchampion.sqlite3" "
 			SELECT json_group_array(json(data)) FROM (
 				SELECT data FROM operations
-				WHERE id > (SELECT max(id) FROM operations WHERE data = '\"UndoPoint\"')
+				WHERE id > $last AND data != '\"UndoPoint\"'
 				ORDER BY id
 			)
 		" > "$scratch/operations"
+	}
+	act() {
+		snapshot
+		task "$@"
+		record
+	}
+	refuse() {
+		snapshot
+		if task "$@"; then
+			echo "task accepted \`$*\`, which the case expects it to refuse" >&2
+			return 1
+		fi
+		record
 	}
 	for fixture in "$PWD"/Tests/ModelsTests/WriteFixtures/*/; do
 		replica="$taskdata/writes"

@@ -1,0 +1,24 @@
+{
+	"after": {
+		"d5ca8ed1-0b94-4b7e-876b-e1cfde979c5d": {
+			"description": "Alpha",
+			"end": "1790442876",
+			"entry": "1790442876",
+			"modified": "1790442876",
+			"start": "1790442876",
+			"status": "deleted"
+		}
+	},
+	"before": {
+		"d5ca8ed1-0b94-4b7e-876b-e1cfde979c5d": {
+			"description": "Alpha",
+			"end": "1790442876",
+			"entry": "1790442876",
+			"modified": "1790442876",
+			"start": "1790442876",
+			"status": "deleted"
+		}
+	},
+	"now": 1790442876,
+	"operations": []
+}
