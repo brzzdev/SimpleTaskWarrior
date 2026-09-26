@@ -17,6 +17,8 @@ let package = Package(
 		// Direct because MemberImportVisibility wants the declaring module imported
 		// directly, not reached as TCA's re-export.
 		.package(url: "https://github.com/pointfreeco/swift-sharing", from: "2.10.1"),
+		// Image snapshots of the leaf content views, in `ReplicaFeatureTests`.
+		.package(url: "https://github.com/pointfreeco/swift-snapshot-testing", from: "1.19.6"),
 	],
 	targets: [
 		// Assembled into `Engine/build/` by `just engine`, which also regenerates the
@@ -139,6 +141,7 @@ let package = Package(
 				"TaskrcClient",
 				"TestSupport",
 				.product(name: "ComposableArchitecture", package: "swift-composable-architecture"),
+				.product(name: "SnapshotTesting", package: "swift-snapshot-testing"),
 			],
 		),
 		.testTarget(

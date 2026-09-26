@@ -3,20 +3,7 @@ import AppKit
 import ComposableArchitecture
 import Models
 import SwiftNavigation
-import SwiftUI
 import Taskrc
-
-/// Hosts the task table in the window's SwiftUI content, until that content moves to AppKit.
-struct TaskTable: NSViewControllerRepresentable {
-	let autosaveName: String
-	let store: StoreOf<ReplicaFeature>
-
-	func makeNSViewController(context _: Context) -> TaskTableController {
-		TaskTableController(autosaveName: autosaveName, store: store)
-	}
-
-	func updateNSViewController(_: TaskTableController, context _: Context) {}
-}
 
 /// Shows the rows in the reducer's order, and sends back the selection and the sort. AppKit
 /// autosaves the columns' widths, order and visibility, and the sort, under the Replica's name.
