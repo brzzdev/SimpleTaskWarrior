@@ -222,6 +222,27 @@ final class BannerView: NSView {
 	}
 }
 
+extension NSTableView {
+	/// A cell the table can reuse, or a new one from `make`.
+	func reusedCell<Cell: NSView>(_ make: () -> Cell) -> Cell {
+		let identifier = NSUserInterfaceItemIdentifier(String(describing: Cell.self))
+		if let cell = makeView(withIdentifier: identifier, owner: nil) as? Cell {
+			return cell
+		}
+		let cell = make()
+		cell.identifier = identifier
+		return cell
+	}
+}
+
+/// A label that tail-truncates.
+func truncatingLabel() -> NSTextField {
+	let label = NSTextField(labelWithString: "")
+	label.lineBreakMode = .byTruncatingTail
+	label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+	return label
+}
+
 /// A label that wraps at whatever width it's laid out at. An `NSTextField` otherwise reports its
 /// height for the width it was last told, so its container sizes itself for too few lines.
 final class WrappingLabel: NSTextField {

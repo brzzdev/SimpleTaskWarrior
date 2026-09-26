@@ -73,7 +73,7 @@ struct Sidebar: Equatable {
 		for tag in listed.flatMap(\.task.tags) {
 			tagCounts[tag, default: 0] += 1
 		}
-		tags = sorted(tagCounts).map { Count(count: $0.value, item: .tag($0.key)) }
+		tags = byName(tagCounts).map { Count(count: $0.value, item: .tag($0.key)) }
 	}
 }
 
@@ -81,7 +81,7 @@ extension Sidebar.Project {
 	/// The projects in `counts` one segment below `parent`, or the top-level ones for nil, with
 	/// theirs below them.
 	fileprivate static func children(of parent: String?, in counts: [String: Int]) -> [Self] {
-		sorted(counts.filter { $0.key.parentProject == parent }).map { name, count in
+		byName(counts.filter { $0.key.parentProject == parent }).map { name, count in
 			Self(children: children(of: name, in: counts), count: count, name: name)
 		}
 	}
@@ -148,6 +148,6 @@ private func zeroCounts(_ names: [String]) -> [String: Int] {
 }
 
 /// `counts` in the order Finder sorts names.
-private func sorted(_ counts: [String: Int]) -> [(key: String, value: Int)] {
+private func byName(_ counts: [String: Int]) -> [(key: String, value: Int)] {
 	counts.sorted { $0.key.localizedStandardCompare($1.key) == .orderedAscending }
 }

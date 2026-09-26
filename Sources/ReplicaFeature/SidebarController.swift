@@ -177,7 +177,7 @@ final class SidebarController: NSViewController, NSOutlineViewDataSource, NSOutl
 
 	/// The node a expand or collapse notification is about.
 	private func expandedNode(in notification: Notification) -> SidebarNode? {
-		notification.userInfo?["NSObject"] as? SidebarNode
+		notification.userInfo?[outlineItemKey] as? SidebarNode
 	}
 
 	/// Shows the store's sidebar and its selection, reloading only when the sidebar changed, and
@@ -378,5 +378,9 @@ private func contextSummary(skipped: [String]) -> String {
 }
 
 private let contextPopoverWidth: CGFloat = 260
+
+/// Where an outline's expand and collapse notifications carry the item, as `NSOutlineView`
+/// documents.
+private let outlineItemKey = "NSObject"
 
 private let symbolWidth: CGFloat = 20

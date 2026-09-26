@@ -406,27 +406,6 @@ private func udaText(_ value: UDAValue?) -> String {
 	}
 }
 
-extension NSTableView {
-	/// A cell the table can reuse, or a new one from `make`.
-	func reusedCell<Cell: NSView>(_ make: () -> Cell) -> Cell {
-		let identifier = NSUserInterfaceItemIdentifier(String(describing: Cell.self))
-		if let cell = makeView(withIdentifier: identifier, owner: nil) as? Cell {
-			return cell
-		}
-		let cell = make()
-		cell.identifier = identifier
-		return cell
-	}
-}
-
-/// A label that tail-truncates.
-func truncatingLabel() -> NSTextField {
-	let label = NSTextField(labelWithString: "")
-	label.lineBreakMode = .byTruncatingTail
-	label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-	return label
-}
-
 /// A caption-sized label, as the description's markers are.
 private func captionLabel(_ string: String, color: NSColor) -> NSTextField {
 	let label = NSTextField(labelWithString: string)

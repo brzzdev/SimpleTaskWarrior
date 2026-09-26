@@ -32,10 +32,10 @@ struct ReplicaFeature {
 		/// Kept by UUID, so it survives the CLI renumbering tasks.
 		var selection: Set<Models.Task.ID> = []
 		var sidebarSelection: Set<SidebarItem> = []
-		/// Every task in the Replica as last read, which the blocked rule and Urgency read.
-		var storedTasks: [StoredTask] = []
 		/// The table's sort, which the table autosaves per Replica and reports once it restores.
 		var sortOrder = [TaskSort(.urgency, order: .reverse)]
+		/// Every task in the Replica as last read, which the blocked rule and Urgency read.
+		var storedTasks: [StoredTask] = []
 		var taskrc: TaskrcClient.Loaded?
 		/// Why the last Taskrc or grant the user chose couldn't be kept.
 		var taskrcSaveFailure: TaskrcSaveFailure?
@@ -70,13 +70,13 @@ struct ReplicaFeature {
 				: location
 		}
 
-		var sidebar: Sidebar {
-			Sidebar(rows: allRows, selection: sidebarSelection)
-		}
-
 		/// The Taskrc the window runs on: the last one that loaded, or TW's defaults.
 		var runningTaskrc: Taskrc {
 			taskrc?.taskrc ?? .defaults
+		}
+
+		var sidebar: Sidebar {
+			Sidebar(rows: allRows, selection: sidebarSelection)
 		}
 
 		/// The file panel that fixes the Taskrc's problem: a grant for an include the app can't read,
