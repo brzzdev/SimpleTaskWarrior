@@ -223,12 +223,6 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 		sendSortOrder()
 	}
 
-	/// Shows the table once its layout is restored, so the default never draws first, and while the
-	/// Replica is open, since a failure takes its place.
-	private func updateVisibility() {
-		view.isHidden = table.autosaveName == nil || store.failure != nil
-	}
-
 	/// Shows the store's rows and selection, reloading only when the rows changed.
 	private func updateRows() {
 		let rows = store.rows
@@ -246,6 +240,12 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 		if table.selectedRowIndexes != selection {
 			table.selectRowIndexes(selection, byExtendingSelection: false)
 		}
+	}
+
+	/// Shows the table once its layout is restored, so the default never draws first, and while the
+	/// Replica is open, since a failure takes its place.
+	private func updateVisibility() {
+		view.isHidden = table.autosaveName == nil || store.failure != nil
 	}
 }
 
