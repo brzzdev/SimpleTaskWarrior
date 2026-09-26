@@ -493,6 +493,26 @@ struct ReplicaFeatureTests {
 	}
 
 	@Test
+	func tiedTasksWithoutAnIDHoldTheirOrderAcrossSnapshots() async {
+		let store = TestStore(initialState: ReplicaFeature.State(bookmark: Data())) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.date.now = now
+			$0.timeZone = .gmt
+		}
+		store.exhaustivity = .off
+		let paint = storedTask(0, "Paint the fence", status: "completed", workingSetID: nil)
+		let sweep = storedTask(1, "Sweep the yard", status: "completed", workingSetID: nil)
+		await store.send(\.binding.sidebarSelection, [.view(.completed)])
+
+		// Tied on Urgency and without IDs, so in UUID order whichever order the Replica reads them in.
+		await store.send(.tasksLoaded([sweep, paint]))
+		#expect(store.state.rows.map(\.id) == [UUID(0), UUID(1)])
+		await store.send(.tasksLoaded([paint, sweep]))
+		#expect(store.state.rows.map(\.id) == [UUID(0), UUID(1)])
+	}
+
+	@Test
 	func waitingTaskMovesToPendingAsItsWaitPasses() async {
 		let (tasks, continuation) = AsyncThrowingStream<[StoredTask], any Error>.makeStream()
 		let clock = TestClock()

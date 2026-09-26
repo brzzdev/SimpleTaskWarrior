@@ -352,10 +352,20 @@ struct ReplicaFeature {
 		state.selection.formIntersection(state.rows.ids)
 	}
 
-	/// Sorts the ranked rows by `sortOrder`, breaking ties by ID so the order holds still, then
-	/// narrows them to the table.
+	/// Sorts the ranked rows by `sortOrder`, then narrows them to the table. Ties break by ID, then
+	/// by UUID for the completed and deleted tasks that have no ID, so the order holds still whatever
+	/// order the Replica reads them in.
 	private func sortRows(_ state: inout State) {
-		state.allRows.sort(using: state.sortOrder + [TaskSort(.id)])
+		let comparators = state.sortOrder + [TaskSort(.id)]
+		state.allRows.sort { lhs, rhs in
+			for comparator in comparators {
+				let order = comparator.compare(lhs, rhs)
+				if order != .orderedSame {
+					return order == .orderedAscending
+				}
+			}
+			return lhs.id < rhs.id
+		}
 		filterRows(&state)
 	}
 
