@@ -12,6 +12,8 @@ let package = Package(
 		.package(url: "https://github.com/pointfreeco/swift-composable-architecture", from: "1.26.2"),
 		// Direct because the app host detects a test run through `TestContext`.
 		.package(url: "https://github.com/pointfreeco/swift-issue-reporting", from: "2.1.1"),
+		// Direct for `observe`, which binds the AppKit views to their store.
+		.package(url: "https://github.com/pointfreeco/swift-navigation", from: "2.11.2"),
 		// Direct because MemberImportVisibility wants the declaring module imported
 		// directly, not reached as TCA's re-export.
 		.package(url: "https://github.com/pointfreeco/swift-sharing", from: "2.10.1"),
@@ -78,6 +80,7 @@ let package = Package(
 				"TaskrcClient",
 				.product(name: "ComposableArchitecture", package: "swift-composable-architecture"),
 				.product(name: "Sharing", package: "swift-sharing"),
+				.product(name: "SwiftNavigation", package: "swift-navigation"),
 			],
 		),
 		.target(

@@ -141,13 +141,16 @@ private struct Pairing: Codable, Equatable {
 /// The index of the pairing whose Replica bookmark resolves to the folder `replica`, re-saving any
 /// stale Replica bookmark it resolves on the way.
 private func pairingIndex(of replica: URL, in stored: inout Stored) -> Int? {
-	let folder = { (url: URL) in
-		URL(filePath: url.path(percentEncoded: false), directoryHint: .isDirectory).standardizedFileURL
-	}
-	return stored.pairings.indices.first { index in
+	stored.pairings.indices.first { index in
 		url(of: stored.pairings[index].replica) { stored.pairings[index].replica = $0 }
-			.map(folder) == folder(replica)
+			.map(standardizedFolder) == standardizedFolder(replica)
 	}
+}
+
+/// The folder at `url`, standardized so two spellings of it compare equal: how the app tells
+/// whether two URLs name the same Replica.
+public func standardizedFolder(_ url: URL) -> URL {
+	URL(filePath: url.path(percentEncoded: false), directoryHint: .isDirectory).standardizedFileURL
 }
 
 /// The URL `bookmark` resolves to, and whether the bookmark is stale and wants saving again.
