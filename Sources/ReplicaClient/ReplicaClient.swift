@@ -89,7 +89,12 @@ extension ReplicaClient: DependencyKey {
 						let replica = try await Replica.open(directory: directory)
 						openReplicas.withLock { $0[directory] = replica }
 						defer {
-							openReplicas.withLock { $0[directory] = nil }
+							// A window reopened on the folder may have registered its own by now.
+							openReplicas.withLock { replicas in
+								if replicas[directory] === replica {
+									replicas[directory] = nil
+								}
+							}
 						}
 						while true {
 							// Before every read too: cancelling doesn't interrupt a blocked `open`, and
