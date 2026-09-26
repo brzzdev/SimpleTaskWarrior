@@ -204,47 +204,6 @@ struct ReplicaFeatureTests {
 	}
 
 	@Test
-	func layoutIsKeptPerReplicaForTheNextWindowOnIt() async {
-		let work = URL(filePath: "/Users/paul/work", directoryHint: .isDirectory)
-		let home = URL(filePath: "/Users/paul/home", directoryHint: .isDirectory)
-		let sortOrder = [TaskSort(.description)]
-		func window() -> TestStoreOf<ReplicaFeature> {
-			TestStore(initialState: ReplicaFeature.State(bookmark: Data())) {
-				ReplicaFeature()
-			} withDependencies: {
-				$0.bookmarkClient.changes = { .finished }
-				$0.taskrcClient.load = { _, _, _ in .finished }
-			}
-		}
-
-		let closed = window()
-		await closed.send(.directoryResolved(work)) {
-			$0.directory = work
-		}
-		closed.state.$layout.withLock { $0.sortOrder = sortOrder }
-
-		let reopened = window()
-		await reopened.send(.directoryResolved(work)) {
-			$0.directory = work
-			$0.$layout.withLock { $0.sortOrder = sortOrder }
-		}
-
-		let other = window()
-		await other.send(.directoryResolved(home)) {
-			$0.directory = home
-		}
-	}
-
-	@Test
-	func layoutKeyKeepsAnEncodedLookingFolderApart() {
-		let dotted = URL(filePath: "/tmp/acme.prod", directoryHint: .isDirectory)
-		let encoded = URL(filePath: "/tmp/acme%2Eprod", directoryHint: .isDirectory)
-
-		#expect(layoutKey(for: dotted) != layoutKey(for: encoded))
-		#expect(!layoutKey(for: dotted).contains("."))
-	}
-
-	@Test
 	func listsPendingTasksSortedAndDropsSelectedTasksThatLeave() async {
 		let directory = URL(filePath: "/Users/paul/.task")
 		let (tasks, continuation) = AsyncThrowingStream<[StoredTask], any Error>.makeStream()
@@ -275,10 +234,9 @@ struct ReplicaFeatureTests {
 			$0.storedTasks = [dog, taxes, milk]
 			$0.rows = try [row(milk), row(dog)]
 		}
-		store.state.$layout.withLock { $0.sortOrder = [TaskSort(.description, order: .reverse)] }
-		await store.send(.sortOrderChanged) {
-			$0.$layout.withLock { $0.sortOrder = [TaskSort(.description, order: .reverse)] }
+		await store.send(.sortOrderChanged([TaskSort(.description, order: .reverse)])) {
 			$0.rows = try [row(dog), row(milk)]
+			$0.sortOrder = [TaskSort(.description, order: .reverse)]
 		}
 		await store.send(\.binding.selection, [UUID(0), UUID(1)]) {
 			$0.selection = [UUID(0), UUID(1)]
@@ -381,6 +339,20 @@ struct ReplicaFeatureTests {
 			$0.taskrc = TaskrcClient.Loaded(taskrc: taskrc, url: taskrcFile)
 			$0.udaColumns = UDAColumn.all(in: taskrc)
 		}
+	}
+
+	@Test
+	func sortDescriptorsRoundTripThroughTheTableColumnIdentifiers() {
+		let sorts = [
+			TaskSort(.description),
+			TaskSort(.uda("estimate.hours"), order: .reverse),
+			TaskSort(.urgency, order: .reverse),
+		]
+		let descriptors = sorts.map(\.descriptor)
+
+		#expect(descriptors.map(\.key) == ["description", "uda.estimate.hours", "urgency"])
+		#expect(descriptors.compactMap(TaskSort.init) == sorts)
+		#expect(TaskSort(NSSortDescriptor(key: "gone", ascending: true)) == nil)
 	}
 
 	@Test

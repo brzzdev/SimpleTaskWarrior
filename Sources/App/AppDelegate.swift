@@ -98,12 +98,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
 	}
 
 	private func makeController(bookmark: Data, folder: URL) -> ReplicaWindowController {
-		let controller = ReplicaWindowController(bookmark: bookmark) { [weak self] in
+		// Unique per window, as restoration requires, and the same for a Replica each time, so its
+		// window reopens where it last was, laid out as it was.
+		let name = "replica:" + folder.path(percentEncoded: false)
+		let controller = ReplicaWindowController(autosaveName: name, bookmark: bookmark) {
+			[weak self] in
 			self?.controllers[folder] = nil
 		}
-		// Unique per window, as restoration requires, and the same for a Replica each time, so its
-		// window reopens where it last was.
-		let name = "replica:" + folder.path(percentEncoded: false)
 		controller.window?.identifier = NSUserInterfaceItemIdentifier(name)
 		controller.window?.restorationClass = Self.self
 		controller.window?.setFrameAutosaveName(name)
