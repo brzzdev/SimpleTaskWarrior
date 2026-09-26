@@ -81,6 +81,8 @@ public struct WritePlanner: Sendable {
 	private func create(_ draft: inout Draft, description: String, at now: Date, epoch: String) {
 		draft.set("description", description)
 		draft.set("entry", epoch)
+		// Stamped here, not only by `operations(modified:)`, so defaults can refer to it.
+		draft.set("modified", epoch)
 		draft.set("status", Status.pending.rawValue)
 		for tag in taskrc.contextWrite.tags {
 			draft.setTag(tag, isPresent: true)

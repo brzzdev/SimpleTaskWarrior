@@ -274,6 +274,28 @@ struct WritePlannerTests {
 		#expect(plan.operations.contains(.setValue(id, property: "review", value: "1893456000")))
 	}
 
+	/// `modified`, which the create stamps, is set before the defaults that refer to it. `modified+1d`
+	/// would resolve without it, since TW reads an unset attribute plus a duration from now.
+	@Test
+	func creatingATaskResolvesADefaultThatRefersToItsModifiedStamp() throws {
+		let taskrc = Taskrc(path: "/taskrc", environment: .fixture) { path, _ throws(Taskrc.ReadError) in
+			Taskrc.File(
+				contents: """
+					uda.review.default=modified-1d
+					uda.review.type=date
+					""",
+				realPath: path,
+			)
+		}
+		let planner = WritePlanner(taskrc: taskrc, timeZone: .gmt)
+		let id = UUID()
+		let now = Date(timeIntervalSince1970: 1_790_000_000)
+
+		let plan = try planner.plan(.create(id, description: "Alpha"), tasks: [:], at: now)
+
+		#expect(plan.operations.contains(.setValue(id, property: "review", value: "1789913600")))
+	}
+
 	@Test
 	func creatingATaskInAContextThatWritesAReservedTagThrows() {
 		let planner = WritePlanner(taskrc: pendingContext, timeZone: .gmt)
