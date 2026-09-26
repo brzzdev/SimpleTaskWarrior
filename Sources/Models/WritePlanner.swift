@@ -49,6 +49,9 @@ public struct WritePlanner: Sendable {
 			return try plan(ids, tasks: tasks, at: epoch) { $0.delete(at: epoch) }
 
 		case let .edit(ids, edit):
+			if case let .addAnnotation(text, _) = edit, text.allSatisfy(\.isWhitespace) {
+				throw .blankAnnotation
+			}
 			if let tag = edit.tag, reservedTags.contains(tag) {
 				throw .reservedTag(tag)
 			}
@@ -292,6 +295,8 @@ private let reservedTags: Set = [
 ]
 
 public enum WritePlanError: Error, Equatable, Sendable {
+	/// An annotation with no text, or only whitespace, which `task annotate` refuses.
+	case blankAnnotation
 	/// A New Task with no description, or only whitespace, which `task add` refuses. `task modify`
 	/// accepts removing one, so an edit may remove it.
 	case blankDescription

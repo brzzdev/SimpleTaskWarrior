@@ -178,6 +178,21 @@ struct WritePlannerTests {
 		}
 	}
 
+	/// `task annotate` refuses both with "Additional text must be provided", writing nothing.
+	@Test(arguments: ["", " "])
+	func annotatingATaskWithBlankTextThrows(text: String) {
+		let planner = WritePlanner(taskrc: .defaults, timeZone: .gmt)
+		let id = UUID()
+
+		#expect(throws: WritePlanError.blankAnnotation) {
+			try planner.plan(
+				.edit([id], .addAnnotation(text, entry: .now)),
+				tasks: [id: ["status": "pending"]],
+				at: .now,
+			)
+		}
+	}
+
 	@Test
 	func editingAMissingTaskThrows() {
 		let planner = WritePlanner(taskrc: .defaults, timeZone: .gmt)
