@@ -27,6 +27,9 @@ public struct WritePlanner: Sendable {
 			return try plan(ids, tasks: tasks, at: epoch) { $0.complete(at: epoch) }
 
 		case let .create(id, description):
+			guard !description.allSatisfy(\.isWhitespace) else {
+				throw .blankDescription
+			}
 			guard tasks[id] == nil else {
 				return WritePlan()
 			}
@@ -156,6 +159,9 @@ public enum TaskEdit: Equatable, Sendable {
 }
 
 public enum WritePlanError: Error, Equatable, Sendable {
+	/// A New Task with no description, or only whitespace, which `task add` refuses. `task modify`
+	/// accepts removing one, so an edit may remove it.
+	case blankDescription
 	/// The task isn't in the snapshot, as after a `task undo` of its creation, or a purge.
 	case noSuchTask(Task.ID)
 }

@@ -138,6 +138,16 @@ struct WritePlannerTests {
 		#expect(plan.skippedContextWrite == ["priority:H"])
 	}
 
+	/// `task add` refuses both with "Additional text must be provided", writing nothing.
+	@Test(arguments: ["", " "])
+	func creatingATaskWithABlankDescriptionThrows(description: String) {
+		let planner = WritePlanner(taskrc: .defaults, timeZone: .gmt)
+
+		#expect(throws: WritePlanError.blankDescription) {
+			try planner.plan(.create(UUID(), description: description), tasks: [:], at: .now)
+		}
+	}
+
 	@Test
 	func editingAMissingTaskThrows() {
 		let planner = WritePlanner(taskrc: .defaults, timeZone: .gmt)
