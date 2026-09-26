@@ -111,7 +111,7 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 		guard !isFollowingStore else {
 			return
 		}
-		store.send(.sortOrderChanged(table.sortDescriptors.compactMap(TaskSort.init)))
+		sendSortOrder()
 	}
 
 	func tableView(_: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
@@ -163,6 +163,11 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 		return cell
 	}
 
+	/// Tells the reducer the sort the table shows.
+	private func sendSortOrder() {
+		store.send(.sortOrderChanged(table.sortDescriptors.compactMap(TaskSort.init)))
+	}
+
 	/// Keeps a column per UDA the Taskrc defines, then names the table's autosave once the first
 	/// Taskrc has loaded. Autosave restores only the columns that exist when it's named, so a UDA
 	/// column added later starts from the defaults.
@@ -200,7 +205,7 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 		// Removing a column drops any sort by it without telling the delegate, so the reducer would
 		// go on sorting by a UDA the Taskrc no longer has.
 		if removedColumn, table.autosaveName != nil {
-			store.send(.sortOrderChanged(table.sortDescriptors.compactMap(TaskSort.init)))
+			sendSortOrder()
 		}
 
 		// The name also records that the layout was restored, so it happens once.
@@ -214,7 +219,7 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 		table.autosaveTableColumns = true
 		isFollowingStore = false
 		view.isHidden = false
-		store.send(.sortOrderChanged(table.sortDescriptors.compactMap(TaskSort.init)))
+		sendSortOrder()
 	}
 
 	/// Shows the store's rows and selection, reloading only when the rows changed.
