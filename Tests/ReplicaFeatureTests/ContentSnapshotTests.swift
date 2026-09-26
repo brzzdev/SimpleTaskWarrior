@@ -8,9 +8,17 @@ import TaskrcClient
 import Testing
 import TestSupport
 
-/// Image snapshots of the Replica window's leaf content views, in light and dark. Each renders at
-/// 2x whatever the screen, so a Retina Mac records what a CI runner compares.
+/// Image snapshots of the Replica window's leaf content views, in light and dark, at 2x whatever
+/// the
+/// screen. The CI runner's rendering is the reference: a Mac's differs in sub-pixel text positions
+/// and in how controls draw, so the suite runs only on CI. There a missing or failing snapshot is
+/// recorded afresh and uploaded as the run's `snapshots` artifact, whose images are committed once
+/// the change they show is intended.
 @MainActor
+@Suite(.enabled(
+	if: ProcessInfo.processInfo.environment["CI"] != nil,
+	"The CI runner's rendering is the reference",
+))
 struct ContentSnapshotTests {
 	@Test
 	func dataLocationBanner() {
