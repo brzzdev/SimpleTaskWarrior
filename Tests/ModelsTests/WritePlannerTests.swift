@@ -183,7 +183,7 @@ struct WritePlannerTests {
 	}
 
 	/// `task add` refuses both with "Additional text must be provided", writing nothing.
-	@Test(arguments: ["", " "])
+	@Test(arguments: ["", " ", "   "])
 	func creatingATaskWithABlankDescriptionThrows(description: String) {
 		let planner = WritePlanner(taskrc: .defaults, timeZone: .gmt)
 
@@ -193,7 +193,7 @@ struct WritePlannerTests {
 	}
 
 	/// `task annotate` refuses both with "Additional text must be provided", writing nothing.
-	@Test(arguments: ["", " "])
+	@Test(arguments: ["", " ", "   "])
 	func annotatingATaskWithBlankTextThrows(text: String) {
 		let planner = WritePlanner(taskrc: .defaults, timeZone: .gmt)
 		let id = UUID()

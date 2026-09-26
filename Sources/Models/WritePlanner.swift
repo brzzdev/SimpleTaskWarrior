@@ -271,8 +271,9 @@ public enum TaskEdit: Equatable, Sendable {
 	case removeAnnotation(entry: Date)
 	case removeDependency(Task.ID)
 	case removeTag(String)
-	/// Sets an attribute, or removes it when `value` is nil or an empty string. Tags, dependencies,
-	/// annotations and `status` have their own edits and actions.
+	/// Sets an attribute, or removes it when `value` is nil or an empty string. A description loses
+	/// its trailing spaces first, so one of only spaces removes it. Tags, dependencies, annotations
+	/// and `status` have their own edits and actions.
 	case set(String, UDAValue?)
 }
 
@@ -292,7 +293,7 @@ extension TaskEdit {
 			.addAnnotation(text.trimmingSpaces, entry: entry)
 
 		case let .set("description", .string(description)):
-			.set("description", .string(description.droppingTrailingSpaces))
+			.set("description", .string(description.trimmingTrailingSpaces))
 
 		default:
 			self
@@ -303,7 +304,7 @@ extension TaskEdit {
 extension String {
 	/// Without trailing spaces, as `task modify description:` stores its value, keeping leading ones.
 	/// Other whitespace, such as a tab or a no-break space, stays.
-	fileprivate var droppingTrailingSpaces: String {
+	fileprivate var trimmingTrailingSpaces: String {
 		guard let last = lastIndex(where: { $0 != " " }) else {
 			return ""
 		}
@@ -312,7 +313,7 @@ extension String {
 
 	/// Without leading or trailing spaces, as `task add` and `task annotate` store their text.
 	fileprivate var trimmingSpaces: String {
-		String(droppingTrailingSpaces.trimmingPrefix { $0 == " " })
+		String(trimmingTrailingSpaces.trimmingPrefix { $0 == " " })
 	}
 }
 
