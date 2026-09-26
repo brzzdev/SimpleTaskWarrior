@@ -142,6 +142,15 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 		store.send(.binding(.set(\.selection, selection)))
 	}
 
+	/// Adds `tableColumn`, starting fitted to `widestCell` where one is given.
+	private func addColumn(_ tableColumn: NSTableColumn, widestCell: NSView?) {
+		setMinimumWidth(of: tableColumn, widestCell: widestCell)
+		if widestCell != nil {
+			tableColumn.width = tableColumn.minWidth
+		}
+		table.addTableColumn(tableColumn)
+	}
+
 	/// A cell the table can reuse, or a new one from `make`.
 	private func reusedCell<Cell: NSView>(_ make: () -> Cell) -> Cell {
 		let identifier = NSUserInterfaceItemIdentifier(String(describing: Cell.self))
@@ -151,15 +160,6 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 		let cell = make()
 		cell.identifier = identifier
 		return cell
-	}
-
-	/// Adds `tableColumn`, starting fitted to `widestCell` where one is given.
-	private func addColumn(_ tableColumn: NSTableColumn, widestCell: NSView?) {
-		setMinimumWidth(of: tableColumn, widestCell: widestCell)
-		if widestCell != nil {
-			tableColumn.width = tableColumn.minWidth
-		}
-		table.addTableColumn(tableColumn)
 	}
 
 	/// Tells the reducer the sort the table shows.
@@ -320,13 +320,13 @@ private func sampleCell(_ column: TaskColumn) -> NSView? {
 		cell.configure(sampleRow)
 		return cell
 
+	case .project, .tags, .uda:
+		return nil
+
 	case .urgency:
 		let cell = UrgencyCell()
 		cell.configure(urgency: sampleRow.urgency, highest: 0)
 		return cell
-
-	case .project, .tags, .uda:
-		return nil
 	}
 }
 
@@ -335,6 +335,7 @@ private func sampleCell(_ column: TaskColumn) -> NSView? {
 private let sampleRow: TaskRow = {
 	// 28 December 2026, whose day and month take two digits in every zone and numeric date style.
 	let date = Date(timeIntervalSince1970: 1_798_459_200)
+	// Three digits, as a working set of up to 999 pending tasks shows.
 	var task = Models.Task(description: "Buy milk", id: UUID(), status: .pending, workingSetID: 999)
 	task.annotations = Array(
 		repeating: Models.Task.Annotation(description: "", entry: date),
@@ -348,6 +349,7 @@ private let sampleRow: TaskRow = {
 	task.start = date
 	task.until = date
 	task.wait = date
+	// Two whole digits and a sign, wider than all but the rarest Urgency.
 	return TaskRow(isBlocked: true, task: task, udaColumns: [], urgency: -99.9)
 }()
 
