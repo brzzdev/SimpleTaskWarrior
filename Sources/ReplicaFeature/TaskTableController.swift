@@ -4,6 +4,7 @@ import ComposableArchitecture
 import Models
 import SwiftNavigation
 import SwiftUI
+import Taskrc
 
 /// Hosts the task table in the window's SwiftUI content, until that content moves to AppKit.
 struct TaskTable: NSViewControllerRepresentable {
@@ -198,7 +199,12 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 				existing.title = uda.label
 				continue
 			}
-			let tableColumn = makeColumn(column, firstOrder: firstOrder, title: uda.label)
+			let tableColumn = makeColumn(
+				column,
+				firstOrder: firstOrder,
+				minWidth: uda.type == .date ? dateColumnMinimumWidth : 48,
+				title: uda.label,
+			)
 			tableColumn.isHidden = true
 			table.addTableColumn(tableColumn)
 		}
@@ -219,6 +225,15 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 		table.autosaveTableColumns = true
 		isFollowingStore = false
 		view.isHidden = false
+		// The table fits its columns only as its own width changes, so the defaults, and a layout
+		// saved in a wider window, would start wider than it.
+		view.layoutSubtreeIfNeeded()
+		if
+			let clipView = table.enclosingScrollView?.contentView,
+			table.frame.width > clipView.bounds.width
+		{
+			table.sizeToFit()
+		}
 		sendSortOrder()
 	}
 
@@ -242,25 +257,31 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 	}
 }
 
+/// Wide enough for a numeric date in full.
+private let dateColumnMinimumWidth: CGFloat = 80
+
 private let descriptionIdentifier = TaskColumn.description.identifier
 
 /// The columns every Taskrc has, in their default order. The dates past Due start hidden.
 private func builtInColumns() -> [NSTableColumn] {
-	let id = makeColumn(.id, title: String(localized: "ID"))
-	id.minWidth = 32
+	let id = makeColumn(.id, minWidth: 32, title: String(localized: "ID"))
 	id.width = 40
 	id.maxWidth = 64
-	let urgency = makeColumn(.urgency, firstOrder: .reverse, title: String(localized: "Urgency"))
-	urgency.minWidth = 48
-	urgency.width = 64
+	let urgency = makeColumn(
+		.urgency,
+		firstOrder: .reverse,
+		minWidth: 64,
+		title: String(localized: "Urgency"),
+	)
+	urgency.width = 80
 	urgency.maxWidth = 96
-	let description = makeColumn(.description, title: String(localized: "Description"))
+	let description = makeColumn(.description, minWidth: 100, title: String(localized: "Description"))
 	description.width = 240
 	let hidden = [
-		makeColumn(.age, title: String(localized: "Age")),
-		makeColumn(.scheduled, title: String(localized: "Scheduled")),
-		makeColumn(.wait, title: String(localized: "Wait")),
-		makeColumn(.until, title: String(localized: "Until")),
+		makeColumn(.age, minWidth: 56, title: String(localized: "Age")),
+		makeColumn(.scheduled, minWidth: dateColumnMinimumWidth, title: String(localized: "Scheduled")),
+		makeColumn(.wait, minWidth: dateColumnMinimumWidth, title: String(localized: "Wait")),
+		makeColumn(.until, minWidth: dateColumnMinimumWidth, title: String(localized: "Until")),
 	]
 	for column in hidden {
 		column.isHidden = true
@@ -269,9 +290,9 @@ private func builtInColumns() -> [NSTableColumn] {
 		id,
 		urgency,
 		description,
-		makeColumn(.project, title: String(localized: "Project")),
-		makeColumn(.tags, title: String(localized: "Tags")),
-		makeColumn(.due, title: String(localized: "Due")),
+		makeColumn(.project, minWidth: 48, title: String(localized: "Project")),
+		makeColumn(.tags, minWidth: 48, title: String(localized: "Tags")),
+		makeColumn(.due, minWidth: dateColumnMinimumWidth, title: String(localized: "Due")),
 	] + hidden
 }
 
@@ -279,9 +300,12 @@ private func builtInColumns() -> [NSTableColumn] {
 private func makeColumn(
 	_ column: TaskColumn,
 	firstOrder: SortOrder = .forward,
+	minWidth: CGFloat,
 	title: String,
 ) -> NSTableColumn {
 	let tableColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(column.identifier))
+	// Also the floor a column shrinks to as others appear or the window narrows.
+	tableColumn.minWidth = minWidth
 	tableColumn.sortDescriptorPrototype = TaskSort(column, order: firstOrder).descriptor
 	tableColumn.title = title
 	return tableColumn
