@@ -3,7 +3,8 @@ public import AppKit
 import ComposableArchitecture
 public import Foundation
 import SwiftNavigation
-import SwiftUI
+import Taskrc
+import UniformTypeIdentifiers
 
 /// Shows one Replica, and handles the menu bar's Taskrc commands while its window is in front.
 public final class ReplicaWindowController: NSWindowController, NSMenuItemValidation,
@@ -11,6 +12,8 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 {
 	private var fetch: _Concurrency.Task<Void, Never>?
 	private let onClose: @MainActor () -> Void
+	/// The file panel on screen, so a store change while it's up doesn't open a second.
+	private var openPanel: NSOpenPanel?
 	private let store: StoreOf<ReplicaFeature>
 
 	/// A controller for the Replica `bookmark` locates, which autosaves the layout of its split
@@ -38,7 +41,7 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 		let sidebarController = NSViewController()
 		sidebarController.view = NSView()
 		let inspector = NSSplitViewItem(
-			inspectorWithViewController: hostingController(InspectorView(store: store)),
+			inspectorWithViewController: InspectorController(store: store),
 		)
 		// An inspector's maximum defaults to its minimum, which leaves its divider nothing to drag. The
 		// cap leaves the table room at the default window size.
@@ -47,9 +50,7 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 		split.splitViewItems = [
 			NSSplitViewItem(sidebarWithViewController: sidebarController),
 			NSSplitViewItem(
-				viewController: hostingController(
-					ReplicaContentView(autosaveName: autosaveName, store: store),
-				),
+				viewController: ReplicaContentController(autosaveName: autosaveName, store: store),
 			),
 			inspector,
 		]
@@ -72,6 +73,12 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 			}
 			window.subtitle = store.directory?.path(percentEncoded: false) ?? ""
 			window.title = store.directory?.lastPathComponent ?? ""
+		}
+		observe { [weak self] in
+			guard let self, let fileImporter = store.fileImporter else {
+				return
+			}
+			beginOpenPanel(for: fileImporter)
 		}
 		fetch = _Concurrency.Task { [store] in
 			await store.send(.fetchRequested).finish()
@@ -150,16 +157,59 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 		fetch?.cancel()
 		onClose()
 	}
+
+	/// Opens the file panel `fileImporter` asks for as a sheet on the window, and reports the file
+	/// chosen, or that it was cancelled.
+	private func beginOpenPanel(for fileImporter: ReplicaFeature.FileImporter) {
+		guard openPanel == nil, let window else {
+			return
+		}
+		let panel = NSOpenPanel()
+		// Files, and the symlinks dotfile managers make of them. Folders and packages are neither.
+		panel.allowedContentTypes = [.data, .symbolicLink]
+		panel.canChooseDirectories = false
+		panel.directoryURL = fileImporter.directory
+		panel.message = fileImporter.message
+		panel.showsHiddenFiles = true
+		openPanel = panel
+		panel.beginSheetModal(for: window) { [weak self] response in
+			guard let self else {
+				return
+			}
+			openPanel = nil
+			guard response == .OK, let file = panel.url else {
+				store.send(.binding(.set(\.fileImporter, nil)))
+				return
+			}
+			store.send(.fileChosen(file, for: fileImporter))
+		}
+	}
+}
+
+extension ReplicaFeature.FileImporter {
+	/// Where the panel opens: at the path an include resolved to, or in the home folder, where the
+	/// CLI looks for `.taskrc`.
+	fileprivate var directory: URL? {
+		switch self {
+		case let .grant(_, file):
+			file.deletingLastPathComponent()
+
+		case .taskrc:
+			Taskrc.Environment.live.variables["HOME"].map { URL(filePath: $0, directoryHint: .isDirectory) }
+		}
+	}
+
+	fileprivate var message: String {
+		switch self {
+		case let .grant(_, file):
+			String(localized: "Grant access to \(file.lastPathComponent), which the Taskrc includes.")
+
+		case .taskrc:
+			String(localized: "Choose the Taskrc to use with this Replica.")
+		}
+	}
 }
 
 private let bookmarkKey = "bookmark"
-
-/// Hosts `rootView`, leaving its size to the split view rather than to SwiftUI.
-@MainActor
-private func hostingController(_ rootView: some View) -> NSViewController {
-	let controller = NSHostingController(rootView: rootView)
-	controller.sizingOptions = []
-	return controller
-}
 
 private let windowSize = NSSize(width: 1_000, height: 600)
