@@ -63,9 +63,8 @@ struct WritePlannerTests {
 
 	@Test
 	func everyRecordingHasAnAction() throws {
-		let directory = try #require(Bundle.module.url(forResource: "WriteFixtures", withExtension: nil))
 		let recordings = try FileManager.default
-			.subpathsOfDirectory(atPath: directory.path(percentEncoded: false))
+			.subpathsOfDirectory(atPath: Recording.directory().path(percentEncoded: false))
 			.filter { $0.hasSuffix(".json") }
 			.map { String($0.dropLast(".json".count)) }
 
@@ -177,7 +176,7 @@ struct Recording {
 
 	/// Reads `<fixture>/<case>`.
 	init(_ name: String) throws {
-		let directory = try #require(Bundle.module.url(forResource: "WriteFixtures", withExtension: nil))
+		let directory = try Self.directory()
 		let file = try JSONDecoder().decode(
 			File.self,
 			from: Data(contentsOf: directory.appending(path: "\(name).json")),
@@ -188,6 +187,11 @@ struct Recording {
 		operations = file.operations
 		let fixture = try #require(name.split(separator: "/").first)
 		taskrc = Taskrc(fixture: directory.appending(path: "\(fixture)/taskrc"))
+	}
+
+	/// Where `just fixtures` records the writes.
+	static func directory() throws -> URL {
+		try #require(Bundle.module.url(forResource: "WriteFixtures", withExtension: nil))
 	}
 
 	/// The task the write created.

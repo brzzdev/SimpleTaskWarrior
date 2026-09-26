@@ -229,6 +229,35 @@ public enum UDAValue: Equatable, Sendable {
 	}
 }
 
+extension UDAValue {
+	/// The value as TW stores it, or nil for an empty string, which TW stores by removing the key.
+	public var stored: String? {
+		switch self {
+		case let .date(date):
+			String(date.epoch)
+
+		case let .duration(duration):
+			duration.iso
+
+		// An integer as it is, and anything else as `std::ostream` writes a double: six significant
+		// digits. The CLI keeps the integer form only for input typed without a point, which a
+		// `Double` can't tell apart.
+		case let .numeric(number):
+			if number.rounded() == number, abs(number) < 1e15 {
+				String(Int(number))
+			} else {
+				String(format: "%g", number)
+			}
+
+		case let .string(string):
+			string.isEmpty ? nil : string
+
+		case let .uuid(uuid):
+			uuid.uuidString.lowercased()
+		}
+	}
+}
+
 extension Date {
 	/// The date as TW stores it, to the second.
 	var epoch: Int {
@@ -245,7 +274,7 @@ extension Date {
 }
 
 extension String {
-	fileprivate func dropPrefix(_ prefix: String) -> String? {
+	func dropPrefix(_ prefix: String) -> String? {
 		hasPrefix(prefix) ? String(dropFirst(prefix.count)) : nil
 	}
 }

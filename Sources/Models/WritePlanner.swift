@@ -22,30 +22,54 @@ public struct WritePlanner: Sendable {
 		at now: Date,
 	) throws(WritePlanError) -> WritePlan {
 		let epoch = String(now.epoch)
-		if case let .create(id, description) = action {
+		switch action {
+		case let .complete(ids):
+			return try plan(ids, tasks: tasks, at: epoch) { $0.complete(at: epoch) }
+
+		case let .create(id, description):
 			guard tasks[id] == nil else {
 				return WritePlan()
 			}
 			var draft = Draft(id: id, properties: [:], isNew: true)
-			create(&draft, description: description, at: now)
-			return WritePlan([draft], now: epoch, skippedContextWrite: taskrc.contextWrite.skipped)
-		}
+			create(&draft, description: description, at: now, epoch: epoch)
+			var plan = WritePlan([draft], now: epoch)
+			if !plan.operations.isEmpty {
+				plan.skippedContextWrite = taskrc.contextWrite.skipped
+			}
+			return plan
 
+		case let .delete(ids):
+			return try plan(ids, tasks: tasks, at: epoch) { $0.delete(at: epoch) }
+
+		case let .edit(ids, edit):
+			return try plan(ids, tasks: tasks, at: epoch) { $0.apply(edit) }
+
+		case let .markPending(ids):
+			return try plan(ids, tasks: tasks, at: epoch) { $0.markPending() }
+
+		case let .start(ids):
+			return try plan(ids, tasks: tasks, at: epoch) { $0.start(at: epoch) }
+
+		case let .stop(ids):
+			return try plan(ids, tasks: tasks, at: epoch) { $0.stop() }
+		}
+	}
+
+	/// Plans `change` on each task in `ids`, once each, in order.
+	private func plan(
+		_ ids: [Task.ID],
+		tasks: [Task.ID: [String: String]],
+		at epoch: String,
+		change: (inout Draft) -> Void,
+	) throws(WritePlanError) -> WritePlan {
 		var drafts: [Draft] = []
-		for id in action.ids where !drafts.contains(where: { $0.id == id }) {
+		var seen: Set<Task.ID> = []
+		for id in ids where seen.insert(id).inserted {
 			guard let properties = tasks[id] else {
 				throw .noSuchTask(id)
 			}
 			var draft = Draft(id: id, properties: properties, isNew: false)
-			switch action {
-			case .complete: draft.complete(at: epoch)
-			case .create: break
-			case .delete: draft.delete(at: epoch)
-			case let .edit(_, edit): draft.apply(edit)
-			case .markPending: draft.markPending()
-			case .start: draft.start(at: epoch)
-			case .stop: draft.stop()
-			}
+			change(&draft)
 			drafts.append(draft)
 		}
 		return WritePlan(drafts, now: epoch)
@@ -53,9 +77,9 @@ public struct WritePlanner: Sendable {
 
 	/// What `task add <description>` writes: `Task::validate`'s stamps and defaults, after the
 	/// active Context's `project:` and `+tag` modifications, which the CLI applies as if typed.
-	private func create(_ draft: inout Draft, description: String, at now: Date) {
+	private func create(_ draft: inout Draft, description: String, at now: Date, epoch: String) {
 		draft.set("description", description)
-		draft.set("entry", String(now.epoch))
+		draft.set("entry", epoch)
 		draft.set("status", Status.pending.rawValue)
 		for tag in taskrc.contextWrite.tags {
 			draft.setTag(tag, isPresent: true)
@@ -76,28 +100,22 @@ public struct WritePlanner: Sendable {
 		// is resolved, where the CLI stores the text, which `task export` then drops.
 		for key in taskrc.values.keys.sorted() where key.hasPrefix("uda.") && key.contains(".default") {
 			guard
-				let name = key.dropFirst("uda.".count).split(separator: ".").first.map(String.init),
+				let name = key.dropPrefix("uda.")?.split(separator: ".").first.map(String.init),
 				draft.properties[name] == nil,
 				let text = nonEmpty("uda.\(name).default")
 			else {
 				continue
 			}
-			switch taskrc.udaTypes[name] {
-			case .date:
-				guard let date = try? dateInput.date(text, at: now) else {
-					continue
+			let value: UDAValue? =
+				switch taskrc.udaTypes[name] {
+				case .date: (try? dateInput.date(text, at: now)).map(UDAValue.date)
+				case .duration: (try? dateInput.duration(text, at: now)).map(UDAValue.duration)
+				case nil, .numeric, .string, .uuid: .string(text)
 				}
-				draft.set(name, UDAValue.date(date).stored)
-
-			case .duration:
-				guard let duration = try? dateInput.duration(text, at: now) else {
-					continue
-				}
-				draft.set(name, duration.iso)
-
-			case nil, .numeric, .string, .uuid:
-				draft.set(name, text)
+			guard let value else {
+				continue
 			}
+			draft.set(name, value.stored)
 		}
 	}
 
@@ -120,17 +138,6 @@ public enum WriteAction: Equatable, Sendable {
 	/// `task start`, which reopens a completed or deleted task.
 	case start([Task.ID])
 	case stop([Task.ID])
-
-	fileprivate var ids: [Task.ID] {
-		switch self {
-		case let .complete(ids), let .delete(ids), let .edit(ids, _), let .markPending(ids),
-		     let .start(ids), let .stop(ids):
-			ids
-
-		case let .create(id, _):
-			[id]
-		}
-	}
 }
 
 /// One change to each task an edit names. `wait` is an attribute like any other: setting it never
@@ -162,18 +169,10 @@ public struct WritePlan: Equatable, Sendable {
 	/// `+tag`.
 	public var skippedContextWrite: [String] = []
 
-	public init(
-		expectations: [Expectation] = [],
-		operations: [Operation] = [],
-		skippedContextWrite: [String] = [],
-	) {
-		self.expectations = expectations
-		self.operations = operations
-		self.skippedContextWrite = skippedContextWrite
-	}
+	public init() {}
 
 	/// Empty when no draft changed, since a plan that writes nothing needs nothing to hold.
-	fileprivate init(_ drafts: [Draft], now: String, skippedContextWrite: [String] = []) {
+	fileprivate init(_ drafts: [Draft], now: String) {
 		operations = drafts.flatMap { $0.operations(modified: now) }
 		guard !operations.isEmpty else {
 			return
@@ -184,7 +183,6 @@ public struct WritePlan: Equatable, Sendable {
 				Expectation(property: property, uuid: draft.id, value: value)
 			}
 		}
-		self.skippedContextWrite = skippedContextWrite
 	}
 }
 
@@ -208,35 +206,6 @@ extension WritePlan {
 		case setStatus(Task.ID, Status)
 		/// Removes the property when `value` is nil.
 		case setValue(Task.ID, property: String, value: String?)
-	}
-}
-
-extension UDAValue {
-	/// The value as TW stores it, or nil for an empty string, which TW stores by removing the key.
-	public var stored: String? {
-		switch self {
-		case let .date(date):
-			String(date.epoch)
-
-		case let .duration(duration):
-			duration.iso
-
-		// An integer as it is, and anything else as `std::ostream` writes a double: six significant
-		// digits. The CLI keeps the integer form only for input typed without a point, which a
-		// `Double` can't tell apart.
-		case let .numeric(number):
-			if number.rounded() == number, abs(number) < 1e15 {
-				String(Int(number))
-			} else {
-				String(format: "%g", number)
-			}
-
-		case let .string(string):
-			string.isEmpty ? nil : string
-
-		case let .uuid(uuid):
-			uuid.uuidString.lowercased()
-		}
 	}
 }
 
@@ -281,8 +250,10 @@ private struct Draft {
 		return properties[property]
 	}
 
-	/// Sets `property`, or removes it when `value` is nil.
+	/// Sets `property`, or removes it when `value` is nil, having read it: a plan changes a property
+	/// only on the strength of its current value.
 	mutating func set(_ property: String, _ value: String?) {
+		_ = read(property)
 		properties[property] = value
 	}
 
@@ -306,9 +277,7 @@ private struct Draft {
 			setTag(tag, isPresent: true)
 
 		case let .removeAnnotation(entry):
-			let property = "annotation_\(entry.epoch)"
-			_ = read(property)
-			set(property, nil)
+			set("annotation_\(entry.epoch)", nil)
 
 		case let .removeDependency(dependency):
 			setDependency(dependency, isPresent: false)
@@ -317,7 +286,6 @@ private struct Draft {
 			setTag(tag, isPresent: false)
 
 		case let .set(property, value):
-			_ = read(property)
 			set(property, value?.stored)
 		}
 	}
@@ -328,7 +296,6 @@ private struct Draft {
 			return
 		}
 		stampEnd(at: now)
-		_ = read("start")
 		set("start", nil)
 		set("status", Status.completed.rawValue)
 	}
@@ -348,7 +315,6 @@ private struct Draft {
 		guard status == Status.completed.rawValue || status == Status.deleted.rawValue else {
 			return
 		}
-		_ = read("end")
 		set("end", nil)
 		set("status", Status.pending.rawValue)
 	}
@@ -364,27 +330,27 @@ private struct Draft {
 
 	/// `task stop`.
 	mutating func stop() {
-		_ = read("start")
 		set("start", nil)
 	}
 
 	mutating func setTag(_ tag: String, isPresent: Bool) {
-		setMember("tag_\(tag)", isPresent: isPresent, mirror: "tags", prefix: "tag_")
+		setMember(tag, isPresent: isPresent, prefix: "tag_", mirror: "tags")
 	}
 
 	private mutating func setDependency(_ dependency: Task.ID, isPresent: Bool) {
-		let property = "dep_\(dependency.uuidString.lowercased())"
-		setMember(property, isPresent: isPresent, mirror: "depends", prefix: "dep_")
+		let member = dependency.uuidString.lowercased()
+		setMember(member, isPresent: isPresent, prefix: "dep_", mirror: "depends")
 	}
 
 	/// Adds or removes a `tag_*` or `dep_*` key, stored as `"x"` as TW writes them, and rewrites the
 	/// legacy mirror that lists them, in byte order, which TW writes but never reads back.
 	private mutating func setMember(
-		_ property: String,
+		_ member: String,
 		isPresent: Bool,
-		mirror: String,
 		prefix: String,
+		mirror: String,
 	) {
+		let property = prefix + member
 		guard (read(property) != nil) != isPresent else {
 			return
 		}
@@ -392,10 +358,8 @@ private struct Draft {
 		for key in original.keys where key.hasPrefix(prefix) {
 			_ = read(key)
 		}
-		_ = read(mirror)
 		let members = properties.keys
-			.filter { $0.hasPrefix(prefix) }
-			.map { String($0.dropFirst(prefix.count)) }
+			.compactMap { $0.dropPrefix(prefix) }
 			.sorted { $0.utf8.lexicographicallyPrecedes($1.utf8) }
 		set(mirror, members.isEmpty ? nil : members.joined(separator: ","))
 	}

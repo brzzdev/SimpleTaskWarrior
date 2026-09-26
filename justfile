@@ -143,15 +143,17 @@ fixtures:
 		) > "$fixture/expected.rc"
 	done
 
+	# Runs `task` against `$replica` under `$fixture`'s Taskrc, in UTC, for the Models and write
+	# fixtures.
+	task() {
+		(
+			cd "$scratch"
+			env -i HOME=/home/fixture TZ=UTC TASKDATA="$replica" TASKRC="$fixture/taskrc" \
+				"$task" rc.confirmation=0 rc.hooks=0 rc.verbose=nothing "$@"
+		)
+	}
 	for fixture in "$PWD"/Tests/ModelsTests/Fixtures/*/; do
 		replica="$taskdata/$(basename "$fixture")"
-		task() {
-			(
-				cd "$scratch"
-				env -i HOME=/home/fixture TZ=UTC TASKDATA="$replica" TASKRC="$fixture/taskrc" \
-					"$task" rc.confirmation=0 rc.hooks=0 rc.verbose=nothing "$@"
-			)
-		}
 		source "$fixture/tasks.sh" > /dev/null
 		# TW generates Recurrence instances only when a report runs.
 		task list > /dev/null
@@ -175,13 +177,6 @@ fixtures:
 	# so every stamp the case makes is `now`, or the recording fails.
 	for fixture in "$PWD"/Tests/ModelsTests/WriteFixtures/*/; do
 		replica="$taskdata/writes"
-		task() {
-			(
-				cd "$scratch"
-				env -i HOME=/home/fixture TZ=UTC TASKDATA="$replica" TASKRC="$fixture/taskrc" \
-					"$task" rc.confirmation=0 rc.hooks=0 rc.verbose=nothing "$@"
-			)
-		}
 		properties() {
 			sqlite3 "$replica/taskchampion.sqlite3" \
 				"SELECT coalesce(json_group_object(uuid, json(data)), '{}') FROM tasks"
@@ -200,7 +195,8 @@ fixtures:
 			" > "$scratch/operations"
 		}
 		source "$fixture/cases.sh"
-		for case in $(declare -F | sed -n 's/^declare -f case_//p'); do
+		cases="$(declare -F | sed -n 's/^declare -f case_//p')"
+		for case in $cases; do
 			for attempt in {1..5}; do
 				rm -rf "$replica"
 				now="$(date +%s)"
@@ -222,7 +218,7 @@ fixtures:
 				print(json.dumps(recording, indent="\t", sort_keys=True))
 			PYTHON
 		done
-		unset -f $(declare -F | sed -n 's/^declare -f \(case_\)/\1/p')
+		for case in $cases; do unset -f "case_$case"; done
 	done
 
 	# Each line of `DateFixtures/inputs` is one `attribute:value` argument, added to a fresh Replica
