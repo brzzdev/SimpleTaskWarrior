@@ -111,7 +111,10 @@ ensure-generated: engine
 # what `task` reports at `now`: `export.json`, and the UUIDs it counts as
 # blocked, blocking and templates. TW stamps tasks with the time, so every
 # recording differs.
-# Record the golden Taskrc, Models and date input fixtures from real `task` 3.5
+#
+# Each write fixture's `cases.sh` runs one write per case, which
+# `WritePlannerTests` plans against what `task` committed for it.
+# Record the golden Taskrc, Models, write and date input fixtures from real `task` 3.5
 fixtures:
 	#!/usr/bin/env bash
 	set -euo pipefail
@@ -143,15 +146,17 @@ fixtures:
 		) > "$fixture/expected.rc"
 	done
 
+	# Runs `task` against `$replica` under `$fixture`'s Taskrc, in UTC, for the Models and write
+	# fixtures.
+	task() {
+		(
+			cd "$scratch"
+			env -i HOME=/home/fixture TZ=UTC TASKDATA="$replica" TASKRC="$fixture/taskrc" \
+				"$task" rc.confirmation=0 rc.hooks=0 rc.verbose=nothing "$@"
+		)
+	}
 	for fixture in "$PWD"/Tests/ModelsTests/Fixtures/*/; do
 		replica="$taskdata/$(basename "$fixture")"
-		task() {
-			(
-				cd "$scratch"
-				env -i HOME=/home/fixture TZ=UTC TASKDATA="$replica" TASKRC="$fixture/taskrc" \
-					"$task" rc.confirmation=0 rc.hooks=0 rc.verbose=nothing "$@"
-			)
-		}
 		source "$fixture/tasks.sh" > /dev/null
 		# TW generates Recurrence instances only when a report runs.
 		task list > /dev/null
@@ -166,6 +171,79 @@ fixtures:
 		task +BLOCKED _uuids | sort > "$fixture/blocked"
 		task +BLOCKING _uuids | sort > "$fixture/blocking"
 		task status:recurring or +TEMPLATE _uuids | sort > "$fixture/templates"
+	done
+
+	# Each `case_<name>` in a write fixture's `cases.sh` builds a fresh Replica under its `taskrc`,
+	# in UTC, then runs one write with `act`, or with `refuse` where `task` must refuse it.
+	# `<name>.json` records the second it ran in, the Replica's properties before and after, and the
+	# operations the write committed, which `WritePlannerTests` plans the same write against. A case
+	# that straddles a second is retried, so every stamp the case makes is `now`, or the recording
+	# fails.
+	properties() {
+		sqlite3 "$replica/taskchampion.sqlite3" \
+			"SELECT coalesce(json_group_object(uuid, json(data)), '{}') FROM tasks"
+	}
+	snapshot() {
+		last=0
+		if [ ! -d "$replica" ]; then
+			echo '{}' > "$scratch/before"
+			return
+		fi
+		properties > "$scratch/before"
+		last="$(sqlite3 "$replica/taskchampion.sqlite3" "SELECT coalesce(max(id), 0) FROM operations")"
+	}
+	# The operations after the snapshot's, rather than since the newest Undo point: a refused write
+	# pushes none, so that would record the previous command's. The Undo point itself is left out.
+	record() {
+		properties > "$scratch/after"
+		sqlite3 "$replica/taskchampion.sqlite3" "
+			SELECT json_group_array(json(data)) FROM (
+				SELECT data FROM operations
+				WHERE id > $last AND data != '\"UndoPoint\"'
+				ORDER BY id
+			)
+		" > "$scratch/operations"
+	}
+	act() {
+		snapshot
+		task "$@"
+		record
+	}
+	refuse() {
+		snapshot
+		if task "$@"; then
+			echo "task accepted \`$*\`, which the case expects it to refuse" >&2
+			return 1
+		fi
+		record
+	}
+	for fixture in "$PWD"/Tests/ModelsTests/WriteFixtures/*/; do
+		replica="$taskdata/writes"
+		source "$fixture/cases.sh"
+		cases=($(declare -F | sed -n 's/^declare -f case_//p'))
+		for case in "${cases[@]}"; do
+			for attempt in {1..5}; do
+				rm -rf "$replica"
+				now="$(date +%s)"
+				"case_$case" > /dev/null
+				[ "$(date +%s)" = "$now" ] && break
+				if [ "$attempt" = 5 ]; then
+					echo "every run of $case in $fixture straddled a second" >&2
+					exit 1
+				fi
+			done
+			python3 - "$now" "$scratch" > "$fixture/$case.json" <<-'PYTHON'
+				import json, pathlib, sys
+				now, scratch = int(sys.argv[1]), pathlib.Path(sys.argv[2])
+				recording = {
+					name: json.loads((scratch / name).read_text())
+					for name in ["after", "before", "operations"]
+				}
+				recording["now"] = now
+				print(json.dumps(recording, indent="\t", sort_keys=True))
+			PYTHON
+		done
+		for case in "${cases[@]}"; do unset -f "case_$case"; done
 	done
 
 	# Each line of `DateFixtures/inputs` is one `attribute:value` argument, added to a fresh Replica

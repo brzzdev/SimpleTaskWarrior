@@ -1,0 +1,134 @@
+{
+	"after": {
+		"55df4c5a-233c-42cb-849b-b0f918ee8239": {
+			"area": "home",
+			"description": "Alpha",
+			"due": "1790553599",
+			"entry": "1790440073",
+			"estimate": "90min",
+			"modified": "1790440073",
+			"project": "Inbox",
+			"review": "tomorrow",
+			"scheduled": "1790526473",
+			"size": "3",
+			"status": "pending"
+		}
+	},
+	"before": {},
+	"now": 1790440073,
+	"operations": [
+		{
+			"Create": {
+				"uuid": "55df4c5a-233c-42cb-849b-b0f918ee8239"
+			}
+		},
+		{
+			"Update": {
+				"old_value": null,
+				"property": "modified",
+				"timestamp": "2026-09-26T16:27:53.080089Z",
+				"uuid": "55df4c5a-233c-42cb-849b-b0f918ee8239",
+				"value": "1790440073"
+			}
+		},
+		{
+			"Update": {
+				"old_value": null,
+				"property": "area",
+				"timestamp": "2026-09-26T16:27:53.080089Z",
+				"uuid": "55df4c5a-233c-42cb-849b-b0f918ee8239",
+				"value": "home"
+			}
+		},
+		{
+			"Update": {
+				"old_value": null,
+				"property": "description",
+				"timestamp": "2026-09-26T16:27:53.080090Z",
+				"uuid": "55df4c5a-233c-42cb-849b-b0f918ee8239",
+				"value": "Alpha"
+			}
+		},
+		{
+			"Update": {
+				"old_value": null,
+				"property": "due",
+				"timestamp": "2026-09-26T16:27:53.080091Z",
+				"uuid": "55df4c5a-233c-42cb-849b-b0f918ee8239",
+				"value": "1790553599"
+			}
+		},
+		{
+			"Update": {
+				"old_value": null,
+				"property": "entry",
+				"timestamp": "2026-09-26T16:27:53.080091Z",
+				"uuid": "55df4c5a-233c-42cb-849b-b0f918ee8239",
+				"value": "1790440073"
+			}
+		},
+		{
+			"Update": {
+				"old_value": null,
+				"property": "estimate",
+				"timestamp": "2026-09-26T16:27:53.080092Z",
+				"uuid": "55df4c5a-233c-42cb-849b-b0f918ee8239",
+				"value": "90min"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "1790440073",
+				"property": "modified",
+				"timestamp": "2026-09-26T16:27:53.080092Z",
+				"uuid": "55df4c5a-233c-42cb-849b-b0f918ee8239",
+				"value": "1790440073"
+			}
+		},
+		{
+			"Update": {
+				"old_value": null,
+				"property": "project",
+				"timestamp": "2026-09-26T16:27:53.080093Z",
+				"uuid": "55df4c5a-233c-42cb-849b-b0f918ee8239",
+				"value": "Inbox"
+			}
+		},
+		{
+			"Update": {
+				"old_value": null,
+				"property": "review",
+				"timestamp": "2026-09-26T16:27:53.080093Z",
+				"uuid": "55df4c5a-233c-42cb-849b-b0f918ee8239",
+				"value": "tomorrow"
+			}
+		},
+		{
+			"Update": {
+				"old_value": null,
+				"property": "scheduled",
+				"timestamp": "2026-09-26T16:27:53.080094Z",
+				"uuid": "55df4c5a-233c-42cb-849b-b0f918ee8239",
+				"value": "1790526473"
+			}
+		},
+		{
+			"Update": {
+				"old_value": null,
+				"property": "size",
+				"timestamp": "2026-09-26T16:27:53.080094Z",
+				"uuid": "55df4c5a-233c-42cb-849b-b0f918ee8239",
+				"value": "3"
+			}
+		},
+		{
+			"Update": {
+				"old_value": null,
+				"property": "status",
+				"timestamp": "2026-09-26T16:27:53.080096Z",
+				"uuid": "55df4c5a-233c-42cb-849b-b0f918ee8239",
+				"value": "pending"
+			}
+		}
+	]
+}

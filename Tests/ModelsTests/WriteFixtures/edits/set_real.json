@@ -1,0 +1,40 @@
+{
+	"after": {
+		"8d42573a-b450-4e0c-b07a-eac9be014c2c": {
+			"description": "Alpha",
+			"entry": "1790440077",
+			"modified": "1790440077",
+			"size": "4.5",
+			"status": "pending"
+		}
+	},
+	"before": {
+		"8d42573a-b450-4e0c-b07a-eac9be014c2c": {
+			"description": "Alpha",
+			"entry": "1790440077",
+			"modified": "1790440077",
+			"status": "pending"
+		}
+	},
+	"now": 1790440077,
+	"operations": [
+		{
+			"Update": {
+				"old_value": "1790440077",
+				"property": "modified",
+				"timestamp": "2026-09-26T16:27:57.092652Z",
+				"uuid": "8d42573a-b450-4e0c-b07a-eac9be014c2c",
+				"value": "1790440077"
+			}
+		},
+		{
+			"Update": {
+				"old_value": null,
+				"property": "size",
+				"timestamp": "2026-09-26T16:27:57.092653Z",
+				"uuid": "8d42573a-b450-4e0c-b07a-eac9be014c2c",
+				"value": "4.5"
+			}
+		}
+	]
+}

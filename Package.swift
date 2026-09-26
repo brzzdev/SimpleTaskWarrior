@@ -119,6 +119,7 @@ let package = Package(
 				// Recorded by `just fixtures`.
 				.copy("DateFixtures"),
 				.copy("Fixtures"),
+				.copy("WriteFixtures"),
 			],
 		),
 		.testTarget(
