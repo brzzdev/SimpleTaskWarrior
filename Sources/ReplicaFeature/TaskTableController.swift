@@ -202,7 +202,7 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 			let tableColumn = makeColumn(
 				column,
 				firstOrder: firstOrder,
-				minWidth: uda.type == .date ? dateColumnMinimumWidth : 48,
+				minWidth: uda.type == .date ? dateColumnMinimumWidth : columnMinimumWidth,
 				title: uda.label,
 			)
 			tableColumn.isHidden = true
@@ -225,8 +225,8 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 		table.autosaveTableColumns = true
 		isFollowingStore = false
 		view.isHidden = false
-		// The table fits its columns only as its own width changes, so the defaults, and a layout
-		// saved in a wider window, would start wider than it.
+		// The table fits its columns to its width only when that width changes. Without this, the
+		// defaults, or a layout saved in a wider window, would start wider than the table.
 		view.layoutSubtreeIfNeeded()
 		if
 			let clipView = table.enclosingScrollView?.contentView,
@@ -256,6 +256,9 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 		}
 	}
 }
+
+/// Wide enough for a short project, tag list or UDA value, where no other floor applies.
+private let columnMinimumWidth: CGFloat = 48
 
 /// Wide enough for a numeric date in full.
 private let dateColumnMinimumWidth: CGFloat = 80
@@ -290,8 +293,8 @@ private func builtInColumns() -> [NSTableColumn] {
 		id,
 		urgency,
 		description,
-		makeColumn(.project, minWidth: 48, title: String(localized: "Project")),
-		makeColumn(.tags, minWidth: 48, title: String(localized: "Tags")),
+		makeColumn(.project, minWidth: columnMinimumWidth, title: String(localized: "Project")),
+		makeColumn(.tags, minWidth: columnMinimumWidth, title: String(localized: "Tags")),
 		makeColumn(.due, minWidth: dateColumnMinimumWidth, title: String(localized: "Due")),
 	] + hidden
 }
