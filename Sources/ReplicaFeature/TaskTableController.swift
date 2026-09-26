@@ -169,6 +169,7 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 	private func updateColumns() {
 		let udaColumns = store.udaColumns
 		let udaIdentifiers = Set(udaColumns.map { TaskColumn.uda($0.name).identifier })
+		var removedColumn = false
 		for column in table.tableColumns {
 			guard
 				case .uda? = TaskColumn(identifier: column.identifier.rawValue),
@@ -177,6 +178,7 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 				continue
 			}
 			table.removeTableColumn(column)
+			removedColumn = true
 		}
 		for uda in udaColumns {
 			let column = TaskColumn.uda(uda.name)
@@ -194,6 +196,11 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 			let tableColumn = makeColumn(column, firstOrder: firstOrder, title: uda.label)
 			tableColumn.isHidden = true
 			table.addTableColumn(tableColumn)
+		}
+		// Removing a column drops any sort by it without telling the delegate, so the reducer would
+		// go on sorting by a UDA the Taskrc no longer has.
+		if removedColumn, table.autosaveName != nil {
+			store.send(.sortOrderChanged(table.sortDescriptors.compactMap(TaskSort.init)))
 		}
 
 		// The name also records that the layout was restored, so it happens once.
