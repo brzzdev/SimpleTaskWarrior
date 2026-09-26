@@ -76,9 +76,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
 			replica.representedObject = url
 			return replica
 		}
-		menu.items = (replicas.isEmpty ? [] : replicas + [.separator()]) + [
-			menuItem("Clear Menu", #selector(NSDocumentController.clearRecentDocuments(_:))),
-		]
+		let clear = menuItem("Clear Menu", #selector(NSDocumentController.clearRecentDocuments(_:)))
+		// With no NSDocument, the document controller isn't in the responder chain.
+		clear.target = NSDocumentController.shared
+		menu.items = (replicas.isEmpty ? [] : replicas + [.separator()]) + [clear]
 	}
 
 	@objc
@@ -100,7 +101,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
 		let controller = ReplicaWindowController(bookmark: bookmark) { [weak self] in
 			self?.controllers[folder] = nil
 		}
+		// Unique per window, as restoration requires, and the same for a Replica each time, so its
+		// window reopens where it last was.
+		let name = "replica:" + folder.path(percentEncoded: false)
+		controller.window?.identifier = NSUserInterfaceItemIdentifier(name)
 		controller.window?.restorationClass = Self.self
+		controller.window?.setFrameAutosaveName(name)
 		controllers[folder] = controller
 		return controller
 	}
@@ -122,7 +128,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
 					return
 				}
 				let controller = makeController(bookmark: bookmark, folder: folder)
-				if let window = controller.window {
+				// A Replica opened before keeps the frame it autosaved.
+				if let window = controller.window, !window.setFrameUsingName(window.frameAutosaveName) {
 					if cascadePoint == .zero {
 						window.center()
 					}
