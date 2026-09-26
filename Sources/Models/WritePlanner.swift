@@ -30,11 +30,12 @@ public struct WritePlanner: Sendable {
 			guard !description.allSatisfy(\.isWhitespace) else {
 				throw .blankDescription
 			}
-			if let tag = taskrc.contextWrite.tags.first(where: reservedTags.contains) {
-				throw .reservedTag(tag)
-			}
 			guard tasks[id] == nil else {
 				return WritePlan()
+			}
+			// After the retry check: a create that landed plans nothing, whatever the Context is now.
+			if let tag = taskrc.contextWrite.tags.first(where: reservedTags.contains) {
+				throw .reservedTag(tag)
 			}
 			var draft = Draft(id: id, properties: [:], isNew: true)
 			create(&draft, description: description, at: now, epoch: epoch)

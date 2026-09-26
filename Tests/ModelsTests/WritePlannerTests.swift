@@ -254,14 +254,26 @@ struct WritePlannerTests {
 
 	@Test
 	func creatingATaskInAContextThatWritesAReservedTagThrows() {
-		let taskrc = Taskrc(path: "/taskrc", environment: .fixture) { path, _ throws(Taskrc.ReadError) in
-			Taskrc.File(contents: "context=work\ncontext.work.write=+PENDING\n", realPath: path)
-		}
-		let planner = WritePlanner(taskrc: taskrc, timeZone: .gmt)
+		let planner = WritePlanner(taskrc: pendingContext, timeZone: .gmt)
 
 		#expect(throws: WritePlanError.reservedTag("PENDING")) {
 			try planner.plan(.create(UUID(), description: "Alpha"), tasks: [:], at: .now)
 		}
+	}
+
+	/// A retry of a create that landed before the Context changed still plans nothing.
+	@Test
+	func recreatingATaskInAContextThatWritesAReservedTagPlansNothing() throws {
+		let planner = WritePlanner(taskrc: pendingContext, timeZone: .gmt)
+		let id = UUID()
+
+		let plan = try planner.plan(
+			.create(id, description: "Alpha"),
+			tasks: [id: ["description": "Alpha", "status": "pending"]],
+			at: .now,
+		)
+
+		#expect(plan == WritePlan())
 	}
 
 	@Test
@@ -288,6 +300,12 @@ struct WritePlannerTests {
 
 /// 2030-01-01 in UTC, which the fixtures write as `2030-01-01`.
 private let newYear2030 = Date(timeIntervalSince1970: 1_893_456_000)
+
+/// A Taskrc whose active Context writes the reserved `+PENDING` to new tasks.
+private let pendingContext = Taskrc(path: "/taskrc", environment: .fixture) {
+	path, _ throws(Taskrc.ReadError) in
+	Taskrc.File(contents: "context=work\ncontext.work.write=+PENDING\n", realPath: path)
+}
 
 /// One write `just fixtures` recorded.
 struct Recording {
