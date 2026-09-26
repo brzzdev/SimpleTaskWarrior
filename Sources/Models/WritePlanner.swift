@@ -98,7 +98,8 @@ public struct WritePlanner: Sendable {
 			draft.set(attribute, UDAValue.date(date).stored)
 		}
 		// Every `uda.<name>…default…` key, as `Task::validate` finds them. A date or duration default
-		// is resolved, where the CLI stores the text, which `task export` then drops.
+		// is resolved against the attributes set so far (`due`, `scheduled`, then UDAs by name), where
+		// the CLI stores the text, which `task export` then drops.
 		for key in taskrc.values.keys.sorted() where key.hasPrefix("uda.") && key.contains(".default") {
 			guard
 				let name = key.dropPrefix("uda.")?.split(separator: ".").first.map(String.init),
@@ -107,11 +108,19 @@ public struct WritePlanner: Sendable {
 			else {
 				continue
 			}
+			let properties = draft.properties
+			let references = { reference($0, in: properties) }
 			let value: UDAValue? =
 				switch taskrc.udaTypes[name] {
-				case .date: (try? dateInput.date(text, at: now)).map(UDAValue.date)
-				case .duration: (try? dateInput.duration(text, at: now)).map(UDAValue.duration)
-				case nil, .numeric, .string, .uuid: .string(text)
+				case .date:
+					(try? dateInput.date(text, at: now, references: references)).map(UDAValue.date)
+
+				case .duration:
+					(try? dateInput.duration(text, at: now, references: references))
+						.map(UDAValue.duration)
+
+				case nil, .numeric, .string, .uuid:
+					.string(text)
 				}
 			guard let value else {
 				continue
@@ -147,6 +156,28 @@ public struct WritePlanner: Sendable {
 			drafts.append(draft)
 		}
 		return WritePlan(drafts, epoch: epoch)
+	}
+
+	/// What an expression reads for `name`: a date attribute or UDA as its value, dates and durations
+	/// typed, or an empty string where the task has none, as TW reads one. Any other name is nil,
+	/// which reads as its own text.
+	private func reference(_ name: String, in properties: [String: String]) -> DateInput.Reference? {
+		guard let type = dateAttributes.contains(name) ? .date : taskrc.udaTypes[name] else {
+			return nil
+		}
+		guard let value = properties[name] else {
+			return .text("")
+		}
+		switch type {
+		case .date:
+			return Date(epoch: value).map(DateInput.Reference.date) ?? .text(value)
+
+		case .duration:
+			return TaskDuration(stored: value).map(DateInput.Reference.duration) ?? .text(value)
+
+		case .numeric, .string, .uuid:
+			return .text(value)
+		}
 	}
 
 	/// Refuses a dependency `task modify depends:` refuses, as `Task::addDependency` does: on the
@@ -238,6 +269,11 @@ extension TaskEdit {
 		}
 	}
 }
+
+/// The attributes TW stores as dates, besides date UDAs.
+private let dateAttributes: Set = [
+	"due", "end", "entry", "modified", "scheduled", "start", "until", "wait",
+]
 
 /// TW's virtual tags, which `task` refuses to add or remove, as `feedback_reserved_tags` lists
 /// them. Only these uppercase names are reserved: `pending` is an ordinary tag.

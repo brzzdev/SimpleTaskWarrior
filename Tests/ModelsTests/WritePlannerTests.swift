@@ -252,6 +252,28 @@ struct WritePlannerTests {
 		#expect(plan.operations.contains(.setValue(id, property: "tag_pending", value: "x")))
 	}
 
+	/// A default resolves against the attributes the create has already set, as `wait:due-1wk`
+	/// resolves against the task's `due`.
+	@Test
+	func creatingATaskResolvesADefaultThatRefersToAnotherAttribute() throws {
+		let taskrc = Taskrc(path: "/taskrc", environment: .fixture) { path, _ throws(Taskrc.ReadError) in
+			Taskrc.File(
+				contents: """
+					default.due=2030-01-02
+					uda.review.default=due-1d
+					uda.review.type=date
+					""",
+				realPath: path,
+			)
+		}
+		let planner = WritePlanner(taskrc: taskrc, timeZone: .gmt)
+		let id = UUID()
+
+		let plan = try planner.plan(.create(id, description: "Alpha"), tasks: [:], at: .now)
+
+		#expect(plan.operations.contains(.setValue(id, property: "review", value: "1893456000")))
+	}
+
 	@Test
 	func creatingATaskInAContextThatWritesAReservedTagThrows() {
 		let planner = WritePlanner(taskrc: pendingContext, timeZone: .gmt)
