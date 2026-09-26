@@ -174,6 +174,30 @@ struct ReplicaFeatureTests {
 	}
 
 	@Test
+	func newTaskWaitsForTheReplicaAndTheTaskrc() async {
+		var initialState = ReplicaFeature.State(bookmark: Data())
+		initialState.directory = replicaDirectory
+		let store = TestStore(initialState: initialState) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.date.now = now
+			$0.timeZone = .gmt
+		}
+
+		// Tasks with no Taskrc yet would create on TW's defaults.
+		await store.send(.tasksLoaded([])) {
+			$0.isReplicaOpen = true
+		}
+		await store.send(.newTaskButtonTapped)
+		await store.send(.taskrcLoaded(TaskrcClient.Loaded(taskrc: .defaults, url: taskrcFile))) {
+			$0.taskrc = TaskrcClient.Loaded(taskrc: .defaults, url: taskrcFile)
+		}
+		await store.send(.newTaskButtonTapped) {
+			$0.isNewTaskRowPresented = true
+		}
+	}
+
+	@Test
 	func savingShowsAfterHalfASecondAndOtherWritesWaitUntilTheWriteEnds() async throws {
 		let milk = storedTask(0, "Buy milk", workingSetID: 1)
 		let milkDone = storedTask(0, "Buy milk", status: "completed", workingSetID: 1)
@@ -484,6 +508,7 @@ struct ReplicaFeatureTests {
 		continuation.yield([dog, taxes, milk])
 		await store.receive(\.tasksLoaded) {
 			$0.allRows = try [row(milk), row(dog), row(taxes, view: .completed)]
+			$0.isReplicaOpen = true
 			$0.storedTasks = [dog, taxes, milk]
 			$0.rows = try [row(milk), row(dog)]
 		}
@@ -542,6 +567,7 @@ struct ReplicaFeatureTests {
 		continuation.yield([call, post])
 		await store.receive(\.tasksLoaded) {
 			$0.allRows = try [row(post), row(call)]
+			$0.isReplicaOpen = true
 			$0.rows = try [row(post), row(call)]
 			$0.storedTasks = [call, post]
 		}
@@ -580,6 +606,7 @@ struct ReplicaFeatureTests {
 				row(blocked, isBlocked: true, urgency: -5),
 			]
 			$0.highestUrgency = 8
+			$0.isReplicaOpen = true
 			$0.storedTasks = storedTasks
 			$0.rows = try [
 				row(blocker, urgency: 8),
@@ -855,9 +882,11 @@ private func loadedState(
 		return try row(stored, view: #require(task.flatMap { TaskView($0, at: now) }))
 	}
 	state.directory = replicaDirectory
+	state.isReplicaOpen = true
 	state.rows = IdentifiedArray(uniqueElements: state.allRows)
 	state.selection = selection
 	state.storedTasks = tasks
+	state.taskrc = TaskrcClient.Loaded(taskrc: .defaults, url: nil)
 	return state
 }
 

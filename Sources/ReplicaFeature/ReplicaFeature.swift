@@ -26,6 +26,8 @@ struct ReplicaFeature {
 		/// The highest Urgency in the table, which scales every row's bar.
 		var highestUrgency = 0.0
 		var isNewTaskRowPresented = false
+		/// Set once the Replica's tasks first arrive, by which point `apply` can reach it.
+		var isReplicaOpen = false
 		var isTaskrcHintPresented = false
 		/// The tasks the sidebar and search leave, in `sortOrder`.
 		var rows: IdentifiedArrayOf<TaskRow> = []
@@ -49,6 +51,12 @@ struct ReplicaFeature {
 		/// The active Context's name, where there is one.
 		var activeContext: String? {
 			runningTaskrc["context"].flatMap { $0.isEmpty ? nil : $0 }
+		}
+
+		/// Whether New Task applies: once `apply` can reach the Replica and the Taskrc, whose defaults
+		/// and Context a new task takes, has loaded, and while no write is in progress.
+		var canCreateTask: Bool {
+			isReplicaOpen && failure == nil && taskrc != nil && writeProgress == nil
 		}
 
 		/// Whether Grant Access… can fix the Taskrc's problem.
@@ -324,7 +332,7 @@ struct ReplicaFeature {
 				return perform(.markPending, &state)
 
 			case .newTaskButtonTapped:
-				guard state.writeProgress == nil else {
+				guard state.canCreateTask else {
 					return .none
 				}
 				state.isNewTaskRowPresented = true
@@ -391,6 +399,7 @@ struct ReplicaFeature {
 				return .none
 
 			case let .tasksLoaded(tasks):
+				state.isReplicaOpen = true
 				state.storedTasks = tasks
 				updateRows(&state)
 				return .none

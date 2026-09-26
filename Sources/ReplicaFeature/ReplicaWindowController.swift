@@ -236,7 +236,7 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 			store.canGrantAccess
 
 		case #selector(newTask(_:)):
-			store.writeProgress == nil
+			store.canCreateTask
 
 		case #selector(useTaskwarriorDefaults(_:)):
 			store.hasTaskrc
@@ -300,7 +300,7 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 			item.isEnabled = enabled.contains(command)
 			item.isHidden = !store.state.isOffered(command)
 		}
-		newTaskItem.isEnabled = store.writeProgress == nil
+		newTaskItem.isEnabled = store.canCreateTask
 		guard let startStopItem = commandItems[.startStop] else {
 			return
 		}
