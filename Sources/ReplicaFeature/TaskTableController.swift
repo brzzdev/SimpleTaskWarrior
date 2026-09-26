@@ -108,6 +108,9 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 		_: NSTableView,
 		sortDescriptorsDidChange _: [NSSortDescriptor],
 	) {
+		guard !isFollowingStore else {
+			return
+		}
 		store.send(.sortOrderChanged(table.sortDescriptors.compactMap(TaskSort.init)))
 	}
 
@@ -120,6 +123,15 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 		}
 		let row = rows.elements[row]
 		switch column {
+		case .age, .due, .id, .project, .scheduled, .tags, .uda, .until, .wait:
+			let cell = reusedCell(TextCell.init)
+			cell.textField?.font =
+				column == .id
+					? .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+					: .systemFont(ofSize: NSFont.systemFontSize)
+			cell.textField?.stringValue = text(column, of: row)
+			return cell
+
 		case .description:
 			let cell = reusedCell(DescriptionCell.init)
 			cell.configure(row)
@@ -128,15 +140,6 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 		case .urgency:
 			let cell = reusedCell(UrgencyCell.init)
 			cell.configure(urgency: row.urgency, highest: highestUrgency)
-			return cell
-
-		case .age, .due, .id, .project, .scheduled, .tags, .uda, .until, .wait:
-			let cell = reusedCell(TextCell.init)
-			cell.textField?.font =
-				column == .id
-					? .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
-					: .systemFont(ofSize: NSFont.systemFontSize)
-			cell.textField?.stringValue = text(column, of: row)
 			return cell
 		}
 	}
@@ -188,7 +191,7 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 				existing.title = uda.label
 				continue
 			}
-			let tableColumn = makeColumn(column, title: uda.label, firstOrder: firstOrder)
+			let tableColumn = makeColumn(column, firstOrder: firstOrder, title: uda.label)
 			tableColumn.isHidden = true
 			table.addTableColumn(tableColumn)
 		}
@@ -197,9 +200,12 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 		guard table.autosaveName == nil, store.taskrc != nil else {
 			return
 		}
+		// Sent once below, whichever of these two sets the sort.
+		isFollowingStore = true
 		table.sortDescriptors = initialSortOrder.map(\.descriptor)
 		table.autosaveName = autosaveName
 		table.autosaveTableColumns = true
+		isFollowingStore = false
 		view.isHidden = false
 		store.send(.sortOrderChanged(table.sortDescriptors.compactMap(TaskSort.init)))
 	}
@@ -232,7 +238,7 @@ private func builtInColumns() -> [NSTableColumn] {
 	id.minWidth = 32
 	id.width = 40
 	id.maxWidth = 64
-	let urgency = makeColumn(.urgency, title: String(localized: "Urgency"), firstOrder: .reverse)
+	let urgency = makeColumn(.urgency, firstOrder: .reverse, title: String(localized: "Urgency"))
 	urgency.minWidth = 48
 	urgency.width = 64
 	urgency.maxWidth = 96
@@ -260,8 +266,8 @@ private func builtInColumns() -> [NSTableColumn] {
 /// A column for `column`, whose header sorts in `firstOrder` when first clicked.
 private func makeColumn(
 	_ column: TaskColumn,
-	title: String,
 	firstOrder: SortOrder = .forward,
+	title: String,
 ) -> NSTableColumn {
 	let tableColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(column.identifier))
 	tableColumn.sortDescriptorPrototype = TaskSort(column, order: firstOrder).descriptor
