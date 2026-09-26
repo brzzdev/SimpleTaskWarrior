@@ -226,14 +226,10 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 		isFollowingStore = false
 		view.isHidden = false
 		// The table fits its columns to its width only when that width changes. Without this, the
-		// defaults, or a layout saved in a wider window, would start wider than the table.
+		// defaults, or a layout saved in a wider window, would start wider than the table. A layout
+		// that already fits comes through unchanged.
 		view.layoutSubtreeIfNeeded()
-		if
-			let clipView = table.enclosingScrollView?.contentView,
-			table.frame.width > clipView.bounds.width
-		{
-			table.sizeToFit()
-		}
+		table.sizeToFit()
 		sendSortOrder()
 	}
 
@@ -260,7 +256,7 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 /// Wide enough for a short project, tag list or UDA value, where no other floor applies.
 private let columnMinimumWidth: CGFloat = 48
 
-/// Wide enough for a numeric date in full.
+/// Wide enough for a date in full, numeric or relative.
 private let dateColumnMinimumWidth: CGFloat = 80
 
 private let descriptionIdentifier = TaskColumn.description.identifier
@@ -273,7 +269,8 @@ private func builtInColumns() -> [NSTableColumn] {
 	let urgency = makeColumn(
 		.urgency,
 		firstOrder: .reverse,
-		minWidth: 64,
+		// Its title and the sort indicator it usually shows.
+		minWidth: 80,
 		title: String(localized: "Urgency"),
 	)
 	urgency.width = 80
@@ -281,7 +278,7 @@ private func builtInColumns() -> [NSTableColumn] {
 	let description = makeColumn(.description, minWidth: 100, title: String(localized: "Description"))
 	description.width = 240
 	let hidden = [
-		makeColumn(.age, minWidth: 56, title: String(localized: "Age")),
+		makeColumn(.age, minWidth: dateColumnMinimumWidth, title: String(localized: "Age")),
 		makeColumn(.scheduled, minWidth: dateColumnMinimumWidth, title: String(localized: "Scheduled")),
 		makeColumn(.wait, minWidth: dateColumnMinimumWidth, title: String(localized: "Wait")),
 		makeColumn(.until, minWidth: dateColumnMinimumWidth, title: String(localized: "Until")),
