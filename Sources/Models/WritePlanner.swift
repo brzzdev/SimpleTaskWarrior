@@ -30,6 +30,9 @@ public struct WritePlanner: Sendable {
 			guard !description.allSatisfy(\.isWhitespace) else {
 				throw .blankDescription
 			}
+			if let tag = taskrc.contextWrite.tags.first(where: reservedTags.contains) {
+				throw .reservedTag(tag)
+			}
 			guard tasks[id] == nil else {
 				return WritePlan()
 			}
@@ -45,6 +48,9 @@ public struct WritePlanner: Sendable {
 			return try plan(ids, tasks: tasks, at: epoch) { $0.delete(at: epoch) }
 
 		case let .edit(ids, edit):
+			if let tag = edit.tag, reservedTags.contains(tag) {
+				throw .reservedTag(tag)
+			}
 			guard case let .addDependency(dependency) = edit else {
 				return try plan(ids, tasks: tasks, at: epoch) { $0.apply(edit) }
 			}
@@ -222,6 +228,25 @@ public enum TaskEdit: Equatable, Sendable {
 	case set(String, UDAValue?)
 }
 
+extension TaskEdit {
+	/// The tag an edit adds or removes.
+	fileprivate var tag: String? {
+		switch self {
+		case let .addTag(tag), let .removeTag(tag): tag
+		default: nil
+		}
+	}
+}
+
+/// TW's virtual tags, which `task` refuses to add or remove, as `feedback_reserved_tags` lists
+/// them. Only these uppercase names are reserved: `pending` is an ordinary tag.
+private let reservedTags: Set = [
+	"ACTIVE", "ANNOTATED", "BLOCKED", "BLOCKING", "CHILD", "COMPLETED", "DELETED", "DUE", "DUETODAY",
+	"INSTANCE", "LATEST", "MONTH", "ORPHAN", "OVERDUE", "PARENT", "PENDING", "PRIORITY", "PROJECT",
+	"QUARTER", "READY", "SCHEDULED", "TAGGED", "TEMPLATE", "TODAY", "TOMORROW", "UDA", "UNBLOCKED",
+	"UNTIL", "WAITING", "WEEK", "YEAR", "YESTERDAY",
+]
+
 public enum WritePlanError: Error, Equatable, Sendable {
 	/// A New Task with no description, or only whitespace, which `task add` refuses. `task modify`
 	/// accepts removing one, so an edit may remove it.
@@ -230,6 +255,8 @@ public enum WritePlanError: Error, Equatable, Sendable {
 	case circularDependency(Task.ID)
 	/// The task isn't in the snapshot, as after a `task undo` of its creation, or a purge.
 	case noSuchTask(Task.ID)
+	/// A virtual tag such as `PENDING`, which TW computes and refuses to add or remove.
+	case reservedTag(String)
 	/// The task would depend on itself.
 	case selfDependency(Task.ID)
 }

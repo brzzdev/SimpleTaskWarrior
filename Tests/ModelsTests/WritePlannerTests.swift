@@ -226,6 +226,44 @@ struct WritePlannerTests {
 		}
 	}
 
+	/// `task` refuses adding or removing a virtual tag, whose names are uppercase, writing nothing.
+	@Test(arguments: [(TaskEdit.addTag("PENDING"), "PENDING"), (.removeTag("BLOCKED"), "BLOCKED")])
+	func addingOrRemovingAReservedTagThrows(edit: TaskEdit, tag: String) {
+		let planner = WritePlanner(taskrc: .defaults, timeZone: .gmt)
+		let id = UUID()
+
+		#expect(throws: WritePlanError.reservedTag(tag)) {
+			try planner.plan(.edit([id], edit), tasks: [id: ["status": "pending"]], at: .now)
+		}
+	}
+
+	/// Only the uppercase name is reserved.
+	@Test
+	func addingALowercaseVirtualTagNameWritesIt() throws {
+		let planner = WritePlanner(taskrc: .defaults, timeZone: .gmt)
+		let id = UUID()
+
+		let plan = try planner.plan(
+			.edit([id], .addTag("pending")),
+			tasks: [id: ["status": "pending"]],
+			at: .now,
+		)
+
+		#expect(plan.operations.contains(.setValue(id, property: "tag_pending", value: "x")))
+	}
+
+	@Test
+	func creatingATaskInAContextThatWritesAReservedTagThrows() {
+		let taskrc = Taskrc(path: "/taskrc", environment: .fixture) { path, _ throws(Taskrc.ReadError) in
+			Taskrc.File(contents: "context=work\ncontext.work.write=+PENDING\n", realPath: path)
+		}
+		let planner = WritePlanner(taskrc: taskrc, timeZone: .gmt)
+
+		#expect(throws: WritePlanError.reservedTag("PENDING")) {
+			try planner.plan(.create(UUID(), description: "Alpha"), tasks: [:], at: .now)
+		}
+	}
+
 	@Test
 	func addingATagExpectsTheOtherTags() throws {
 		let planner = WritePlanner(taskrc: .defaults, timeZone: .gmt)
