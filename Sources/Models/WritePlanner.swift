@@ -404,6 +404,24 @@ extension WritePlan {
 		/// Removes the property when `value` is nil.
 		case setValue(Task.ID, property: String, value: String?)
 	}
+
+	/// `tasks` with the plan applied, as the engine would commit it.
+	public func applied(to tasks: [Task.ID: [String: String]]) -> [Task.ID: [String: String]] {
+		var tasks = tasks
+		for operation in operations {
+			switch operation {
+			case let .create(id):
+				tasks[id] = [:]
+
+			case let .setStatus(id, status):
+				tasks[id]?["status"] = status.rawValue
+
+			case let .setValue(id, property, value):
+				tasks[id]?[property] = value
+			}
+		}
+		return tasks
+	}
 }
 
 /// One task's properties as a plan changes them, recording what it reads before changing it.

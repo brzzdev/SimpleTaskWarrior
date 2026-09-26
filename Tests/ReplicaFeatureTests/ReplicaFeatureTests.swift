@@ -59,27 +59,24 @@ struct ReplicaFeatureTests {
 		)
 		let completed = storedTask(2, "File taxes", status: "completed", workingSetID: nil)
 		var state = try loadedState([pending, active, completed])
-		func enabled() -> Set<ReplicaFeature.TaskCommand> {
-			Set([.delete, .done, .markPending, .newTask, .startStop].filter(state.isEnabled))
-		}
 
-		#expect(enabled() == [.newTask])
+		#expect(state.enabledCommands.isEmpty)
 
 		state.selection = [UUID(0), UUID(1)]
-		#expect(enabled() == [.delete, .done, .newTask, .startStop])
+		#expect(state.enabledCommands == [.delete, .done, .startStop])
 		#expect(!state.isStopping)
 
 		state.selection = [UUID(1)]
 		#expect(state.isStopping)
 
 		state.selection = [UUID(2)]
-		#expect(enabled() == [.delete, .markPending, .newTask])
+		#expect(state.enabledCommands == [.delete, .markPending])
 
 		state.selection = [UUID(0), UUID(2)]
-		#expect(enabled() == [.delete, .newTask])
+		#expect(state.enabledCommands == [.delete])
 
-		state.isWriting = true
-		#expect(enabled().isEmpty)
+		state.write = .running
+		#expect(state.enabledCommands.isEmpty)
 	}
 
 	@Test
@@ -96,20 +93,22 @@ struct ReplicaFeatureTests {
 			$0.date.now = now
 			$0.replicaClient.apply = { plan, _ in
 				plans.withValue { $0.append(plan) }
-				return .committed([milkDone, dog])
+				return ApplyOutcome(isCommitted: true, tasks: [milkDone, dog])
 			}
 			$0.timeZone = .gmt
 		}
 
 		await store.send(.doneButtonTapped) {
-			$0.isWriting = true
+			$0.write = .running
 		}
-		await store.receive(\.writeCommitted) {
+		await store.receive(\.tasksLoaded) {
 			$0.allRows = try [row(dog), row(milkDone, view: .completed)]
-			$0.isWriting = false
 			$0.rows = try [row(dog)]
 			$0.selection = []
 			$0.storedTasks = [milkDone, dog]
+		}
+		await store.receive(\.writeCommitted) {
+			$0.write = nil
 		}
 		#expect(
 			try plans.value == [
@@ -138,7 +137,7 @@ struct ReplicaFeatureTests {
 			$0.date.now = now
 			$0.replicaClient.apply = { plan, _ in
 				plans.withValue { $0.append(plan) }
-				return .committed([taxes, milk])
+				return ApplyOutcome(isCommitted: true, tasks: [taxes, milk])
 			}
 			$0.timeZone = .gmt
 			$0.uuid = .incrementing
@@ -152,17 +151,19 @@ struct ReplicaFeatureTests {
 		await store.send(.newTaskDescriptionSubmitted("Buy milk")) {
 			$0.creatingTask = UUID(0)
 			$0.isNewTaskRowPresented = false
-			$0.isWriting = true
+			$0.write = .running
+		}
+		await store.receive(\.tasksLoaded) {
+			$0.allRows = try [row(milk), row(taxes, view: .completed)]
+			$0.storedTasks = [taxes, milk]
 		}
 		// The search would hide it, so it's cleared.
 		await store.receive(\.writeCommitted) {
-			$0.allRows = try [row(milk), row(taxes, view: .completed)]
 			$0.creatingTask = nil
-			$0.isWriting = false
 			$0.rows = try [row(milk)]
 			$0.searchText = ""
 			$0.selection = [UUID(0)]
-			$0.storedTasks = [taxes, milk]
+			$0.write = nil
 		}
 		#expect(plans.value.first?.operations.first == .create(UUID(0)))
 		await store.finish()
@@ -184,29 +185,30 @@ struct ReplicaFeatureTests {
 				for await _ in commits {
 					break
 				}
-				return .committed([milkDone])
+				return ApplyOutcome(isCommitted: true, tasks: [milkDone])
 			}
 			$0.timeZone = .gmt
 		}
 
 		await store.send(.doneButtonTapped) {
-			$0.isWriting = true
+			$0.write = .running
 		}
 		await store.send(.deleteButtonTapped)
 		await clock.advance(by: .milliseconds(499))
 		await clock.advance(by: .milliseconds(1))
 		await store.receive(\.savingDelayElapsed) {
-			$0.isSaving = true
+			$0.write = .saving
 		}
 
 		commit.yield()
-		await store.receive(\.writeCommitted) {
+		await store.receive(\.tasksLoaded) {
 			$0.allRows = try [row(milkDone, view: .completed)]
-			$0.isSaving = false
-			$0.isWriting = false
 			$0.rows = []
 			$0.selection = []
 			$0.storedTasks = [milkDone]
+		}
+		await store.receive(\.writeCommitted) {
+			$0.write = nil
 		}
 		await store.finish()
 	}
@@ -230,13 +232,15 @@ struct ReplicaFeatureTests {
 			$0.date.now = now
 			$0.replicaClient.apply = { plan, _ in
 				plans.withValue { $0.append(plan) }
-				return plans.value.count == 1 ? .conflict([milkStarted]) : .committed([milkDone])
+				return plans.value.count == 1
+					? ApplyOutcome(isCommitted: false, tasks: [milkStarted])
+					: ApplyOutcome(isCommitted: true, tasks: [milkDone])
 			}
 			$0.timeZone = .gmt
 		}
 
 		await store.send(.doneButtonTapped) {
-			$0.isWriting = true
+			$0.write = .running
 		}
 		// Active, so the CLI's start raised its Urgency.
 		await store.receive(\.tasksLoaded) {
@@ -245,13 +249,15 @@ struct ReplicaFeatureTests {
 			$0.rows = try [row(milkStarted, urgency: 4)]
 			$0.storedTasks = [milkStarted]
 		}
-		await store.receive(\.writeCommitted) {
+		await store.receive(\.tasksLoaded) {
 			$0.allRows = try [row(milkDone, view: .completed)]
 			$0.highestUrgency = 0
-			$0.isWriting = false
 			$0.rows = []
 			$0.selection = []
 			$0.storedTasks = [milkDone]
+		}
+		await store.receive(\.writeCommitted) {
+			$0.write = nil
 		}
 		#expect(
 			try plans.value.last
@@ -272,19 +278,19 @@ struct ReplicaFeatureTests {
 			$0.date.now = now
 			$0.replicaClient.apply = { _, _ in
 				attempts.withValue { $0 += 1 }
-				return .conflict([milk])
+				return ApplyOutcome(isCommitted: false, tasks: [milk])
 			}
 			$0.timeZone = .gmt
 		}
 
 		await store.send(.doneButtonTapped) {
-			$0.isWriting = true
+			$0.write = .running
 		}
 		await store.receive(\.tasksLoaded)
 		await store.receive(\.tasksLoaded)
 		await store.receive(\.tasksLoaded)
 		await store.receive(\.writeFailed) {
-			$0.isWriting = false
+			$0.write = nil
 		}
 		#expect(attempts.value == 3)
 		await store.finish()
@@ -840,8 +846,9 @@ private func loadedState(
 	selection: Set<UUID> = [],
 ) throws -> ReplicaFeature.State {
 	var state = ReplicaFeature.State(bookmark: Data())
-	state.allRows = try tasks.map { task in
-		try row(task, view: task.properties["status"] == "completed" ? .completed : .pending)
+	state.allRows = try tasks.map { stored in
+		let task = Models.Task(stored, udaTypes: Taskrc.defaults.udaTypes)
+		return try row(stored, view: #require(task.flatMap { TaskView($0, at: now) }))
 	}
 	state.directory = replicaDirectory
 	state.rows = IdentifiedArray(uniqueElements: state.allRows)

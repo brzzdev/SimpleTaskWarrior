@@ -328,16 +328,15 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 	}
 
 	/// Acts on the right-clicked row, selecting it first where it isn't already, as Finder does. Lists
-	/// Mark Pending in place of Start/Stop, Done and Delete as the toolbar does.
+	/// the commands the toolbar does.
 	private func updateRowMenu() {
 		let clicked = table.clickedRow
 		if row(at: clicked) != nil, !table.selectedRowIndexes.contains(clicked) {
 			table.selectRowIndexes(IndexSet(integer: clicked), byExtendingSelection: false)
 		}
-		let offersMarkPending = store.offersMarkPending
 		for item in rowMenu.items {
-			let isMarkPending = item.action == #selector(ReplicaWindowController.markPending(_:))
-			item.isHidden = isMarkPending != offersMarkPending
+			let command = ReplicaFeature.TaskCommand(action: item.action)
+			item.isHidden = command.map { !store.state.isOffered($0) } ?? false
 		}
 	}
 

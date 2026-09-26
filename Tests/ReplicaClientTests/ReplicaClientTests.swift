@@ -36,11 +36,8 @@ final class ReplicaClientTests {
 
 		let outcome = try await replicaClient.apply(plan, directory)
 
-		guard case let .committed(committed) = outcome else {
-			Issue.record("expected a commit, got \(outcome)")
-			return
-		}
-		#expect(committed.map(\.uuid) == [uuid.uuidString.lowercased()])
+		#expect(outcome.isCommitted)
+		#expect(outcome.tasks.map(\.uuid) == [uuid.uuidString.lowercased()])
 		let undoOperations = try cli.getUndoOperations()
 		#expect(undoOperations.first == .undoPoint)
 		#expect(undoOperations.count { $0 == .undoPoint } == 1)
@@ -64,12 +61,9 @@ final class ReplicaClientTests {
 
 		let outcome = try await replicaClient.apply(plan, directory)
 
-		guard case let .conflict(fresh) = outcome else {
-			Issue.record("expected a conflict, got \(outcome)")
-			return
-		}
-		#expect(fresh.first?.properties["start"] == "1790000000")
-		#expect(fresh.first?.properties["status"] == "pending")
+		#expect(!outcome.isCommitted)
+		#expect(outcome.tasks.first?.properties["start"] == "1790000000")
+		#expect(outcome.tasks.first?.properties["status"] == "pending")
 		#expect(try cli.getUndoOperations() == before)
 	}
 

@@ -26,11 +26,7 @@ struct ReplicaFeature {
 		/// The highest Urgency in the table, which scales every row's bar.
 		var highestUrgency = 0.0
 		var isNewTaskRowPresented = false
-		/// Set once a write has run long enough for the subtitle to say so.
-		var isSaving = false
 		var isTaskrcHintPresented = false
-		/// Set while a write is in progress, which disables every other write.
-		var isWriting = false
 		/// The tasks the sidebar and search leave, in `sortOrder`.
 		var rows: IdentifiedArrayOf<TaskRow> = []
 		/// Narrows the table after the sidebar.
@@ -47,6 +43,8 @@ struct ReplicaFeature {
 		var taskrcSaveFailure: TaskrcSaveFailure?
 		/// The running Taskrc's UDAs, which the table offers as columns.
 		var udaColumns = UDAColumn.all(in: .defaults)
+		/// The write in progress, which disables every other.
+		var write: WriteProgress?
 
 		/// The active Context's name, where there is one.
 		var activeContext: String? {
@@ -61,21 +59,41 @@ struct ReplicaFeature {
 			return false
 		}
 
+		/// The commands that apply to every selected task, none while a write is in progress. Read
+		/// once for all of them, since the selection is looked up for each read.
+		var enabledCommands: Set<TaskCommand> {
+			guard write == nil else {
+				return []
+			}
+			let tasks = selection.compactMap { rows[id: $0]?.task }
+			guard !tasks.isEmpty else {
+				return []
+			}
+			var commands: Set<TaskCommand> = []
+			if tasks.allSatisfy({ $0.status != .deleted }) {
+				commands.insert(.delete)
+			}
+			let isPending = tasks.allSatisfy { $0.status == .pending }
+			if isPending {
+				commands.insert(.done)
+			}
+			if tasks.allSatisfy({ $0.status == .completed || $0.status == .deleted }) {
+				commands.insert(.markPending)
+			}
+			if isPending || isStopping(tasks) {
+				commands.insert(.startStop)
+			}
+			return commands
+		}
+
 		/// Whether Start/Stop stops, which it does when every selected task is active.
 		var isStopping: Bool {
-			let tasks = selectedTasks
-			return !tasks.isEmpty && tasks.allSatisfy { $0.start != nil }
+			isStopping(selection.compactMap { rows[id: $0]?.task })
 		}
 
-		/// Whether the toolbar offers Mark Pending in place of Start/Stop, Done and Delete, which it
-		/// does when every selected fixed view is Completed or Deleted.
-		var offersMarkPending: Bool {
-			SidebarFilter(sidebarSelection).views.isSubset(of: [.completed, .deleted])
-		}
-
-		/// The selected tasks, in the table's order.
-		var selectedTasks: [Models.Task] {
-			rows.filter { selection.contains($0.id) }.map(\.task)
+		/// The selected tasks' IDs, in the table's order.
+		var selectedIDs: [Models.Task.ID] {
+			rows.ids.filter(selection.contains)
 		}
 
 		/// Whether the window has a Taskrc, rather than running on TW's defaults.
@@ -128,31 +146,17 @@ struct ReplicaFeature {
 			self.bookmark = bookmark
 		}
 
-		/// Whether `command` applies to every selected task, while no write is in progress.
-		func isEnabled(_ command: TaskCommand) -> Bool {
-			guard !isWriting else {
-				return false
-			}
-			let tasks = selectedTasks
-			guard command == .newTask || !tasks.isEmpty else {
-				return false
-			}
-			switch command {
-			case .delete:
-				return tasks.allSatisfy { $0.status != .deleted }
+		/// Whether the toolbar and a row's context menu list `command`. Mark Pending takes the place of
+		/// the others where every selected fixed view is Completed or Deleted.
+		func isOffered(_ command: TaskCommand) -> Bool {
+			let offersMarkPending = SidebarFilter(sidebarSelection)
+				.views
+				.isSubset(of: [.completed, .deleted])
+			return (command == .markPending) == offersMarkPending
+		}
 
-			case .done:
-				return tasks.allSatisfy { $0.status == .pending }
-
-			case .markPending:
-				return tasks.allSatisfy { $0.status == .completed || $0.status == .deleted }
-
-			case .newTask:
-				return true
-
-			case .startStop:
-				return isStopping || tasks.allSatisfy { $0.status == .pending }
-			}
+		private func isStopping(_ tasks: [Models.Task]) -> Bool {
+			!tasks.isEmpty && tasks.allSatisfy { $0.start != nil }
 		}
 	}
 
@@ -161,8 +165,13 @@ struct ReplicaFeature {
 		case delete
 		case done
 		case markPending
-		case newTask
 		case startStop
+	}
+
+	enum WriteProgress: Equatable {
+		case running
+		/// Running long enough for the subtitle to say so.
+		case saving
 	}
 
 	struct TaskrcSaveFailure: Equatable {
@@ -206,7 +215,7 @@ struct ReplicaFeature {
 		case timerTicked
 		case tryAgainButtonTapped
 		case useTaskwarriorDefaultsButtonTapped
-		case writeCommitted([StoredTask])
+		case writeCommitted
 		case writeFailed
 	}
 
@@ -239,10 +248,7 @@ struct ReplicaFeature {
 				return .none
 
 			case .deleteButtonTapped:
-				guard state.isEnabled(.delete) else {
-					return .none
-				}
-				return write(.delete(selectedIDs(state)), &state)
+				return perform(.delete, &state)
 
 			case let .directoryResolved(directory):
 				state.directory = directory
@@ -261,10 +267,7 @@ struct ReplicaFeature {
 				)
 
 			case .doneButtonTapped:
-				guard state.isEnabled(.done) else {
-					return .none
-				}
-				return write(.complete(selectedIDs(state)), &state)
+				return perform(.done, &state)
 
 			case .fetchRequested:
 				return .merge(
@@ -312,13 +315,10 @@ struct ReplicaFeature {
 				return .none
 
 			case .markPendingButtonTapped:
-				guard state.isEnabled(.markPending) else {
-					return .none
-				}
-				return write(.markPending(selectedIDs(state)), &state)
+				return perform(.markPending, &state)
 
 			case .newTaskButtonTapped:
-				guard state.isEnabled(.newTask) else {
+				guard state.write == nil else {
 					return .none
 				}
 				state.isNewTaskRowPresented = true
@@ -351,7 +351,9 @@ struct ReplicaFeature {
 
 			case .savingDelayElapsed:
 				// The delay can elapse just as the write ends.
-				state.isSaving = state.isWriting
+				if state.write != nil {
+					state.write = .saving
+				}
 				return .none
 
 			case let .sortOrderChanged(sortOrder):
@@ -360,11 +362,7 @@ struct ReplicaFeature {
 				return .none
 
 			case .startStopButtonTapped:
-				guard state.isEnabled(.startStop) else {
-					return .none
-				}
-				let ids = selectedIDs(state)
-				return write(state.isStopping ? .stop(ids) : .start(ids), &state)
+				return perform(.startStop, &state)
 
 			case .taskrcHintCloseButtonTapped:
 				state.isTaskrcHintPresented = false
@@ -410,19 +408,8 @@ struct ReplicaFeature {
 					try bookmarkClient.saveTaskrc(nil, directory)
 				}
 
-			case let .writeCommitted(tasks):
-				state.storedTasks = tasks
-				updateRows(&state)
-				if let created = state.creatingTask {
-					// Only a search can hide a new task: New Task already showed the sidebar it lands in.
-					if state.rows[id: created] == nil, !state.searchText.isEmpty {
-						state.searchText = ""
-						filterRows(&state)
-					}
-					if state.rows[id: created] != nil {
-						state.selection = [created]
-					}
-				}
+			case .writeCommitted:
+				selectCreatedTask(&state)
 				finishWrite(&state)
 				return .none
 
@@ -465,10 +452,10 @@ struct ReplicaFeature {
 	/// engine refuses the plan as stale, plans it again against the tasks it read instead, up to
 	/// `planAttempts` times. Every other write waits until it finishes.
 	private func write(_ action: WriteAction, _ state: inout State) -> Effect<Action> {
-		guard !state.isWriting, let directory = state.directory else {
+		guard state.write == nil, let directory = state.directory else {
 			return .none
 		}
-		state.isWriting = true
+		state.write = .running
 		let planner = WritePlanner(taskrc: state.runningTaskrc, timeZone: timeZone)
 		return .run { [clock, now, replicaClient, storedTasks = state.storedTasks] send in
 			// A child of the write, so it's cancelled as the write ends, however it ends.
@@ -479,16 +466,14 @@ struct ReplicaFeature {
 			var tasks = storedTasks
 			for _ in 1 ... planAttempts {
 				let plan = try planner.plan(action, tasks: properties(of: tasks), at: now)
-				switch try await replicaClient.apply(plan, directory) {
-				case let .committed(committed):
-					await send(.writeCommitted(committed))
+				let outcome = try await replicaClient.apply(plan, directory)
+				// The stream won't yield these, having been read already.
+				await send(.tasksLoaded(outcome.tasks))
+				guard !outcome.isCommitted else {
+					await send(.writeCommitted)
 					return
-
-				case let .conflict(fresh):
-					// The stream won't yield these, having been read already.
-					await send(.tasksLoaded(fresh))
-					tasks = fresh
 				}
+				tasks = outcome.tasks
 			}
 			await send(.writeFailed)
 		} catch: { _, send in
@@ -499,13 +484,39 @@ struct ReplicaFeature {
 	/// Ends the write in progress, whatever became of it.
 	private func finishWrite(_ state: inout State) {
 		state.creatingTask = nil
-		state.isSaving = false
-		state.isWriting = false
+		state.write = nil
 	}
 
-	/// The selected tasks' IDs, in the table's order.
-	private func selectedIDs(_ state: State) -> [Models.Task.ID] {
-		state.selectedTasks.map(\.id)
+	/// Writes `command` over the selected tasks, where it applies to every one.
+	private func perform(_ command: TaskCommand, _ state: inout State) -> Effect<Action> {
+		guard state.enabledCommands.contains(command) else {
+			return .none
+		}
+		let ids = state.selectedIDs
+		let action: WriteAction =
+			switch command {
+			case .delete: .delete(ids)
+			case .done: .complete(ids)
+			case .markPending: .markPending(ids)
+			case .startStop: if state.isStopping { .stop(ids) } else { .start(ids) }
+			}
+		return write(action, &state)
+	}
+
+	/// Selects the task New Task created, clearing a search that hides it. New Task already showed
+	/// the sidebar it lands in.
+	private func selectCreatedTask(_ state: inout State) {
+		guard let created = state.creatingTask else {
+			return
+		}
+		if state.rows[id: created] == nil, !state.searchText.isEmpty {
+			state.searchText = ""
+			filterRows(&state)
+		}
+		guard state.rows[id: created] != nil else {
+			return
+		}
+		state.selection = [created]
 	}
 
 	/// Whether the sidebar shows a task New Task would create now, with only the Context's and the
@@ -520,14 +531,14 @@ struct ReplicaFeature {
 		else {
 			return true
 		}
-		// The plan writes `status` with its own operation.
-		var properties = ["status": Status.pending.rawValue]
-		for case let .setValue(_, property, value?) in plan.operations {
-			properties[property] = value
-		}
-		let stored = StoredTask(properties: properties, uuid: id.uuidString, workingSetID: nil)
 		guard
-			let task = Models.Task(stored, udaTypes: taskrc.udaTypes),
+			let properties = plan.applied(to: [:])[id],
+			let task = Models.Task(
+				properties: properties,
+				udaTypes: taskrc.udaTypes,
+				uuid: id.uuidString,
+				workingSetID: nil,
+			),
 			let view = TaskView(task, at: now)
 		else {
 			return true

@@ -24,10 +24,16 @@ public struct ReplicaClient: Sendable {
 	public var validate: @Sendable (_ directory: URL) async throws -> Void
 }
 
-public enum ApplyOutcome: Equatable, Sendable {
-	case committed([StoredTask])
-	/// Nothing was committed, because a value the plan read had changed.
-	case conflict([StoredTask])
+public struct ApplyOutcome: Equatable, Sendable {
+	/// False where nothing was committed, because a value the plan read had changed.
+	public var isCommitted: Bool
+	/// Every task, read after the commit, or in place of it.
+	public var tasks: [StoredTask]
+
+	public init(isCommitted: Bool, tasks: [StoredTask]) {
+		self.isCommitted = isCommitted
+		self.tasks = tasks
+	}
 }
 
 public enum ReplicaError: Equatable, LocalizedError {
@@ -169,14 +175,7 @@ actor Replica {
 			operations: plan.operations.map(PlannedOperation.init),
 			expectations: plan.expectations.map(Expectation.init),
 		)
-		let tasks = try readTasks()
-		switch outcome {
-		case .committed:
-			return .committed(tasks)
-
-		case .conflict:
-			return .conflict(tasks)
-		}
+		return try ApplyOutcome(isCommitted: outcome == .committed, tasks: readTasks())
 	}
 
 	/// Yields every task when anything has committed since the last read.

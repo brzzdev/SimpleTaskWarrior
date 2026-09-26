@@ -11,25 +11,20 @@ import UniformTypeIdentifiers
 public final class ReplicaWindowController: NSWindowController, NSMenuItemValidation,
 	NSToolbarDelegate, NSWindowDelegate
 {
-	private let deleteItem = commandItem(
-		deleteIdentifier,
-		action: #selector(deleteTasks(_:)),
-		label: String(localized: "Delete"),
-		symbolName: "trash",
-	)
-	private let doneItem = commandItem(
-		doneIdentifier,
-		action: #selector(markDone(_:)),
-		label: String(localized: "Done"),
-		symbolName: "checkmark.circle",
+	private let commandItems = Dictionary(
+		uniqueKeysWithValues: ReplicaFeature.TaskCommand.all.map { command in
+			(
+				command,
+				commandItem(
+					command.identifier,
+					action: command.action,
+					label: command.title,
+					symbolName: command.symbolName,
+				),
+			)
+		},
 	)
 	private var fetch: _Concurrency.Task<Void, Never>?
-	private let markPendingItem = commandItem(
-		markPendingIdentifier,
-		action: #selector(markPending(_:)),
-		label: String(localized: "Mark Pending"),
-		symbolName: "arrow.uturn.backward.circle",
-	)
 	private let newTaskItem = commandItem(
 		newTaskIdentifier,
 		action: #selector(newTask(_:)),
@@ -40,12 +35,6 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 	/// The file panel on screen, so a store change while it's up doesn't open a second.
 	private var openPanel: NSOpenPanel?
 	private let searchItem = NSSearchToolbarItem(itemIdentifier: searchIdentifier)
-	private let startStopItem = commandItem(
-		startStopIdentifier,
-		action: #selector(startOrStop(_:)),
-		label: String(localized: "Start"),
-		symbolName: "play",
-	)
 	private let store: StoreOf<ReplicaFeature>
 
 	/// A controller for the Replica `bookmark` locates, which autosaves the layout of its split
@@ -107,7 +96,7 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 				return
 			}
 			window.subtitle =
-				store.isSaving
+				store.write == .saving
 					? String(localized: "Saving…")
 					: store.directory?.path(percentEncoded: false) ?? ""
 			window.title = store.directory?.lastPathComponent ?? ""
@@ -133,28 +122,9 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 
 	/// The task commands, as the menu bar's Task menu and a row's context menu list them.
 	public static func taskCommandMenuItems() -> [NSMenuItem] {
-		[
-			NSMenuItem(
-				title: String(localized: "Start"),
-				action: #selector(startOrStop(_:)),
-				keyEquivalent: "s",
-			),
-			NSMenuItem(
-				title: String(localized: "Done"),
-				action: #selector(markDone(_:)),
-				keyEquivalent: "\r",
-			),
-			NSMenuItem(
-				title: String(localized: "Delete"),
-				action: #selector(deleteTasks(_:)),
-				keyEquivalent: backspace,
-			),
-			NSMenuItem(
-				title: String(localized: "Mark Pending"),
-				action: #selector(markPending(_:)),
-				keyEquivalent: "P",
-			),
-		]
+		ReplicaFeature.TaskCommand.all.map { command in
+			NSMenuItem(title: command.title, action: command.action, keyEquivalent: command.keyEquivalent)
+		}
 	}
 
 	/// The bookmark a window encoded for restoration after a relaunch.
@@ -228,9 +198,8 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 		itemForItemIdentifier identifier: NSToolbarItem.Identifier,
 		willBeInsertedIntoToolbar _: Bool,
 	) -> NSToolbarItem? {
-		[
-			deleteItem, doneItem, markPendingItem, newTaskItem, searchItem, startStopItem,
-		].first { $0.itemIdentifier == identifier }
+		(Array(commandItems.values) + [newTaskItem, searchItem])
+			.first { $0.itemIdentifier == identifier }
 	}
 
 	public func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -245,10 +214,7 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 			.sidebarTrackingSeparator,
 			newTaskIdentifier,
 			.flexibleSpace,
-			startStopIdentifier,
-			doneIdentifier,
-			deleteIdentifier,
-			markPendingIdentifier,
+		] + ReplicaFeature.TaskCommand.all.map(\.identifier) + [
 			searchIdentifier,
 			.inspectorTrackingSeparator,
 			.flexibleSpace,
@@ -262,25 +228,15 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 	}
 
 	public func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
-		switch menuItem.action {
-		case #selector(deleteTasks(_:)):
-			// ⌘⌫ deletes text while a field is being edited, so it's left for the field.
-			!(window?.firstResponder is NSText) && store.state.isEnabled(.delete)
-
+		if let command = ReplicaFeature.TaskCommand(action: menuItem.action) {
+			return validate(menuItem, for: command)
+		}
+		return switch menuItem.action {
 		case #selector(grantAccess(_:)):
 			store.canGrantAccess
 
-		case #selector(markDone(_:)):
-			store.state.isEnabled(.done)
-
-		case #selector(markPending(_:)):
-			store.state.isEnabled(.markPending)
-
 		case #selector(newTask(_:)):
-			store.state.isEnabled(.newTask)
-
-		case #selector(startOrStop(_:)):
-			startOrStopValidated(menuItem)
+			store.write == nil
 
 		case #selector(useTaskwarriorDefaults(_:)):
 			store.hasTaskrc
@@ -304,32 +260,37 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 		store.send(.binding(.set(\.searchText, searchField.stringValue)))
 	}
 
-	/// Titles Start/Stop for what it will do, and reports whether it's enabled.
-	private func startOrStopValidated(_ menuItem: NSMenuItem) -> Bool {
-		menuItem.title = store.isStopping ? String(localized: "Stop") : String(localized: "Start")
-		return store.state.isEnabled(.startStop)
-	}
-
-	/// Shows Mark Pending in place of Start/Stop, Done and Delete where the sidebar shows only closed
-	/// tasks, and enables each item as the menu bar does.
+	/// Shows and enables each toolbar item as the store says, and titles Start/Stop for what it
+	/// will do.
 	private func updateCommandItems() {
-		let offersMarkPending = store.offersMarkPending
-		for item in [deleteItem, doneItem, startStopItem] {
-			item.isHidden = offersMarkPending
+		let enabled = store.enabledCommands
+		for (command, item) in commandItems {
+			item.isEnabled = enabled.contains(command)
+			item.isHidden = !store.state.isOffered(command)
 		}
-		markPendingItem.isHidden = !offersMarkPending
-		deleteItem.isEnabled = store.state.isEnabled(.delete)
-		doneItem.isEnabled = store.state.isEnabled(.done)
-		markPendingItem.isEnabled = store.state.isEnabled(.markPending)
-		newTaskItem.isEnabled = store.state.isEnabled(.newTask)
-		startStopItem.isEnabled = store.state.isEnabled(.startStop)
+		newTaskItem.isEnabled = store.write == nil
+		guard let startStopItem = commandItems[.startStop] else {
+			return
+		}
 		let isStopping = store.isStopping
 		startStopItem.image = NSImage(
 			systemSymbolName: isStopping ? "stop" : "play",
 			accessibilityDescription: nil,
 		)
-		startStopItem.label = isStopping ? String(localized: "Stop") : String(localized: "Start")
+		startStopItem.label = startStopTitle(isStopping: isStopping)
 		startStopItem.toolTip = startStopItem.label
+	}
+
+	/// Whether a task command's menu item is enabled, titling Start/Stop for what it will do.
+	private func validate(_ menuItem: NSMenuItem, for command: ReplicaFeature.TaskCommand) -> Bool {
+		if command == .startStop {
+			menuItem.title = startStopTitle(isStopping: store.isStopping)
+		}
+		// ⌘⌫ deletes text while a field is being edited, so it's left for the field.
+		if command == .delete, window?.firstResponder is NSText {
+			return false
+		}
+		return store.enabledCommands.contains(command)
 	}
 
 	/// Selects `view` alone in the sidebar, as a click on it does.
@@ -389,6 +350,70 @@ extension ReplicaFeature.FileImporter {
 	}
 }
 
+extension ReplicaFeature.TaskCommand {
+	/// In the order the Task menu and the toolbar list them.
+	static let all: [Self] = [.startStop, .done, .delete, .markPending]
+
+	var action: Selector {
+		switch self {
+		case .delete: #selector(ReplicaWindowController.deleteTasks(_:))
+		case .done: #selector(ReplicaWindowController.markDone(_:))
+		case .markPending: #selector(ReplicaWindowController.markPending(_:))
+		case .startStop: #selector(ReplicaWindowController.startOrStop(_:))
+		}
+	}
+
+	fileprivate var identifier: NSToolbarItem.Identifier {
+		switch self {
+		case .delete: NSToolbarItem.Identifier("delete")
+		case .done: NSToolbarItem.Identifier("done")
+		case .markPending: NSToolbarItem.Identifier("markPending")
+		case .startStop: NSToolbarItem.Identifier("startStop")
+		}
+	}
+
+	/// ⌘ and this key. An uppercase letter adds ⇧.
+	fileprivate var keyEquivalent: String {
+		switch self {
+		case .delete: backspace
+		case .done: "\r"
+		case .markPending: "P"
+		case .startStop: "s"
+		}
+	}
+
+	fileprivate var symbolName: String {
+		switch self {
+		case .delete: "trash"
+		case .done: "checkmark.circle"
+		case .markPending: "arrow.uturn.backward.circle"
+		case .startStop: "play"
+		}
+	}
+
+	/// Start/Stop's title until validation says which it is.
+	fileprivate var title: String {
+		switch self {
+		case .delete: String(localized: "Delete")
+		case .done: String(localized: "Done")
+		case .markPending: String(localized: "Mark Pending")
+		case .startStop: startStopTitle(isStopping: false)
+		}
+	}
+
+	/// The command a menu item or toolbar item sends `action` for.
+	init?(action: Selector?) {
+		guard let command = Self.all.first(where: { $0.action == action }) else {
+			return nil
+		}
+		self = command
+	}
+}
+
+private func startStopTitle(isStopping: Bool) -> String {
+	isStopping ? String(localized: "Stop") : String(localized: "Start")
+}
+
 /// A toolbar button that sends `action` along the responder chain. The store enables it, rather
 /// than AppKit's validation, which runs only after events and so misses a write finishing.
 @MainActor
@@ -413,16 +438,8 @@ private let backspace = "\u{8}"
 
 private let bookmarkKey = "bookmark"
 
-private let deleteIdentifier = NSToolbarItem.Identifier("delete")
-
-private let doneIdentifier = NSToolbarItem.Identifier("done")
-
-private let markPendingIdentifier = NSToolbarItem.Identifier("markPending")
-
 private let newTaskIdentifier = NSToolbarItem.Identifier("newTask")
 
 private let searchIdentifier = NSToolbarItem.Identifier("search")
-
-private let startStopIdentifier = NSToolbarItem.Identifier("startStop")
 
 private let windowSize = NSSize(width: 1_000, height: 600)
