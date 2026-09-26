@@ -16,12 +16,35 @@ case_add_annotation_in_a_taken_second() {
 	act 1 annotate Second
 }
 
+case_add_annotation_nbsp_only() {
+	task add Alpha
+	act 1 annotate $'\xc2\xa0'
+}
+
+case_add_annotation_padded() {
+	task add Alpha
+	act 1 annotate ' Note '
+}
+
+case_add_annotation_space_before_combining_mark() {
+	task add Alpha
+	act 1 annotate $' \xcc\x81Note '
+}
+
 case_add_dependency() {
 	task add Alpha
 	task add Beta
 	task add Gamma
 	task 1 modify depends:3
 	act 1 modify depends:2
+}
+
+case_add_padded() {
+	act add ' Alpha '
+}
+
+case_add_tab_only() {
+	act add $'\t'
 }
 
 case_add_tag() {
@@ -101,6 +124,16 @@ case_remove_wait() {
 case_set_description() {
 	task add Alpha
 	act 1 modify Beta
+}
+
+case_set_description_padded() {
+	task add Alpha
+	act 1 modify description:' Beta '
+}
+
+case_set_description_to_spaces() {
+	task add Alpha
+	act 1 modify 'description:   '
 }
 
 case_set_duration() {
