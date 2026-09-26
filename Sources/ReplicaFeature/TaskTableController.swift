@@ -24,7 +24,8 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 {
 	private let autosaveName: String
 	private var highestUrgency = 0.0
-	/// The sort a Replica starts with, which a saved one replaces.
+	/// The sort a Replica starts with, which a saved one replaces. Kept from the start, since
+	/// reading the store's in `updateColumns` would run it again on every sort.
 	private let initialSortOrder: [TaskSort]
 	/// Set while the table follows the store, so the changes it makes aren't sent back.
 	private var isFollowingStore = false
@@ -192,6 +193,7 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 			table.addTableColumn(tableColumn)
 		}
 
+		// The name also records that the layout was restored, so it happens once.
 		guard table.autosaveName == nil, store.taskrc != nil else {
 			return
 		}
