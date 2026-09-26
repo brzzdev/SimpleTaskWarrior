@@ -91,4 +91,17 @@ jobs:
 
       - name: Build and test
         if: '!cancelled()'
+        # xcodebuild hands the tests a TEST_RUNNER_ variable without its prefix, so SnapshotTesting
+        # writes each failing snapshot's image where the next step can upload it.
+        env:
+          TEST_RUNNER_SNAPSHOT_ARTIFACTS: ${{ runner.temp }}/snapshot-artifacts
         run: just test
+
+      # The runner's images, to compare with the recorded ones when a snapshot fails here only.
+      - name: Upload failed snapshots
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: failed-snapshots
+          path: ${{ runner.temp }}/snapshot-artifacts
+          if-no-files-found: ignore

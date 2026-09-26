@@ -45,6 +45,16 @@ struct ContentSnapshotTests {
 	}
 
 	@Test
+	func narrowFailure() {
+		let view = EmptyStateView(
+			symbolName: "exclamationmark.triangle",
+			title: String(localized: "Can't Open Replica"),
+		)
+		view.message = "The folder “.task” couldn’t be opened because it doesn’t exist."
+		assertAppearanceSnapshots(of: view, size: CGSize(width: 220, height: 320))
+	}
+
+	@Test
 	func problemBanner() {
 		// No folder, so TW's default data.location doesn't add its own banner.
 		var state = ReplicaFeature.State(bookmark: Data())

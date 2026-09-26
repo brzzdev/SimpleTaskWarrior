@@ -245,7 +245,7 @@ final class EmptyStateView: NSView {
 		}
 	}
 
-	private let messageLabel = NSTextField(wrappingLabelWithString: "")
+	private let messageLabel = WrappingLabel(wrappingLabelWithString: "")
 
 	init(symbolName: String, title: String) {
 		super.init(frame: .zero)
@@ -258,15 +258,19 @@ final class EmptyStateView: NSView {
 		titleLabel.textColor = .secondaryLabelColor
 		messageLabel.alignment = .center
 		messageLabel.isHidden = true
-		// Short enough lines to read, where the view is wide.
-		messageLabel.preferredMaxLayoutWidth = 360
 		messageLabel.textColor = .secondaryLabelColor
 		let stack = NSStackView(views: [symbol, titleLabel, messageLabel])
 		stack.orientation = .vertical
 		stack.spacing = 8
 		stack.translatesAutoresizingMaskIntoConstraints = false
 		addSubview(stack)
+		// Short enough lines to read where the view is wide, and as wide as that where it's not, since
+		// a wrapping label would otherwise keep whatever narrow width it first wrapped at.
+		let readableWidth = messageLabel.widthAnchor.constraint(equalToConstant: 360)
+		readableWidth.priority = NSLayoutConstraint.Priority(500)
 		NSLayoutConstraint.activate([
+			messageLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 360),
+			readableWidth,
 			stack.centerXAnchor.constraint(equalTo: centerXAnchor),
 			stack.centerYAnchor.constraint(equalTo: centerYAnchor),
 			stack.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 16),
