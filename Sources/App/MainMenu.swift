@@ -73,11 +73,18 @@ func mainMenu(openRecent openRecentDelegate: any NSMenuDelegate) -> NSMenu {
 		menuItem("Paste", #selector(NSText.paste(_:)), key: "v"),
 		menuItem("Delete", #selector(NSText.delete(_:))),
 		menuItem("Select All", #selector(NSText.selectAll(_:)), key: "a"),
+		.separator(),
+		menuItem("Find…", #selector(ReplicaWindowController.find(_:)), key: "f"),
 	]
 
 	// The split view controller retitles these Show or Hide as the panes change.
 	let view = NSMenu(title: "View")
 	view.items = [
+		menuItem("Pending", #selector(ReplicaWindowController.showPending(_:)), key: "1"),
+		menuItem("Waiting", #selector(ReplicaWindowController.showWaiting(_:)), key: "2"),
+		menuItem("Completed", #selector(ReplicaWindowController.showCompleted(_:)), key: "3"),
+		menuItem("Deleted", #selector(ReplicaWindowController.showDeleted(_:)), key: "4"),
+		.separator(),
 		menuItem(
 			"Show Sidebar",
 			#selector(NSSplitViewController.toggleSidebar(_:)),

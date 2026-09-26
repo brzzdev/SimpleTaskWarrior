@@ -160,6 +160,11 @@ extension Task {
 		}
 		annotations.sort { $0.entry < $1.entry }
 	}
+
+	/// TW's `is_waiting`: pending, with a `wait` still ahead of `now`.
+	public func isWaiting(at now: Date) -> Bool {
+		status == .pending && wait.map { $0 > now } == true
+	}
 }
 
 /// A task as TaskChampion stores it, before a Taskrc says which of its properties are UDAs.

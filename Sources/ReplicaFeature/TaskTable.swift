@@ -3,13 +3,15 @@ public import Foundation
 public import Models
 import Taskrc
 
-/// A pending task as the table shows it, ranked with the window's Taskrc.
+/// A task as the table shows it, ranked with the window's Taskrc.
 struct TaskRow: Equatable, Identifiable {
 	var isBlocked: Bool
 	var task: Models.Task
 	/// Where the task's value of each UDA with `values` falls in that list.
 	var udaRanks: [String: Int]
 	var urgency: Double
+	/// The fixed view the task shows in.
+	var view: TaskView
 
 	var id: Models.Task.ID {
 		task.id
@@ -19,7 +21,13 @@ struct TaskRow: Equatable, Identifiable {
 		task.tags.sorted().joined(separator: " ")
 	}
 
-	init(isBlocked: Bool, task: Models.Task, udaColumns: [UDAColumn], urgency: Double) {
+	init(
+		isBlocked: Bool,
+		task: Models.Task,
+		udaColumns: [UDAColumn],
+		urgency: Double,
+		view: TaskView,
+	) {
 		self.isBlocked = isBlocked
 		self.task = task
 		// A value the list doesn't name ranks after every value it does.
@@ -30,6 +38,7 @@ struct TaskRow: Equatable, Identifiable {
 			ranks[uda.name] = uda.values.firstIndex(of: value) ?? uda.values.count
 		}
 		self.urgency = urgency
+		self.view = view
 	}
 
 	fileprivate func sortKey(for column: TaskColumn) -> SortKey? {

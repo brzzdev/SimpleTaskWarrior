@@ -12,6 +12,8 @@ import TaskrcClient
 struct ReplicaFeature {
 	@ObservableState
 	struct State: Equatable {
+		/// Every task a fixed view shows, ranked, which the sidebar and search narrow to `rows`.
+		var allRows: [TaskRow] = []
 		let bookmark: Data
 
 		var directory: URL?
@@ -22,12 +24,15 @@ struct ReplicaFeature {
 		/// The highest Urgency in the table, which scales every row's bar.
 		var highestUrgency = 0.0
 		var isTaskrcHintPresented = false
-		/// Every task in the Replica as last read, which the blocked rule and Urgency read.
-		var storedTasks: [StoredTask] = []
-		/// Pending tasks, in `sortOrder`.
+		/// The tasks the sidebar and search leave, in `sortOrder`.
 		var rows: IdentifiedArrayOf<TaskRow> = []
+		/// Narrows the table after the sidebar.
+		var searchText = ""
 		/// Kept by UUID, so it survives the CLI renumbering tasks.
 		var selection: Set<Models.Task.ID> = []
+		var sidebarSelection: Set<SidebarItem> = []
+		/// Every task in the Replica as last read, which the blocked rule and Urgency read.
+		var storedTasks: [StoredTask] = []
 		/// The table's sort, which the table autosaves per Replica and reports once it restores.
 		var sortOrder = [TaskSort(.urgency, order: .reverse)]
 		var taskrc: TaskrcClient.Loaded?
@@ -35,6 +40,11 @@ struct ReplicaFeature {
 		var taskrcSaveFailure: TaskrcSaveFailure?
 		/// The running Taskrc's UDAs, which the table offers as columns.
 		var udaColumns = UDAColumn.all(in: .defaults)
+
+		/// The active Context's name, where there is one.
+		var activeContext: String? {
+			runningTaskrc["context"].flatMap { $0.isEmpty ? nil : $0 }
+		}
 
 		/// Whether Grant Access… can fix the Taskrc's problem.
 		var canGrantAccess: Bool {
@@ -57,6 +67,10 @@ struct ReplicaFeature {
 			return standardizedFolder(URL(filePath: location)) == standardizedFolder(directory)
 				? nil
 				: location
+		}
+
+		var sidebar: Sidebar {
+			Sidebar(rows: allRows, selection: sidebarSelection)
 		}
 
 		/// The Taskrc the window runs on: the last one that loaded, or TW's defaults.
@@ -140,6 +154,10 @@ struct ReplicaFeature {
 		BindingReducer()
 		Reduce { state, action in
 			switch action {
+			case .binding(\.searchText), .binding(\.sidebarSelection):
+				filterRows(&state)
+				return .none
+
 			case .binding:
 				return .none
 
@@ -295,25 +313,38 @@ struct ReplicaFeature {
 		.cancellable(id: CancelID.taskrc, cancelInFlight: true)
 	}
 
-	/// Ranks the Replica's pending tasks with the Taskrc the window runs on, decoding their UDAs and
-	/// computing their Urgency again, and drops selected tasks that left the table.
+	/// Ranks the Replica's tasks with the Taskrc the window runs on, decoding their UDAs, computing
+	/// their Urgency and sorting them into fixed views again, then narrows them to the table.
 	private func updateRows(_ state: inout State) {
 		let taskrc = state.runningTaskrc
 		let tasks = state.storedTasks.compactMap { Models.Task($0, udaTypes: taskrc.udaTypes) }
 		let blocked = DependencyScan(tasks).blocked
 		let urgencies = UrgencyCoefficients(taskrc).urgencies(of: tasks, at: now, in: timeZone)
 		state.udaColumns = UDAColumn.all(in: taskrc)
+		state.allRows = tasks.compactMap { [now, udaColumns = state.udaColumns] task in
+			TaskView(task, at: now).map { view in
+				TaskRow(
+					isBlocked: blocked.contains(task.id),
+					task: task,
+					udaColumns: udaColumns,
+					urgency: urgencies[task.id] ?? 0,
+					view: view,
+				)
+			}
+		}
+		filterRows(&state)
+	}
+
+	/// Narrows the ranked rows by the sidebar, then the search, and drops selected tasks that left
+	/// the table.
+	private func filterRows(_ state: inout State) {
 		state.rows = IdentifiedArray(
-			uniqueElements: tasks
-				.filter { $0.status == .pending && !$0.isTemplate }
-				.map { [udaColumns = state.udaColumns] task in
-					TaskRow(
-						isBlocked: blocked.contains(task.id),
-						task: task,
-						udaColumns: udaColumns,
-						urgency: urgencies[task.id] ?? 0,
-					)
-				},
+			uniqueElements: state.allRows.filter { [
+				search = state.searchText,
+				sidebar = state.sidebarSelection,
+			] in
+				sidebar.includes($0) && $0.matches(search: search)
+			},
 		)
 		sortRows(&state)
 		state.highestUrgency = state.rows.map(\.urgency).max() ?? 0

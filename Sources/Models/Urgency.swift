@@ -346,9 +346,8 @@ private struct UrgencyCalculator {
 		return interval.start <= due && due < interval.end
 	}
 
-	/// TW's `is_waiting`: pending, with a `wait` still ahead.
 	private func isWaiting(_ task: Task) -> Bool {
-		task.status == .pending && task.wait.map { $0 > now } == true
+		task.isWaiting(at: now)
 	}
 
 	private func matches(_ task: Task, _ match: UrgencyCoefficients.UserCoefficient.Match) -> Bool {

@@ -14,6 +14,7 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 	private let onClose: @MainActor () -> Void
 	/// The file panel on screen, so a store change while it's up doesn't open a second.
 	private var openPanel: NSOpenPanel?
+	private let searchItem = NSSearchToolbarItem(itemIdentifier: searchIdentifier)
 	private let store: StoreOf<ReplicaFeature>
 
 	/// A controller for the Replica `bookmark` locates, which autosaves the layout of its split
@@ -38,8 +39,9 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 		window.toolbarStyle = .unified
 		super.init(window: window)
 
-		let sidebarController = NSViewController()
-		sidebarController.view = NSView()
+		let sidebar = NSSplitViewItem(sidebarWithViewController: SidebarController(store: store))
+		// Wide enough for every fixed view's title beside its count.
+		sidebar.minimumThickness = 170
 		let inspector = NSSplitViewItem(
 			inspectorWithViewController: InspectorController(store: store),
 		)
@@ -48,7 +50,7 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 		inspector.maximumThickness = 400
 		let split = NSSplitViewController()
 		split.splitViewItems = [
-			NSSplitViewItem(sidebarWithViewController: sidebarController),
+			sidebar,
 			NSSplitViewItem(
 				viewController: ReplicaContentController(autosaveName: autosaveName, store: store),
 			),
@@ -61,6 +63,8 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 		window.setContentSize(windowSize)
 		window.delegate = self
 
+		searchItem.searchField.action = #selector(searchFieldChanged(_:))
+		searchItem.searchField.target = self
 		let toolbar = NSToolbar(identifier: "replica")
 		toolbar.allowsDisplayModeCustomization = false
 		toolbar.delegate = self
@@ -100,18 +104,43 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 		store.send(.chooseTaskrcButtonTapped)
 	}
 
+	/// Puts the cursor in the search field.
+	@objc
+	public func find(_: Any?) {
+		searchItem.beginSearchInteraction()
+	}
+
 	@objc
 	public func grantAccess(_: Any?) {
 		store.send(.grantAccessButtonTapped)
 	}
 
-	/// Unused, since every item is a system one, but AppKit drops a toolbar delegate without it.
+	@objc
+	public func showCompleted(_: Any?) {
+		show(.completed)
+	}
+
+	@objc
+	public func showDeleted(_: Any?) {
+		show(.deleted)
+	}
+
+	@objc
+	public func showPending(_: Any?) {
+		show(.pending)
+	}
+
+	@objc
+	public func showWaiting(_: Any?) {
+		show(.waiting)
+	}
+
 	public func toolbar(
 		_: NSToolbar,
-		itemForItemIdentifier _: NSToolbarItem.Identifier,
+		itemForItemIdentifier identifier: NSToolbarItem.Identifier,
 		willBeInsertedIntoToolbar _: Bool,
 	) -> NSToolbarItem? {
-		nil
+		identifier == searchIdentifier ? searchItem : nil
 	}
 
 	public func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -125,6 +154,7 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 			.toggleSidebar,
 			.sidebarTrackingSeparator,
 			.flexibleSpace,
+			searchIdentifier,
 			.inspectorTrackingSeparator,
 			.flexibleSpace,
 			.toggleInspector,
@@ -156,6 +186,16 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 	public func windowWillClose(_: Notification) {
 		fetch?.cancel()
 		onClose()
+	}
+
+	@objc
+	func searchFieldChanged(_ searchField: NSSearchField) {
+		store.send(.binding(.set(\.searchText, searchField.stringValue)))
+	}
+
+	/// Selects `view` alone in the sidebar, as a click on it does.
+	private func show(_ view: TaskView) {
+		store.send(.binding(.set(\.sidebarSelection, [.view(view)])))
 	}
 
 	/// Opens the file panel `fileImporter` asks for as a sheet on the window, and reports the file
@@ -211,5 +251,7 @@ extension ReplicaFeature.FileImporter {
 }
 
 private let bookmarkKey = "bookmark"
+
+private let searchIdentifier = NSToolbarItem.Identifier("search")
 
 private let windowSize = NSSize(width: 1_000, height: 600)
