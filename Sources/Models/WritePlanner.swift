@@ -45,10 +45,18 @@ public struct WritePlanner: Sendable {
 			return try plan(ids, tasks: tasks, at: epoch) { $0.delete(at: epoch) }
 
 		case let .edit(ids, edit):
-			if case let .addDependency(dependency) = edit {
-				try refuseCycle(dependingOn: dependency, from: ids, tasks: tasks)
+			guard case let .addDependency(dependency) = edit else {
+				return try plan(ids, tasks: tasks, at: epoch) { $0.apply(edit) }
 			}
-			return try plan(ids, tasks: tasks, at: epoch) { $0.apply(edit) }
+			let searched = try refuseCycle(dependingOn: dependency, from: ids, tasks: tasks)
+			var plan = try plan(ids, tasks: tasks, at: epoch) { $0.apply(edit) }
+			guard !plan.operations.isEmpty else {
+				return plan
+			}
+			for expectation in searched where !plan.expectations.contains(expectation) {
+				plan.expectations.append(expectation)
+			}
+			return plan
 
 		case let .markPending(ids):
 			return try plan(ids, tasks: tasks, at: epoch) { $0.markPending() }
@@ -139,11 +147,16 @@ public struct WritePlanner: Sendable {
 	/// `dependencyIsCircular` follows through tasks of any status. A dependency the task already has
 	/// is left for the plan, since TW returns before searching. A task missing from the snapshot is
 	/// left for the plan to report.
+	///
+	/// Returns what the search read of each task it passed through: its `dep_*` keys and the
+	/// `depends` mirror every writer rewrites alongside them, so a dependency added to the chain
+	/// before the plan commits fails it.
 	private func refuseCycle(
 		dependingOn dependency: Task.ID,
 		from ids: [Task.ID],
 		tasks: [Task.ID: [String: String]],
-	) throws(WritePlanError) {
+	) throws(WritePlanError) -> [WritePlan.Expectation] {
+		var searched: [WritePlan.Expectation] = []
 		for id in ids {
 			guard let properties = tasks[id] else {
 				continue
@@ -163,9 +176,18 @@ public struct WritePlanner: Sendable {
 				guard visited.insert(next).inserted else {
 					continue
 				}
-				unvisited += dependencies(tasks[next] ?? [:])
+				let properties = tasks[next] ?? [:]
+				for property in properties.keys.sorted() where property.hasPrefix("dep_") {
+					let value = properties[property]
+					searched.append(WritePlan.Expectation(property: property, uuid: next, value: value))
+				}
+				searched.append(
+					WritePlan.Expectation(property: "depends", uuid: next, value: properties["depends"]),
+				)
+				unvisited += dependencies(properties)
 			}
 		}
+		return searched
 	}
 }
 

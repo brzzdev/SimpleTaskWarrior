@@ -174,6 +174,29 @@ struct WritePlannerTests {
 		#expect(plan == WritePlan())
 	}
 
+	/// So a dependency another writer adds to the chain meanwhile, closing a cycle, fails the plan:
+	/// every writer rewrites `depends` with the `dep_*` keys it mirrors.
+	@Test
+	func addingADependencyExpectsTheChainItSearched() throws {
+		let planner = WritePlanner(taskrc: .defaults, timeZone: .gmt)
+		let (alpha, beta, gamma) = (UUID(), UUID(), UUID())
+		let gammaKey = "dep_\(gamma.uuidString.lowercased())"
+		let tasks = [
+			alpha: ["status": "pending"],
+			beta: [gammaKey: "x", "depends": gamma.uuidString.lowercased(), "status": "pending"],
+			gamma: ["status": "pending"],
+		]
+
+		let plan = try planner.plan(.edit([alpha], .addDependency(beta)), tasks: tasks, at: .now)
+
+		let expected = [
+			WritePlan.Expectation(property: "depends", uuid: beta, value: gamma.uuidString.lowercased()),
+			WritePlan.Expectation(property: gammaKey, uuid: beta, value: "x"),
+			WritePlan.Expectation(property: "depends", uuid: gamma, value: nil),
+		]
+		#expect(Set(expected).isSubset(of: plan.expectations))
+	}
+
 	/// `task modify depends:` refuses both, writing nothing.
 	@Test
 	func addingADependencyOnItselfThrows() {
