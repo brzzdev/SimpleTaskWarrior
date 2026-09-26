@@ -1,0 +1,77 @@
+{
+	"after": {
+		"19889fa2-4d33-4adc-ab4a-7c2daaa4928a": {
+			"dep_42f3a944-f3e6-4533-9d7e-ee9a024537f3": "x",
+			"dep_ec5267d8-0aee-4fda-8c10-32c18b94374c": "x",
+			"depends": "42f3a944-f3e6-4533-9d7e-ee9a024537f3,ec5267d8-0aee-4fda-8c10-32c18b94374c",
+			"description": "Alpha",
+			"entry": "1790440073",
+			"modified": "1790440073",
+			"status": "pending"
+		},
+		"42f3a944-f3e6-4533-9d7e-ee9a024537f3": {
+			"description": "Gamma",
+			"entry": "1790440073",
+			"modified": "1790440073",
+			"status": "pending"
+		},
+		"ec5267d8-0aee-4fda-8c10-32c18b94374c": {
+			"description": "Beta",
+			"entry": "1790440073",
+			"modified": "1790440073",
+			"status": "pending"
+		}
+	},
+	"before": {
+		"19889fa2-4d33-4adc-ab4a-7c2daaa4928a": {
+			"dep_42f3a944-f3e6-4533-9d7e-ee9a024537f3": "x",
+			"depends": "42f3a944-f3e6-4533-9d7e-ee9a024537f3",
+			"description": "Alpha",
+			"entry": "1790440073",
+			"modified": "1790440073",
+			"status": "pending"
+		},
+		"42f3a944-f3e6-4533-9d7e-ee9a024537f3": {
+			"description": "Gamma",
+			"entry": "1790440073",
+			"modified": "1790440073",
+			"status": "pending"
+		},
+		"ec5267d8-0aee-4fda-8c10-32c18b94374c": {
+			"description": "Beta",
+			"entry": "1790440073",
+			"modified": "1790440073",
+			"status": "pending"
+		}
+	},
+	"now": 1790440073,
+	"operations": [
+		{
+			"Update": {
+				"old_value": "1790440073",
+				"property": "modified",
+				"timestamp": "2026-09-26T16:27:53.747022Z",
+				"uuid": "19889fa2-4d33-4adc-ab4a-7c2daaa4928a",
+				"value": "1790440073"
+			}
+		},
+		{
+			"Update": {
+				"old_value": null,
+				"property": "dep_ec5267d8-0aee-4fda-8c10-32c18b94374c",
+				"timestamp": "2026-09-26T16:27:53.747022Z",
+				"uuid": "19889fa2-4d33-4adc-ab4a-7c2daaa4928a",
+				"value": "x"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "42f3a944-f3e6-4533-9d7e-ee9a024537f3",
+				"property": "depends",
+				"timestamp": "2026-09-26T16:27:53.747024Z",
+				"uuid": "19889fa2-4d33-4adc-ab4a-7c2daaa4928a",
+				"value": "42f3a944-f3e6-4533-9d7e-ee9a024537f3,ec5267d8-0aee-4fda-8c10-32c18b94374c"
+			}
+		}
+	]
+}

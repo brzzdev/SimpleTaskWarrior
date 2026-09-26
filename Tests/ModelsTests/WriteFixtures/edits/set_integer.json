@@ -1,0 +1,40 @@
+{
+	"after": {
+		"175d939a-9abb-44e4-8f00-19a57cab334f": {
+			"description": "Alpha",
+			"entry": "1790440076",
+			"modified": "1790440076",
+			"size": "1234567",
+			"status": "pending"
+		}
+	},
+	"before": {
+		"175d939a-9abb-44e4-8f00-19a57cab334f": {
+			"description": "Alpha",
+			"entry": "1790440076",
+			"modified": "1790440076",
+			"status": "pending"
+		}
+	},
+	"now": 1790440076,
+	"operations": [
+		{
+			"Update": {
+				"old_value": "1790440076",
+				"property": "modified",
+				"timestamp": "2026-09-26T16:27:56.744497Z",
+				"uuid": "175d939a-9abb-44e4-8f00-19a57cab334f",
+				"value": "1790440076"
+			}
+		},
+		{
+			"Update": {
+				"old_value": null,
+				"property": "size",
+				"timestamp": "2026-09-26T16:27:56.744498Z",
+				"uuid": "175d939a-9abb-44e4-8f00-19a57cab334f",
+				"value": "1234567"
+			}
+		}
+	]
+}

@@ -13,5 +13,5 @@ from the CLI on purpose:
 - **Repeated text.** Text multiplied past 4096 bytes, or by a negative count, fails the evaluation
   and falls back to reading the input as a plain date. The CLI builds it, or loops without end.
 - **UDA defaults.** A date or duration `uda.<name>.default`, such as `tomorrow`, resolves to a real
-  value when a task is created. The CLI stores the text, which `task export` then drops. No fixture
-  covers this: the parser doesn't read defaults, and whatever applies them does.
+  value when a task is created. The CLI stores the text, which `task export` then drops. The write
+  fixtures cover this (`../WriteFixtures/README.md`), since the planner applies defaults.

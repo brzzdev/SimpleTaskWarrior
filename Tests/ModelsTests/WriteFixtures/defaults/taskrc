@@ -1,0 +1,11 @@
+default.due=eow
+default.project=Inbox
+default.scheduled=1d
+uda.area.default=home
+uda.area.type=string
+uda.estimate.default=90min
+uda.estimate.type=duration
+uda.review.default=tomorrow
+uda.review.type=date
+uda.size.default=3
+uda.size.type=numeric

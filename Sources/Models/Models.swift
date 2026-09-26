@@ -230,6 +230,11 @@ public enum UDAValue: Equatable, Sendable {
 }
 
 extension Date {
+	/// The date as TW stores it, to the second.
+	var epoch: Int {
+		Int(timeIntervalSince1970.rounded(.down))
+	}
+
 	/// A date as TW stores it: whole seconds since 1970.
 	init?(epoch: some StringProtocol) {
 		guard let seconds = Int(epoch) else {

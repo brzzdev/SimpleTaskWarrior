@@ -1,0 +1,40 @@
+{
+	"after": {
+		"8bb43867-6d9f-4142-88b7-b70d9be59305": {
+			"annotation_1790440073": "Note",
+			"description": "Alpha",
+			"entry": "1790440073",
+			"modified": "1790440073",
+			"status": "pending"
+		}
+	},
+	"before": {
+		"8bb43867-6d9f-4142-88b7-b70d9be59305": {
+			"description": "Alpha",
+			"entry": "1790440073",
+			"modified": "1790440073",
+			"status": "pending"
+		}
+	},
+	"now": 1790440073,
+	"operations": [
+		{
+			"Update": {
+				"old_value": "1790440073",
+				"property": "modified",
+				"timestamp": "2026-09-26T16:27:53.309056Z",
+				"uuid": "8bb43867-6d9f-4142-88b7-b70d9be59305",
+				"value": "1790440073"
+			}
+		},
+		{
+			"Update": {
+				"old_value": null,
+				"property": "annotation_1790440073",
+				"timestamp": "2026-09-26T16:27:53.309056Z",
+				"uuid": "8bb43867-6d9f-4142-88b7-b70d9be59305",
+				"value": "Note"
+			}
+		}
+	]
+}

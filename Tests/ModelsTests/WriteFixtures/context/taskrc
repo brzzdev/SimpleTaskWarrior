@@ -1,0 +1,4 @@
+context=work
+context.work.read=+work
+context.work.write=project:Work +work +urgent priority:H
+default.project=Inbox

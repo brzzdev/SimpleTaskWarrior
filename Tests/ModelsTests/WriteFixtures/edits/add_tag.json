@@ -1,0 +1,53 @@
+{
+	"after": {
+		"0e6f8cc9-b694-4b06-ad87-4d9b7ac11b85": {
+			"description": "Alpha",
+			"entry": "1790440073",
+			"modified": "1790440073",
+			"status": "pending",
+			"tag_Work": "x",
+			"tag_home": "x",
+			"tags": "Work,home"
+		}
+	},
+	"before": {
+		"0e6f8cc9-b694-4b06-ad87-4d9b7ac11b85": {
+			"description": "Alpha",
+			"entry": "1790440073",
+			"modified": "1790440073",
+			"status": "pending",
+			"tag_home": "x",
+			"tags": "home"
+		}
+	},
+	"now": 1790440073,
+	"operations": [
+		{
+			"Update": {
+				"old_value": "1790440073",
+				"property": "modified",
+				"timestamp": "2026-09-26T16:27:53.900334Z",
+				"uuid": "0e6f8cc9-b694-4b06-ad87-4d9b7ac11b85",
+				"value": "1790440073"
+			}
+		},
+		{
+			"Update": {
+				"old_value": null,
+				"property": "tag_Work",
+				"timestamp": "2026-09-26T16:27:53.900335Z",
+				"uuid": "0e6f8cc9-b694-4b06-ad87-4d9b7ac11b85",
+				"value": "x"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "home",
+				"property": "tags",
+				"timestamp": "2026-09-26T16:27:53.900336Z",
+				"uuid": "0e6f8cc9-b694-4b06-ad87-4d9b7ac11b85",
+				"value": "Work,home"
+			}
+		}
+	]
+}

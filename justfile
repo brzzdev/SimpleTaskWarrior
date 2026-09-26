@@ -168,6 +168,63 @@ fixtures:
 		task status:recurring or +TEMPLATE _uuids | sort > "$fixture/templates"
 	done
 
+	# Each `case_<name>` in a write fixture's `cases.sh` builds a fresh Replica under its `taskrc`,
+	# in UTC, then runs one write with `act`. `<name>.json` records the second it ran in, the
+	# Replica's properties before and after, and the operations the write committed, which
+	# `WritePlannerTests` plans the same write against. A case that straddles a second is retried,
+	# so every stamp the case makes is `now`, or the recording fails.
+	for fixture in "$PWD"/Tests/ModelsTests/WriteFixtures/*/; do
+		replica="$taskdata/writes"
+		task() {
+			(
+				cd "$scratch"
+				env -i HOME=/home/fixture TZ=UTC TASKDATA="$replica" TASKRC="$fixture/taskrc" \
+					"$task" rc.confirmation=0 rc.hooks=0 rc.verbose=nothing "$@"
+			)
+		}
+		properties() {
+			sqlite3 "$replica/taskchampion.sqlite3" \
+				"SELECT coalesce(json_group_object(uuid, json(data)), '{}') FROM tasks"
+		}
+		act() {
+			if [ -d "$replica" ]; then properties; else echo '{}'; fi > "$scratch/before"
+			task "$@"
+			properties > "$scratch/after"
+			# Everything since the newest Undo point, which the write pushed first.
+			sqlite3 "$replica/taskchampion.sqlite3" "
+				SELECT json_group_array(json(data)) FROM (
+					SELECT data FROM operations
+					WHERE id > (SELECT max(id) FROM operations WHERE data = '\"UndoPoint\"')
+					ORDER BY id
+				)
+			" > "$scratch/operations"
+		}
+		source "$fixture/cases.sh"
+		for case in $(declare -F | sed -n 's/^declare -f case_//p'); do
+			for attempt in {1..5}; do
+				rm -rf "$replica"
+				now="$(date +%s)"
+				"case_$case" > /dev/null
+				[ "$(date +%s)" = "$now" ] && break
+				if [ "$attempt" = 5 ]; then
+					echo "every run of $case in $fixture straddled a second" >&2
+					exit 1
+				fi
+			done
+			python3 - "$now" "$scratch" > "$fixture/$case.json" <<-'PYTHON'
+				import json, pathlib, sys
+				now, scratch = int(sys.argv[1]), pathlib.Path(sys.argv[2])
+				recording = {
+					name: json.loads((scratch / name).read_text())
+					for name in ["after", "before", "operations"]
+				}
+				recording["now"] = now
+				print(json.dumps(recording, indent="\t", sort_keys=True))
+			PYTHON
+		done
+		unset -f $(declare -F | sed -n 's/^declare -f \(case_\)/\1/p')
+	done
+
 	# Each line of `DateFixtures/inputs` is one `attribute:value` argument, added to a fresh Replica
 	# after fixed `scheduled`, `review` and `span` values for it to reference. `expected` records,
 	# for each of the fixture's `zones`, the second the add ran in and what TW stored, or nothing
