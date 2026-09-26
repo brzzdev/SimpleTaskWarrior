@@ -301,19 +301,22 @@ extension TaskEdit {
 	}
 }
 
+// Spaces are trimmed as scalars, as `task` trims bytes: a space followed by a combining mark shares
+// a `Character` with it, yet `task` still drops it.
 extension String {
 	/// Without trailing spaces, as `task modify description:` stores its value, keeping leading ones.
 	/// Other whitespace, such as a tab or a no-break space, stays.
 	fileprivate var trimmingTrailingSpaces: String {
-		guard let last = lastIndex(where: { $0 != " " }) else {
-			return ""
+		var scalars = unicodeScalars[...]
+		while scalars.last == " " {
+			scalars.removeLast()
 		}
-		return String(self[...last])
+		return String(scalars)
 	}
 
 	/// Without leading or trailing spaces, as `task add` and `task annotate` store their text.
 	fileprivate var trimmingSpaces: String {
-		String(trimmingTrailingSpaces.trimmingPrefix { $0 == " " })
+		String(trimmingTrailingSpaces.unicodeScalars.drop { $0 == " " })
 	}
 }
 

@@ -26,6 +26,11 @@ case_add_annotation_padded() {
 	act 1 annotate ' Note '
 }
 
+case_add_annotation_space_before_combining_mark() {
+	task add Alpha
+	act 1 annotate $' \xcc\x81Note '
+}
+
 case_add_dependency() {
 	task add Alpha
 	task add Beta

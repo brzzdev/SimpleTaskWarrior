@@ -21,6 +21,9 @@ struct WritePlannerTests {
 		"edits/add_annotation_padded": {
 			try .edit([$0.id("Alpha")], .addAnnotation(" Note ", entry: $0.now))
 		},
+		"edits/add_annotation_space_before_combining_mark": {
+			try .edit([$0.id("Alpha")], .addAnnotation(" \u{301}Note ", entry: $0.now))
+		},
 		"edits/add_dependency": { try .edit([$0.id("Alpha")], .addDependency($0.id("Beta"))) },
 		"edits/add_padded": { try .create($0.created(), description: " Alpha ") },
 		"edits/add_tab_only": { try .create($0.created(), description: "\t") },
