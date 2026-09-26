@@ -27,7 +27,8 @@ public struct WritePlanner: Sendable {
 			return try plan(ids, tasks: tasks, at: epoch) { $0.complete(at: epoch) }
 
 		case let .create(id, description):
-			guard !description.allSatisfy(\.isWhitespace) else {
+			let description = description.trimmingSpaces
+			guard !description.isEmpty else {
 				throw .blankDescription
 			}
 			guard tasks[id] == nil else {
@@ -49,7 +50,8 @@ public struct WritePlanner: Sendable {
 			return try plan(ids, tasks: tasks, at: epoch) { $0.delete(at: epoch) }
 
 		case let .edit(ids, edit):
-			if case let .addAnnotation(text, _) = edit, text.allSatisfy(\.isWhitespace) {
+			let edit = edit.trimmed
+			if case let .addAnnotation(text, _) = edit, text.isEmpty {
 				throw .blankAnnotation
 			}
 			if let tag = edit.tag, reservedTags.contains(tag) {
@@ -282,6 +284,36 @@ extension TaskEdit {
 		default: nil
 		}
 	}
+
+	/// The edit with its text trimmed as `task annotate` and `task modify description:` trim it.
+	fileprivate var trimmed: TaskEdit {
+		switch self {
+		case let .addAnnotation(text, entry):
+			.addAnnotation(text.trimmingSpaces, entry: entry)
+
+		case let .set("description", .string(description)):
+			.set("description", .string(description.droppingTrailingSpaces))
+
+		default:
+			self
+		}
+	}
+}
+
+extension String {
+	/// Without trailing spaces, as `task modify description:` stores its value, keeping leading ones.
+	/// Other whitespace, such as a tab or a no-break space, stays.
+	fileprivate var droppingTrailingSpaces: String {
+		guard let last = lastIndex(where: { $0 != " " }) else {
+			return ""
+		}
+		return String(self[...last])
+	}
+
+	/// Without leading or trailing spaces, as `task add` and `task annotate` store their text.
+	fileprivate var trimmingSpaces: String {
+		String(droppingTrailingSpaces.trimmingPrefix { $0 == " " })
+	}
 }
 
 /// The attributes TW stores as dates, besides date UDAs.
@@ -303,9 +335,9 @@ private let reservedTags: Set = [
 ]
 
 public enum WritePlanError: Error, Equatable, Sendable {
-	/// An annotation with no text, or only whitespace, which `task annotate` refuses.
+	/// An annotation with no text, or only spaces, which `task annotate` refuses.
 	case blankAnnotation
-	/// A New Task with no description, or only whitespace, which `task add` refuses. `task modify`
+	/// A New Task with no description, or only spaces, which `task add` refuses. `task modify`
 	/// accepts removing one, so an edit may remove it.
 	case blankDescription
 	/// The task would depend, through others, on a task that depends on it.

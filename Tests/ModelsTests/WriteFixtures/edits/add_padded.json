@@ -1,0 +1,64 @@
+{
+	"after": {
+		"88d21ab6-a320-4281-b71e-0f2646a7fd41": {
+			"description": "Alpha",
+			"entry": "1790458198",
+			"modified": "1790458198",
+			"status": "pending"
+		}
+	},
+	"before": {},
+	"now": 1790458198,
+	"operations": [
+		{
+			"Create": {
+				"uuid": "88d21ab6-a320-4281-b71e-0f2646a7fd41"
+			}
+		},
+		{
+			"Update": {
+				"old_value": null,
+				"property": "modified",
+				"timestamp": "2026-09-26T21:29:58.684311Z",
+				"uuid": "88d21ab6-a320-4281-b71e-0f2646a7fd41",
+				"value": "1790458198"
+			}
+		},
+		{
+			"Update": {
+				"old_value": null,
+				"property": "description",
+				"timestamp": "2026-09-26T21:29:58.684312Z",
+				"uuid": "88d21ab6-a320-4281-b71e-0f2646a7fd41",
+				"value": "Alpha"
+			}
+		},
+		{
+			"Update": {
+				"old_value": null,
+				"property": "entry",
+				"timestamp": "2026-09-26T21:29:58.684312Z",
+				"uuid": "88d21ab6-a320-4281-b71e-0f2646a7fd41",
+				"value": "1790458198"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "1790458198",
+				"property": "modified",
+				"timestamp": "2026-09-26T21:29:58.684313Z",
+				"uuid": "88d21ab6-a320-4281-b71e-0f2646a7fd41",
+				"value": "1790458198"
+			}
+		},
+		{
+			"Update": {
+				"old_value": null,
+				"property": "status",
+				"timestamp": "2026-09-26T21:29:58.684316Z",
+				"uuid": "88d21ab6-a320-4281-b71e-0f2646a7fd41",
+				"value": "pending"
+			}
+		}
+	]
+}

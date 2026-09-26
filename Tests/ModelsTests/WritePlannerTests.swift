@@ -15,7 +15,15 @@ struct WritePlannerTests {
 		"edits/add_annotation_in_a_taken_second": {
 			try .edit([$0.id("Alpha")], .addAnnotation("Second", entry: $0.now))
 		},
+		"edits/add_annotation_nbsp_only": {
+			try .edit([$0.id("Alpha")], .addAnnotation("\u{A0}", entry: $0.now))
+		},
+		"edits/add_annotation_padded": {
+			try .edit([$0.id("Alpha")], .addAnnotation(" Note ", entry: $0.now))
+		},
 		"edits/add_dependency": { try .edit([$0.id("Alpha")], .addDependency($0.id("Beta"))) },
+		"edits/add_padded": { try .create($0.created(), description: " Alpha ") },
+		"edits/add_tab_only": { try .create($0.created(), description: "\t") },
 		"edits/add_tag": { try .edit([$0.id("Alpha")], .addTag("Work")) },
 		"edits/complete": { try .complete([$0.id("Alpha")]) },
 		"edits/complete_several": { try .complete([$0.id("Alpha"), $0.id("Beta")]) },
@@ -30,6 +38,12 @@ struct WritePlannerTests {
 		"edits/remove_tag": { try .edit([$0.id("Alpha")], .removeTag("home")) },
 		"edits/remove_wait": { try .edit([$0.id("Alpha")], .set("wait", .string(""))) },
 		"edits/set_description": { try .edit([$0.id("Alpha")], .set("description", .string("Beta"))) },
+		"edits/set_description_padded": {
+			try .edit([$0.id("Alpha")], .set("description", .string(" Beta ")))
+		},
+		"edits/set_description_to_spaces": {
+			try .edit([$0.id("Alpha")], .set("description", .string("   ")))
+		},
 		"edits/set_duration": {
 			try .edit([$0.id("Alpha")], .set("estimate", .duration(TaskDuration(seconds: 5_400))))
 		},
