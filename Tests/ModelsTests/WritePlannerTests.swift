@@ -125,6 +125,36 @@ struct WritePlannerTests {
 	}
 
 	@Test
+	func writingALegacyWaitingTaskMakesItPending() throws {
+		let planner = WritePlanner(taskrc: .defaults, timeZone: .gmt)
+		let id = UUID()
+		let now = Date(timeIntervalSince1970: 1_790_000_000)
+
+		// `task modify` rewrites a stored `waiting` only when it writes anything.
+		let edited = try planner.plan(
+			.edit([id], .addTag("home")),
+			tasks: [id: ["status": "waiting"]],
+			at: now,
+		)
+		let retried = try planner.plan(
+			.edit([id], .addTag("home")),
+			tasks: [id: ["status": "waiting", "tag_home": "x", "tags": "home"]],
+			at: now,
+		)
+		let markedPending = try planner.plan(
+			.markPending([id]),
+			tasks: [id: ["status": "waiting"]],
+			at: now,
+		)
+
+		#expect(edited.operations.last == .setStatus(id, .pending))
+		let status = WritePlan.Expectation(property: "status", uuid: id, value: "waiting")
+		#expect(edited.expectations.contains(status))
+		#expect(retried == WritePlan())
+		#expect(markedPending.operations.last == .setStatus(id, .pending))
+	}
+
+	@Test
 	func contextWriteReportsWhatItSkips() throws {
 		let recording = try Recording("context/add")
 		let planner = WritePlanner(taskrc: recording.taskrc, timeZone: .gmt)

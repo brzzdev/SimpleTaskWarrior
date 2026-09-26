@@ -155,6 +155,7 @@ public struct WritePlanner: Sendable {
 			}
 			var draft = Draft(id: id, properties: properties, isNew: false)
 			change(&draft)
+			draft.rewriteLegacyWaiting()
 			drafts.append(draft)
 		}
 		return WritePlan(drafts, epoch: epoch)
@@ -247,8 +248,8 @@ public enum WriteAction: Equatable, Sendable {
 	case stop([Task.ID])
 }
 
-/// One change to each task an edit names. `wait` is an attribute like any other: setting it never
-/// touches `status`, since TW 3 derives waiting from it.
+/// One change to each task an edit names. `wait` is an attribute like any other: setting it touches
+/// `status` only to rewrite a legacy stored `waiting`, since TW 3 derives waiting from `wait`.
 public enum TaskEdit: Equatable, Sendable {
 	/// An annotation at `entry`, or the first free second after it, as `task annotate` does.
 	case addAnnotation(String, entry: Date)
@@ -276,6 +277,10 @@ extension TaskEdit {
 private let dateAttributes: Set = [
 	"due", "end", "entry", "modified", "scheduled", "start", "until", "wait",
 ]
+
+/// The status TW 2 stored for a waiting task, which `Status` doesn't decode. TW 3 reads it as
+/// pending and writes it back as `pending`.
+private let legacyWaiting = "waiting"
 
 /// TW's virtual tags, which `task` refuses to add or remove, as `feedback_reserved_tags` lists
 /// them. Only these uppercase names are reserved: `pending` is an ordinary tag.
@@ -402,7 +407,7 @@ private struct Draft {
 	/// `task done`: only from pending, removing `start`. A legacy stored `waiting` is pending too.
 	mutating func complete(at epoch: String) {
 		let status = read("status")
-		guard status == Status.pending.rawValue || status == "waiting" else {
+		guard status == Status.pending.rawValue || status == legacyWaiting else {
 			return
 		}
 		stampEnd(at: epoch)
@@ -419,10 +424,12 @@ private struct Draft {
 		set("status", Status.deleted.rawValue)
 	}
 
-	/// `modify status:pending`, where `Task::validate` removes `end` from a pending task.
+	/// `modify status:pending`, where `Task::validate` removes `end` from a pending task. A legacy
+	/// stored `waiting` changes to `pending` too.
 	mutating func markPending() {
 		let status = read("status")
-		guard status == Status.completed.rawValue || status == Status.deleted.rawValue else {
+		let from = [Status.completed.rawValue, Status.deleted.rawValue, legacyWaiting]
+		guard let status, from.contains(status) else {
 			return
 		}
 		set("end", nil)
@@ -451,6 +458,16 @@ private struct Draft {
 			reads[property] = .some(original[property])
 		}
 		return properties[property]
+	}
+
+	/// A legacy stored `waiting` becomes `pending` on any write that changes the task, as TW 3 writes
+	/// it back, while a write that changes nothing leaves it. Runs after the change it follows, and
+	/// looks at `status` without reading it, so only a rewrite expects it.
+	mutating func rewriteLegacyWaiting() {
+		guard properties != original, properties["status"] == legacyWaiting else {
+			return
+		}
+		set("status", Status.pending.rawValue)
 	}
 
 	/// Sets `property`, or removes it when `value` is nil, having read it: a plan changes a property
