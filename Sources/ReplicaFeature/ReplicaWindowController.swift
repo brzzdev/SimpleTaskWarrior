@@ -36,8 +36,9 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 		let inspector = NSSplitViewItem(
 			inspectorWithViewController: hostingController(InspectorView(store: store)),
 		)
-		// An inspector's maximum defaults to its minimum, which leaves its divider nothing to drag.
-		inspector.maximumThickness = inspectorMaximumThickness
+		// An inspector's maximum defaults to its minimum, which leaves its divider nothing to drag. The
+		// cap keeps a drag from squeezing the table away.
+		inspector.maximumThickness = 400
 		let split = NSSplitViewController()
 		split.splitViewItems = [
 			NSSplitViewItem(sidebarWithViewController: sidebarController),
@@ -172,7 +173,5 @@ private func hostingController(_ rootView: some View) -> NSViewController {
 	controller.sizingOptions = []
 	return controller
 }
-
-private let inspectorMaximumThickness: CGFloat = 400
 
 private let windowSize = NSSize(width: 1_000, height: 600)
