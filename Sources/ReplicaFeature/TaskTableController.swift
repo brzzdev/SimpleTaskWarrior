@@ -63,6 +63,9 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 		observe { [weak self] in
 			self?.updateRows()
 		}
+		observe { [weak self] in
+			self?.updateVisibility()
+		}
 	}
 
 	@objc
@@ -211,13 +214,19 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 		table.autosaveName = autosaveName
 		table.autosaveTableColumns = true
 		isFollowingStore = false
-		view.isHidden = false
+		updateVisibility()
 		// The table fits its columns to its width only when that width changes. Without this, the
 		// defaults, or a layout saved in a wider window, would start wider than the table. A layout
 		// that already fits comes through unchanged.
 		view.layoutSubtreeIfNeeded()
 		table.sizeToFit()
 		sendSortOrder()
+	}
+
+	/// Shows the table once its layout is restored, so the default never draws first, and while the
+	/// Replica is open, since a failure takes its place.
+	private func updateVisibility() {
+		view.isHidden = table.autosaveName == nil || store.failure != nil
 	}
 
 	/// Shows the store's rows and selection, reloading only when the rows changed.

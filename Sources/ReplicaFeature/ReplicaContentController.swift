@@ -70,8 +70,6 @@ final class ReplicaContentController: NSViewController {
 			bannerStack.isHidden = failure != nil
 			failureView.isHidden = failure == nil
 			failureView.message = failure
-			// Hidden by the table itself too, until its layout is restored.
-			table.view.alphaValue = failure == nil ? 1 : 0
 		}
 	}
 
@@ -225,8 +223,8 @@ final class BannerView: NSView {
 }
 
 /// A label that wraps at whatever width it's laid out at. An `NSTextField` otherwise reports its
-/// height for the width it was last told, so a banner sizes itself for too few lines.
-private final class WrappingLabel: NSTextField {
+/// height for the width it was last told, so its container sizes itself for too few lines.
+final class WrappingLabel: NSTextField {
 	override func setFrameSize(_ newSize: NSSize) {
 		super.setFrameSize(newSize)
 		guard preferredMaxLayoutWidth != newSize.width else {

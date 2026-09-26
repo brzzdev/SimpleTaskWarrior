@@ -9,7 +9,7 @@ final class InspectorController: NSViewController {
 		symbolName: "sidebar.trailing",
 		title: String(localized: "No Selection"),
 	)
-	private let pathField = NSTextField(wrappingLabelWithString: "")
+	private let pathField = WrappingLabel(wrappingLabelWithString: "")
 	private let pathSection = NSStackView()
 	private let store: StoreOf<ReplicaFeature>
 
@@ -68,6 +68,12 @@ final class InspectorController: NSViewController {
 			let path = store.directory?.path(percentEncoded: false)
 			pathField.stringValue = path ?? ""
 			pathSection.isHidden = path == nil
+		}
+		// Apart from the path, since the selection changes with every click.
+		observe { [weak self] in
+			guard let self else {
+				return
+			}
 			noSelectionView.isHidden = !store.selection.isEmpty
 		}
 	}
