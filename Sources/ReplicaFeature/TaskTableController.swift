@@ -46,9 +46,11 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 	override func viewDidLoad() {
 		super.viewDidLoad()
 		table.allowsMultipleSelection = true
+		// With only Description autoresizing, it alone takes the width the table gains or loses.
+		table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
 		table.style = .inset
 		table.usesAlternatingRowBackgroundColors = true
-		for column in builtInColumns() {
+		for column in builtInColumns(cellSpacing: table.intercellSpacing.width) {
 			table.addTableColumn(column)
 		}
 		let headerMenu = NSMenu()
@@ -116,11 +118,7 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 		switch column {
 		case .age, .due, .id, .project, .scheduled, .tags, .uda, .until, .wait:
 			let cell = reusedCell(TextCell.init)
-			cell.textField?.font =
-				column == .id
-					? .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
-					: .systemFont(ofSize: NSFont.systemFontSize)
-			cell.textField?.stringValue = text(column, of: row)
+			cell.configure(column, of: row)
 			return cell
 
 		case .description:
@@ -163,6 +161,7 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 	/// Taskrc has loaded. Autosave restores only the columns that exist when it's named, so a UDA
 	/// column added later starts from the defaults.
 	private func updateColumns() {
+		let cellSpacing = table.intercellSpacing.width
 		let udaColumns = store.udaColumns
 		let udaIdentifiers = Set(udaColumns.map { TaskColumn.uda($0.name).identifier })
 		var removedColumn = false
@@ -181,19 +180,27 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 			// Descending first where `values` lists the order, so the first click shows the list as
 			// written, while each direction still sorts as the CLI's `<name>-` and `<name>+` do.
 			let firstOrder: SortOrder = uda.values.isEmpty ? .forward : .reverse
+			// A date UDA shows its dates as Due does.
+			let widestCell = uda.type == .date ? sampleCell(.due) : nil
 			if
 				let existing = table
 					.tableColumn(withIdentifier: NSUserInterfaceItemIdentifier(column.identifier))
 			{
 				existing.sortDescriptorPrototype = TaskSort(column, order: firstOrder).descriptor
 				existing.title = uda.label
+				existing.minWidth = minimumWidth(
+					of: existing,
+					widestCell: widestCell,
+					cellSpacing: cellSpacing,
+				)
 				continue
 			}
 			let tableColumn = makeColumn(
 				column,
+				cellSpacing: cellSpacing,
 				firstOrder: firstOrder,
-				minWidth: uda.type == .date ? dateColumnMinimumWidth : columnMinimumWidth,
 				title: uda.label,
+				widestCell: widestCell,
 			)
 			tableColumn.isHidden = true
 			table.addTableColumn(tableColumn)
@@ -249,63 +256,130 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 	}
 }
 
-/// Wide enough for a short project, tag list or UDA value, where no other floor applies.
-private let columnMinimumWidth: CGFloat = 48
-
-/// Wide enough for a date in full, numeric or relative.
-private let dateColumnMinimumWidth: CGFloat = 80
-
 private let descriptionIdentifier = TaskColumn.description.identifier
 
-/// The columns every Taskrc has, in their default order. The dates past Due start hidden.
-private func builtInColumns() -> [NSTableColumn] {
-	let id = makeColumn(.id, minWidth: 32, title: String(localized: "ID"))
-	id.width = 40
-	id.maxWidth = 64
-	let urgency = makeColumn(
-		.urgency,
-		firstOrder: .reverse,
-		// Its title and the sort indicator it usually shows.
-		minWidth: 80,
-		title: String(localized: "Urgency"),
-	)
-	urgency.width = 80
-	urgency.maxWidth = 96
-	let description = makeColumn(.description, minWidth: 100, title: String(localized: "Description"))
-	description.width = 240
+/// The columns every Taskrc has, in their default order, whose cells sit `cellSpacing` apart. The
+/// dates past Due start hidden.
+private func builtInColumns(cellSpacing: CGFloat) -> [NSTableColumn] {
+	func column(_ column: TaskColumn, firstOrder: SortOrder = .forward, title: String)
+		-> NSTableColumn
+	{
+		makeColumn(
+			column,
+			cellSpacing: cellSpacing,
+			firstOrder: firstOrder,
+			title: title,
+			widestCell: sampleCell(column),
+		)
+	}
 	let hidden = [
-		makeColumn(.age, minWidth: dateColumnMinimumWidth, title: String(localized: "Age")),
-		makeColumn(.scheduled, minWidth: dateColumnMinimumWidth, title: String(localized: "Scheduled")),
-		makeColumn(.wait, minWidth: dateColumnMinimumWidth, title: String(localized: "Wait")),
-		makeColumn(.until, minWidth: dateColumnMinimumWidth, title: String(localized: "Until")),
+		column(.age, title: String(localized: "Age")),
+		column(.scheduled, title: String(localized: "Scheduled")),
+		column(.wait, title: String(localized: "Wait")),
+		column(.until, title: String(localized: "Until")),
 	]
 	for column in hidden {
 		column.isHidden = true
 	}
 	return [
-		id,
-		urgency,
-		description,
-		makeColumn(.project, minWidth: columnMinimumWidth, title: String(localized: "Project")),
-		makeColumn(.tags, minWidth: columnMinimumWidth, title: String(localized: "Tags")),
-		makeColumn(.due, minWidth: dateColumnMinimumWidth, title: String(localized: "Due")),
+		column(.id, title: String(localized: "ID")),
+		column(.urgency, firstOrder: .reverse, title: String(localized: "Urgency")),
+		column(.description, title: String(localized: "Description")),
+		column(.project, title: String(localized: "Project")),
+		column(.tags, title: String(localized: "Tags")),
+		column(.due, title: String(localized: "Due")),
 	] + hidden
 }
 
-/// A column for `column`, whose header sorts in `firstOrder` when first clicked.
+/// A column for `column`, whose header sorts in `firstOrder` when first clicked. It's never
+/// narrower than its header or `widestCell`, and starts fitted to `widestCell` where one is given.
 private func makeColumn(
 	_ column: TaskColumn,
+	cellSpacing: CGFloat,
 	firstOrder: SortOrder = .forward,
-	minWidth: CGFloat,
 	title: String,
+	widestCell: NSView?,
 ) -> NSTableColumn {
 	let tableColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(column.identifier))
-	// Also the floor a column shrinks to as others appear or the window narrows.
-	tableColumn.minWidth = minWidth
+	// Every other column keeps its width until it's resized by hand.
+	tableColumn.resizingMask =
+		column == .description ? [.autoresizingMask, .userResizingMask] : .userResizingMask
 	tableColumn.sortDescriptorPrototype = TaskSort(column, order: firstOrder).descriptor
 	tableColumn.title = title
+	// Also the floor Description shrinks to as the window narrows, past which the table scrolls.
+	tableColumn.minWidth = minimumWidth(
+		of: tableColumn,
+		widestCell: widestCell,
+		cellSpacing: cellSpacing,
+	)
+	if widestCell != nil {
+		tableColumn.width = tableColumn.minWidth
+	}
 	return tableColumn
 }
+
+/// The narrowest `column` can be and still show its whole title with the sort arrow above
+/// `widestCell`, whose cell sits `cellSpacing` narrower than the column.
+private func minimumWidth(
+	of column: NSTableColumn,
+	widestCell: NSView?,
+	cellSpacing: CGFloat,
+) -> CGFloat {
+	let header = column.headerCell
+	// Any width does: the arrow sits a fixed distance from the header's trailing edge.
+	let bounds = NSRect(x: 0, y: 0, width: 100, height: 20)
+	let arrowWidth = bounds.maxX - header.sortIndicatorRect(forBounds: bounds).minX
+	let headerWidth = header.cellSize.width + arrowWidth
+	guard let widestCell else {
+		return headerWidth
+	}
+	// The larger, not the sum, since the header sits above the cells rather than beside them.
+	return max(headerWidth, widestCell.fittingSize.width + cellSpacing)
+}
+
+/// A cell showing `column` for `sampleRow`, or nil where no content sets a floor.
+private func sampleCell(_ column: TaskColumn) -> NSView? {
+	switch column {
+	case .age, .due, .id, .scheduled, .until, .wait:
+		let cell = TextCell()
+		cell.configure(column, of: sampleRow)
+		return cell
+
+	case .description:
+		let cell = DescriptionCell()
+		cell.configure(sampleRow)
+		return cell
+
+	case .urgency:
+		let cell = UrgencyCell()
+		cell.configure(urgency: sampleRow.urgency, highest: 0)
+		return cell
+
+	case .project, .tags, .uda:
+		return nil
+	}
+}
+
+/// A row as wide as the table expects in each column that has a sample cell: every marker with a
+/// two-digit annotation count, and a few characters of description beside them.
+private let sampleRow: TaskRow = {
+	// 28 December 2026, whose day and month take two digits in every zone and numeric date style.
+	let date = Date(timeIntervalSince1970: 1_798_459_200)
+	var task = Models.Task(description: "Buy milk", id: UUID(), status: .pending, workingSetID: 999)
+	task.annotations = Array(
+		repeating: Models.Task.Annotation(description: "", entry: date),
+		count: 10,
+	)
+	task.due = date
+	// Its Age reads in months, the widest unit it's likely to show.
+	task.entry = Date.now.addingTimeInterval(-335 * 24 * 60 * 60)
+	task.parent = ""
+	task.scheduled = date
+	task.start = date
+	task.until = date
+	task.wait = date
+	return TaskRow(isBlocked: true, task: task, udaColumns: [], urgency: -99.9)
+}()
 
 /// What a plain text cell shows for `column`.
 private func text(_ column: TaskColumn, of row: TaskRow) -> String {
@@ -405,6 +479,14 @@ private final class TextCell: NSTableCellView {
 	@available(*, unavailable)
 	required init?(coder: NSCoder) {
 		fatalError("init(coder:) has not been implemented")
+	}
+
+	func configure(_ column: TaskColumn, of row: TaskRow) {
+		textField?.font =
+			column == .id
+				? .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+				: .systemFont(ofSize: NSFont.systemFontSize)
+		textField?.stringValue = text(column, of: row)
 	}
 }
 
