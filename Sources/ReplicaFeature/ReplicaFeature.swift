@@ -533,7 +533,7 @@ struct ReplicaFeature {
 				guard !outcome.isApplied else {
 					return finish
 				}
-				return .merge(beep(), finish)
+				return .merge(.run { _ in NSSound.beep() }, finish)
 
 			case .useTaskwarriorDefaultsButtonTapped:
 				state.isTaskrcHintPresented = false
@@ -596,7 +596,7 @@ struct ReplicaFeature {
 			return .none
 		}
 		state.writeProgress = .running
-		let name = undoName(for: action, state)
+		let name = undoName(for: action, udaColumns: state.udaColumns)
 		let planner = WritePlanner(taskrc: state.runningTaskrc, timeZone: timeZone)
 		return .run { [clock, now, replicaClient, storedTasks = state.storedTasks] send in
 			// A child of the write, so it's cancelled as the write ends, however it ends.
@@ -628,7 +628,7 @@ struct ReplicaFeature {
 		_ state: inout State,
 		_ change: @escaping @Sendable (_ directory: URL) async throws -> UndoOutcome,
 	) -> Effect<Action> {
-		guard let directory = state.directory, state.writeProgress == nil else {
+		guard let directory = state.directory else {
 			return .none
 		}
 		state.writeProgress = .running
@@ -878,12 +878,8 @@ struct ReplicaFeature {
 	}
 }
 
-private func beep() -> Effect<ReplicaFeature.Action> {
-	.run { _ in NSSound.beep() }
-}
-
 /// The name the Edit menu gives `action`'s Undo point, as in "Undo Change Due Date".
-private func undoName(for action: WriteAction, _ state: ReplicaFeature.State) -> String {
+private func undoName(for action: WriteAction, udaColumns: [UDAColumn]) -> String {
 	switch action {
 	case let .complete(ids):
 		counted(ids, String(localized: "Complete Task"), String(localized: "Complete \(ids.count) Tasks"))
@@ -913,7 +909,7 @@ private func undoName(for action: WriteAction, _ state: ReplicaFeature.State) ->
 		String(localized: "Remove Tag")
 
 	case let .edit(_, .set(attribute, _)), let .edit(_, .setInput(attribute, _)):
-		String(localized: "Change \(attributeName(attribute, state))")
+		String(localized: "Change \(attributeName(attribute, udaColumns: udaColumns))")
 
 	case let .markPending(ids):
 		counted(
@@ -936,7 +932,7 @@ private func counted(_ ids: [Models.Task.ID], _ single: String, _ multiple: Stri
 }
 
 /// How an Undo point's name refers to `attribute`: a UDA by its label.
-private func attributeName(_ attribute: String, _ state: ReplicaFeature.State) -> String {
+private func attributeName(_ attribute: String, udaColumns: [UDAColumn]) -> String {
 	switch attribute {
 	case "description": String(localized: "Description")
 	case "due": String(localized: "Due Date")
@@ -944,7 +940,7 @@ private func attributeName(_ attribute: String, _ state: ReplicaFeature.State) -
 	case "scheduled": String(localized: "Scheduled Date")
 	case "until": String(localized: "Until Date")
 	case "wait": String(localized: "Wait Date")
-	default: state.udaColumns.first { $0.name == attribute }?.label ?? attribute
+	default: udaColumns.first { $0.name == attribute }?.label ?? attribute
 	}
 }
 

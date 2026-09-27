@@ -668,7 +668,7 @@ struct ReplicaFeatureTests {
 			$0.replicaClient.undo = { _ in
 				UndoOutcome(
 					isApplied: true,
-					snapshot: TaskSnapshot(readIndex: 1, redoName: "Complete Task", tasks: [milk, dog]),
+					snapshot: snapshot([milk, dog], readIndex: 1, redoName: "Complete Task"),
 					tasks: [UUID(0)],
 				)
 			}
@@ -1260,8 +1260,12 @@ private func loadedState(
 }
 
 /// `tasks` as the Replica's read number `readIndex`.
-private func snapshot(_ tasks: [StoredTask], readIndex: Int = 0) -> TaskSnapshot {
-	TaskSnapshot(readIndex: readIndex, tasks: tasks)
+private func snapshot(
+	_ tasks: [StoredTask],
+	readIndex: Int = 0,
+	redoName: String? = nil,
+) -> TaskSnapshot {
+	TaskSnapshot(readIndex: readIndex, redoName: redoName, tasks: tasks)
 }
 
 /// The planner a window on TW's defaults writes with.

@@ -197,11 +197,9 @@ final class ReplicaClientTests {
 	/// Commits `operations` through `cli`, as the CLI would.
 	private func commit(_ operations: [PlannedOperation], with cli: EngineHandle) {
 		do {
-			guard case let .conflict(uuids) = try cli.apply(operations: operations, expectations: [])
-			else {
-				return
+			if case let .conflict(uuids) = try cli.apply(operations: operations, expectations: []) {
+				Issue.record("The CLI's write conflicted on \(uuids)")
 			}
-			Issue.record("The CLI's write conflicted on \(uuids)")
 		} catch {
 			Issue.record(error)
 		}

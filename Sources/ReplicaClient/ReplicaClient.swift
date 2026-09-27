@@ -213,7 +213,7 @@ actor Replica {
 		var operations: [UndoOperation]
 
 		var tasks: Set<Models.Task.ID> {
-			Set(operations.compactMap { UUID(uuidString: $0.uuid ?? "") })
+			Set(operations.compactMap { $0.uuid.flatMap(UUID.init(uuidString:)) })
 		}
 	}
 
@@ -285,7 +285,7 @@ actor Replica {
 	/// has written since. A CLI write landing between the check and the commit still gets through.
 	func redo() throws -> UndoOutcome {
 		guard let redoPoint, try engine.dataVersion() == redoPoint.dataVersion else {
-			return try UndoOutcome(isApplied: false, snapshot: readTasks(), tasks: [])
+			return try notApplied()
 		}
 		let point = redoPoint.point
 		let outcome = try engine.apply(
@@ -293,7 +293,7 @@ actor Replica {
 			expectations: [],
 		)
 		guard case let .committed(operations) = outcome, !operations.isEmpty else {
-			return try UndoOutcome(isApplied: false, snapshot: readTasks(), tasks: [])
+			return try notApplied()
 		}
 		undoPoints.append(UndoPoint(name: point.name, operations: operations))
 		return try UndoOutcome(isApplied: true, snapshot: readTasks(), tasks: point.tasks)
@@ -303,27 +303,19 @@ actor Replica {
 	/// An error can follow a reversal that landed, so every outcome reads the tasks again, which
 	/// checks the Undo points afresh.
 	func undo() throws -> UndoOutcome {
-		guard let point = undoPoints.last else {
-			return try UndoOutcome(isApplied: false, snapshot: readTasks(), tasks: [])
+		guard
+			let point = undoPoints.last,
+			case let .applied(error)? = try? engine
+				.commitReversedOperations(operations: point.operations)
+		else {
+			return try notApplied()
 		}
-		let outcome: Engine.UndoOutcome
-		do {
-			outcome = try engine.commitReversedOperations(operations: point.operations)
-		} catch {
-			return try UndoOutcome(isApplied: false, snapshot: readTasks(), tasks: [])
-		}
-		switch outcome {
-		case let .applied(error):
-			undoPoints.removeLast()
-			return try UndoOutcome(
-				isApplied: error == nil,
-				snapshot: readTasks(redoing: error == nil ? point : nil),
-				tasks: point.tasks,
-			)
-
-		case .notApplied:
-			return try UndoOutcome(isApplied: false, snapshot: readTasks(), tasks: [])
-		}
+		undoPoints.removeLast()
+		return try UndoOutcome(
+			isApplied: error == nil,
+			snapshot: readTasks(redoing: error == nil ? point : nil),
+			tasks: point.tasks,
+		)
 	}
 
 	/// Yields every task when anything has committed since the last read.
@@ -333,6 +325,11 @@ actor Replica {
 		guard try engine.dataVersion() != readVersion else { return }
 		// Decoded by the window, with its Taskrc's UDAs.
 		try continuation.yield(readTasks())
+	}
+
+	/// An undo or redo that changed nothing, with the tasks read again.
+	private func notApplied() throws -> UndoOutcome {
+		try UndoOutcome(isApplied: false, snapshot: readTasks(), tasks: [])
 	}
 
 	/// Every task, recording the `data_version` they were read at, and which Undo points still
