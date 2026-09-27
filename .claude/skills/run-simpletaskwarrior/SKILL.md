@@ -40,9 +40,11 @@ $D relaunch                        # ⌘Q, then launch with no file: restoration
 active task (3), a blocked one (7), one with 2 annotations (4), one `scheduled` 4 minutes out (9),
 and one waiting.
 
-**Screenshot pixels to click points:** `shot` captures in points but the PNG is 2x. With the default
-frame, a point is `100 + pixel / 2` on each axis. The Read tool shows a downscaled image and states
-its scale; convert through the original size.
+**Screenshot pixels to click points:** `shot` captures a region in points, and the PNG holds the
+display's pixels for it: the scale is the PNG's width over the capture width (2 on a Retina display,
+where the default 1500pt capture is 3000px). With the default frame, a point is
+`100 + pixel / scale` on each axis. The Read tool shows a downscaled image and states the original
+size; convert through that.
 
 ## Gotchas
 
