@@ -556,8 +556,8 @@ private final class DescriptionCell: NSTableCellView {
 		annotations.setAccessibilityRole(.staticText)
 		super.init(frame: .zero)
 
-		// A custom box resolves its fill colour against the current appearance, which a layer's
-		// `CGColor` doesn't.
+		// A custom box redraws its fill color for each appearance, where a layer's `CGColor` would
+		// stay fixed.
 		activeDot.borderWidth = 0
 		activeDot.boxType = .custom
 		activeDot.cornerRadius = activeDotSize / 2
