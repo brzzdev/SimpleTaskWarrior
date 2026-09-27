@@ -339,10 +339,7 @@ struct ReplicaFeature {
 					return .none
 				}
 				state.isNewTaskRowPresented = true
-				if !sidebarShowsNewTask(state) {
-					state.sidebarSelection = [.view(.pending)]
-					filterRows(&state)
-				}
+				showNewTaskSidebar(&state)
 				return .none
 
 			case let .newTaskDescriptionSubmitted(description):
@@ -351,6 +348,8 @@ struct ReplicaFeature {
 				guard !description.allSatisfy({ $0 == " " }) else {
 					return .none
 				}
+				// Again, since the Taskrc or its Context may have changed while the row was open.
+				showNewTaskSidebar(&state)
 				let id = uuid()
 				state.creatingTask = id
 				return write(.create(id, description: description), &state)
@@ -544,6 +543,15 @@ struct ReplicaFeature {
 			return
 		}
 		state.selection = [created]
+	}
+
+	/// Resets the sidebar to Pending where it wouldn't show a task New Task would create now.
+	private func showNewTaskSidebar(_ state: inout State) {
+		guard !sidebarShowsNewTask(state) else {
+			return
+		}
+		state.sidebarSelection = [.view(.pending)]
+		filterRows(&state)
 	}
 
 	/// Whether the sidebar shows a task New Task would create now, with only the Context's and the

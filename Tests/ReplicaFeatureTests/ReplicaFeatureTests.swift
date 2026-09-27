@@ -177,6 +177,46 @@ struct ReplicaFeatureTests {
 	}
 
 	@Test
+	func newTaskChecksItsSidebarAgainWhenTheTaskrcChangesBeforeReturn() async throws {
+		func taskrc(defaultProject: String) -> TaskrcClient.Loaded {
+			let taskrc = Taskrc(path: taskrcFile.path(), environment: .fixture) { path, _ in
+				Taskrc.File(contents: "default.project=\(defaultProject)", realPath: path)
+			}
+			return TaskrcClient.Loaded(taskrc: taskrc, url: taskrcFile)
+		}
+		var initialState = try loadedState([])
+		initialState.sidebarSelection = [.project("Home")]
+		initialState.taskrc = taskrc(defaultProject: "Home")
+		let store = TestStore(initialState: initialState) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.continuousClock = TestClock()
+			$0.date.now = now
+			$0.replicaClient.apply = { _, _ in ApplyOutcome(isCommitted: true, tasks: []) }
+			$0.timeZone = .gmt
+			$0.uuid = .incrementing
+		}
+
+		await store.send(.newTaskButtonTapped) {
+			$0.isNewTaskRowPresented = true
+		}
+		await store.send(.taskrcLoaded(taskrc(defaultProject: "Work"))) {
+			$0.taskrc = taskrc(defaultProject: "Work")
+		}
+		await store.send(.newTaskDescriptionSubmitted("Buy milk")) {
+			$0.creatingTask = UUID(0)
+			$0.isNewTaskRowPresented = false
+			$0.sidebarSelection = [.view(.pending)]
+			$0.writeProgress = .running
+		}
+		await store.receive(\.tasksLoaded)
+		await store.receive(\.writeCommitted) {
+			$0.creatingTask = nil
+			$0.writeProgress = nil
+		}
+	}
+
+	@Test
 	func newTaskWaitsForTheReplicaAndTheTaskrc() async {
 		var initialState = ReplicaFeature.State(bookmark: Data())
 		initialState.directory = replicaDirectory
