@@ -539,7 +539,7 @@ private final class TextCell: NSTableCellView {
 
 /// The description, with a dot before an active task and markers after it.
 private final class DescriptionCell: NSTableCellView {
-	private let activeDot = NSView()
+	private let activeDot = NSBox()
 	private let annotationCount = captionLabel("", color: .secondaryLabelColor)
 	private let annotations: NSStackView
 	private let blocked = captionLabel(String(localized: "Blocked"), color: .systemRed)
@@ -556,8 +556,13 @@ private final class DescriptionCell: NSTableCellView {
 		annotations.setAccessibilityRole(.staticText)
 		super.init(frame: .zero)
 
-		activeDot.wantsLayer = true
-		activeDot.layer?.cornerRadius = activeDotSize / 2
+		// A custom box redraws its fill color for each appearance, where a layer's `CGColor` would
+		// stay fixed.
+		activeDot.borderWidth = 0
+		activeDot.boxType = .custom
+		activeDot.cornerRadius = activeDotSize / 2
+		activeDot.fillColor = .systemGreen
+		activeDot.titlePosition = .noTitle
 		activeDot.setAccessibilityElement(true)
 		activeDot.setAccessibilityLabel(String(localized: "Active"))
 		activeDot.setAccessibilityRole(.image)
@@ -581,13 +586,6 @@ private final class DescriptionCell: NSTableCellView {
 	@available(*, unavailable)
 	required init?(coder: NSCoder) {
 		fatalError("init(coder:) has not been implemented")
-	}
-
-	override func viewDidChangeEffectiveAppearance() {
-		super.viewDidChangeEffectiveAppearance()
-		effectiveAppearance.performAsCurrentDrawingAppearance {
-			activeDot.layer?.backgroundColor = NSColor.systemGreen.cgColor
-		}
 	}
 
 	func configure(_ row: TaskRow) {
