@@ -279,6 +279,17 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 		table.autosaveName = autosaveName
 		table.autosaveTableColumns = true
 		isFollowingStore = false
+		// AppKit's autosave read moves and hides columns without updating the positions the table
+		// caches for them, so the header and cells would draw the layout from before the read until a
+		// column's width next changed. Changing one now brings them up to date: wider first, since
+		// Description has a minimum width but no maximum.
+		if
+			let description = table
+				.tableColumn(withIdentifier: NSUserInterfaceItemIdentifier(descriptionIdentifier))
+		{
+			description.width += 1
+			description.width -= 1
+		}
 		updateVisibility()
 		// The table fits its columns to its width only when that width changes. Without this, the
 		// defaults, or a layout saved in a wider window, would start wider than the table. A layout

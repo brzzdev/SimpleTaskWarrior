@@ -68,8 +68,6 @@ size; convert through that.
   `task next`. Without it the Replica has the template and no instances.
 - **Stale builds:** `open -a` reuses a running copy; `launch` goes through `just run`, which quits
   the old dev build first.
-- **Known bug, #88:** after `relaunch`, the restored table usually loses its UDA columns, column
-  order and sort indicator, though `layout` shows the saved state intact.
 
 ## Human path
 
