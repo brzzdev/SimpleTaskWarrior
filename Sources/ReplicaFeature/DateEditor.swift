@@ -97,7 +97,7 @@ final class DateEditor: NSStackView, NSPopoverDelegate, NSTextFieldDelegate {
 	/// Writes the text, where it resolves; otherwise keeps it as the draft, beside its error.
 	/// Editing ends before a click on another row selects it, so the text goes to its own task.
 	func controlTextDidEndEditing(_: Notification) {
-		guard isEdited, let task, let planner else {
+		guard isEdited, let task else {
 			if !hasDraft {
 				field.stringValue = displayText(saved)
 			}
@@ -107,7 +107,7 @@ final class DateEditor: NSStackView, NSPopoverDelegate, NSTextFieldDelegate {
 		let text = field.stringValue
 		let stored: String?
 		do {
-			stored = try planner.resolve(text, for: property, of: task.properties, at: now)
+			stored = try resolve(text)
 		} catch {
 			hasDraft = true
 			return
@@ -162,21 +162,19 @@ final class DateEditor: NSStackView, NSPopoverDelegate, NSTextFieldDelegate {
 		guard let task else {
 			return
 		}
-		// Typed text the edit ending below writes, which the task won't show until the write is read
-		// back, so the picker starts from it rather than the value it replaces.
+		// Ending the edit below writes the typed text, but the task shows it only once the write is
+		// read back, so the picker starts from the typed text.
 		var start = saved
-		if isEdited, let planner {
+		if isEdited {
 			do {
-				start = try planner.resolve(field.stringValue, for: property, of: task.properties, at: now)
+				start = try resolve(field.stringValue)
 			} catch {
-				// Text that doesn't resolve stays as the draft, writing nothing.
+				// Text that doesn't resolve stays as the draft, so the saved value still stands.
 			}
 		}
 		window?.makeFirstResponder(nil)
-		var date: Date?
-		if case let .date(typed) = start.map({ UDAValue($0, as: kind) }) {
-			date = typed
-		}
+		let date: Date? =
+			if case let .date(date) = start.map({ UDAValue($0, as: kind) }) { date } else { nil }
 		let picker = CalendarPicker(date: date)
 		picking = (task.id, picker)
 		let popover = NSPopover()
@@ -218,15 +216,23 @@ final class DateEditor: NSStackView, NSPopoverDelegate, NSTextFieldDelegate {
 		}
 	}
 
+	/// What `text` stores for the attribute of the task shown, or nil where it removes it.
+	private func resolve(_ text: String) throws(DateInputError) -> String? {
+		guard let task, let planner else {
+			throw .invalid
+		}
+		return try planner.resolve(text, for: property, of: task.properties, at: now)
+	}
+
 	/// Shows what `text` resolves to, in full, or why it doesn't, or nothing for nil or empty text.
 	private func showMessage(for text: String?) {
-		guard let text, !text.isEmpty, let task, let planner else {
+		guard let text, !text.isEmpty else {
 			messageLabel.isHidden = true
 			return
 		}
 		messageLabel.isHidden = false
 		do {
-			let stored = try planner.resolve(text, for: property, of: task.properties, at: now)
+			let stored = try resolve(text)
 			messageLabel.stringValue = self.text(stored) {
 				// With seconds where there are any, so the preview is what's stored.
 				$0.formatted(date: .complete, time: $0.hasSeconds ? .standard : .shortened)

@@ -60,8 +60,8 @@ public struct DateInput: Sendable {
 extension Date {
 	/// The date as ISO 8601 local time in `timeZone`, as in `2026-09-27T14:30`, with seconds only
 	/// where they aren't zero: text to edit that reads back as the same second under any Taskrc.
-	/// The second pass through an hour the clocks go back over adds its offset, since local time
-	/// alone reads back as the first: `Z` for UTC, since TW reads `+00:00` as local time.
+	/// Local time alone reads back as the first pass through an hour the clocks go back over, so the
+	/// second pass adds its offset. UTC's is `Z`, as TW reads `+00:00` as local time.
 	public func isoLocal(in timeZone: TimeZone) -> String {
 		let clock = WallClock(now: self, timeZone: timeZone)
 		let time = clock.brokenDown(epoch)
@@ -74,9 +74,13 @@ extension Date {
 		guard offset != 0 else {
 			return text + "Z"
 		}
-		let minutes = abs(offset) / secondsPerMinute
+		let magnitude = abs(offset)
 		let sign = offset < 0 ? "-" : "+"
-		return text + sign + String(format: "%02d:%02d", minutes / 60, minutes % 60)
+		return text + sign + String(
+			format: "%02d:%02d",
+			magnitude / secondsPerHour,
+			magnitude % secondsPerHour / secondsPerMinute,
+		)
 	}
 }
 
