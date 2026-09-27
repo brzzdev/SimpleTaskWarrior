@@ -298,13 +298,7 @@ struct ReplicaFeature {
 				return edit(id, .removeAnnotation(entry: entry), &state)
 
 			case let .annotationSubmitted(id, text):
-				// Within a second of the last, it takes the next free second, as `task annotate` does.
-				// Given the same second, the planner would read a note with the same text as a retry of
-				// the last and drop it. A clock set back bumps nothing, rather than every later note.
-				var entry = now
-				if let last = state.lastAnnotationEntry, (0 ..< 1).contains(entry.timeIntervalSince(last)) {
-					entry = last.addingTimeInterval(1)
-				}
+				let entry = annotationEntry(for: id, state)
 				state.lastAnnotationEntry = entry
 				return edit(id, .addAnnotation(text, entry: entry), &state)
 
@@ -584,6 +578,21 @@ struct ReplicaFeature {
 		}
 	}
 
+	/// The entry an annotation added to the task `id` now asks for: the second after the latest of
+	/// the task's annotations and the last one added, where that's this second or later, else now.
+	///
+	/// A taken second would make the planner read a note with the same text there as a retry of it,
+	/// and drop it. Only entries less than `annotationWindow` ahead count, so a clock set back
+	/// doesn't carry every later note ahead with it.
+	private func annotationEntry(for id: Models.Task.ID, _ state: State) -> Date {
+		let second = Date(timeIntervalSince1970: now.timeIntervalSince1970.rounded(.down))
+		let annotations = state.allRows.first { $0.id == id }?.task.annotations.map(\.entry) ?? []
+		let taken = (annotations + [state.lastAnnotationEntry].compactMap(\.self)).filter {
+			$0 >= second && $0.timeIntervalSince(now) < annotationWindow
+		}
+		return taken.max().map { $0.addingTimeInterval(annotationSpacing) } ?? now
+	}
+
 	/// Writes an inspector edit to the task `id`, keeping it in the table should the edit move it out.
 	private func edit(
 		_ id: Models.Task.ID,
@@ -789,6 +798,13 @@ struct ReplicaFeature {
 		)
 	}
 }
+
+/// How far apart TW stores annotations: one to a second, keyed by it.
+private let annotationSpacing: TimeInterval = 1
+
+/// How far ahead of now an annotation's entry still moves a new one past it: far beyond any burst
+/// of notes a person can add, and short enough that a clock set back soon stops mattering.
+private let annotationWindow: TimeInterval = 60
 
 /// How many times a write is planned before a plan the engine keeps refusing as stale fails it.
 private let planAttempts = 3

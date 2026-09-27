@@ -47,9 +47,9 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 	private var udaControls: [String: UDAControl] = [:]
 	private let udaStack = verticalStack()
 
-	/// Whether the inspector is on screen, rather than collapsed.
-	private var isShown: Bool {
-		(parent as? NSSplitViewController)?.splitViewItem(for: self)?.isCollapsed == false
+	/// The inspector's pane in the window's split view.
+	private var splitViewItem: NSSplitViewItem? {
+		(parent as? NSSplitViewController)?.splitViewItem(for: self)
 	}
 
 	init(store: StoreOf<ReplicaFeature>) {
@@ -412,7 +412,9 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 			updateLists(lists)
 		}
 
-		if isAnotherTask, store.focusesDescription, isShown {
+		// New Task leaves you in the new task's description, so a collapsed inspector expands for it.
+		if isAnotherTask, store.focusesDescription, let splitViewItem {
+			splitViewItem.isCollapsed = false
 			view.window?.makeFirstResponder(descriptionField)
 		}
 	}

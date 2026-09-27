@@ -248,7 +248,13 @@ struct ReplicaFeatureTests {
 
 	@Test
 	func annotationsAddedWithinASecondTakeTheSecondsAfterIt() async throws {
-		let milk = storedTask(0, "Buy milk", workingSetID: 1)
+		// The CLI already annotated it this second.
+		let milk = storedTask(
+			0,
+			"Buy milk",
+			workingSetID: 1,
+			["annotation_\(Int(now.timeIntervalSince1970))": "Oat"],
+		)
 		let initialState = try loadedState([milk], selection: [UUID(0)])
 		let store = TestStore(initialState: initialState) {
 			ReplicaFeature()
@@ -262,14 +268,17 @@ struct ReplicaFeatureTests {
 		}
 		store.exhaustivity = .off(showSkippedAssertions: false)
 
-		await store.send(.annotationSubmitted(UUID(0), "Oat")) {
-			$0.lastAnnotationEntry = now
+		// The same text each time, which the planner would take for a retry of a note in its second.
+		for _ in 1 ... 3 {
+			await store.send(.annotationSubmitted(UUID(0), "Oat"))
 		}
-		// The same text, which the planner would otherwise take for a retry of the first.
-		await store.send(.annotationSubmitted(UUID(0), "Oat")) {
-			$0.lastAnnotationEntry = now.addingTimeInterval(1)
-			$0.queuedWrites = [.edit([UUID(0)], .addAnnotation("Oat", entry: now.addingTimeInterval(1)))]
-		}
+		// The first add, a second on, is the write in flight; the other two queue behind it.
+		#expect(
+			store.state.queuedWrites == [2, 3].map { second in
+				.edit([UUID(0)], .addAnnotation("Oat", entry: now.addingTimeInterval(second)))
+			},
+		)
+		#expect(store.state.lastAnnotationEntry == now.addingTimeInterval(3))
 		await store.skipInFlightEffects()
 	}
 
