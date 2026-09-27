@@ -96,10 +96,13 @@ final class DateEditor: NSStackView, NSPopoverDelegate, NSTextFieldDelegate {
 
 	/// Writes the text, where it resolves; otherwise keeps it as the draft, beside its error.
 	/// Editing ends before a click on another row selects it, so the text goes to its own task.
-	func controlTextDidEndEditing(_: Notification) {
+	func controlTextDidEndEditing(_ notification: Notification) {
+		// Return ends the edit but keeps the field focused, so it keeps the text to edit.
+		let movement = notification.userInfo?["NSTextMovement"] as? Int
+		let savedText = movement == NSTextMovement.return.rawValue ? editableText : displayText(saved)
 		guard isEdited, let task else {
 			if !hasDraft {
-				field.stringValue = displayText(saved)
+				field.stringValue = savedText
 			}
 			return
 		}
@@ -113,7 +116,7 @@ final class DateEditor: NSStackView, NSPopoverDelegate, NSTextFieldDelegate {
 		}
 		clearDraft()
 		// The saved value until the write is read back, so a write that fails leaves it showing.
-		field.stringValue = displayText(saved)
+		field.stringValue = savedText
 		onSubmit(task.id, .setInput(property, text: text))
 	}
 
