@@ -26,8 +26,6 @@ struct ReplicaFeature {
 		var focusesDescription = false
 		/// Set once the hint that offers Choose Taskrc… has been shown, in any window.
 		@Shared(.appStorage("hasShownTaskrcHint")) var hasShownTaskrcHint = false
-		/// The highest Urgency in the table, which scales every row's bar.
-		var highestUrgency = 0.0
 		/// The task the inspector shows: the one selected task, kept by UUID until the selection changes,
 		/// even once it leaves the table.
 		var inspectedTask: Models.Task.ID?
@@ -759,7 +757,6 @@ struct ReplicaFeature {
 				return $0.id == kept || filter.includes($0) && $0.matches(search: search)
 			},
 		)
-		state.highestUrgency = state.rows.map(\.urgency).max() ?? 0
 		let selectedCount = state.selection.count
 		state.selection.formIntersection(state.rows.ids)
 		// A selection narrowed to one task inspects it, as selecting it would. A task already
