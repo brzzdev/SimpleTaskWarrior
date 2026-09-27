@@ -15,7 +15,8 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 	private let dependencyList = verticalStack()
 	private let dependencyPopUp = NSPopUpButton(frame: .zero, pullsDown: true)
 	private let descriptionField = editableField(placeholder: String(localized: "Description"))
-	private let dueEditor = DateEditor(property: "due", kind: .date)
+	/// The built-in date attributes' editors under their headings, in the order they show.
+	private let dateEditors: [(title: String, editor: DateEditor)]
 	/// The task a field's edit belongs to, from its first keystroke, so a click on another row writes
 	/// it to the task it was typed for. Nil while no field has changed, which writes nothing.
 	private var editingTask: Models.Task.ID?
@@ -34,7 +35,6 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 	private let projectField = editableField(placeholder: String(localized: "None"))
 	private let recurrenceLabel = WrappingLabel(wrappingLabelWithString: "")
 	private let recurrenceSection = verticalStack()
-	private let scheduledEditor = DateEditor(property: "scheduled", kind: .date)
 	/// What the lists last showed, so a store change that leaves them alone, such as a search, doesn't
 	/// build their rows again.
 	private var shownLists: InspectedLists?
@@ -49,8 +49,6 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 	/// half-edited value survives them.
 	private var udaControls: [String: UDAControl] = [:]
 	private let udaStack = verticalStack()
-	private let untilEditor = DateEditor(property: "until", kind: .date)
-	private let waitEditor = DateEditor(property: "wait", kind: .date)
 
 	/// The inspector's pane in the window's split view.
 	private var splitViewItem: NSSplitViewItem? {
@@ -59,6 +57,14 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 
 	init(store: StoreOf<ReplicaFeature>) {
 		self.store = store
+		dateEditors = [
+			(String(localized: "Due"), "due"),
+			(String(localized: "Scheduled"), "scheduled"),
+			(String(localized: "Wait"), "wait"),
+			(String(localized: "Until"), "until"),
+		].map { title, property in
+			(title, Self.dateEditor(property, kind: .date, store: store))
+		}
 		super.init(nibName: nil, bundle: nil)
 	}
 
@@ -74,9 +80,6 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 		// A pull-down's first item is its title.
 		dependencyPopUp.addItem(withTitle: addDependencyTitle)
 		dependencyPopUp.menu?.delegate = self
-		for editor in [dueEditor, scheduledEditor, untilEditor, waitEditor] {
-			editor.onSubmit = { [store] in store.send(.inspectorFieldSubmitted($0, $1)) }
-		}
 		recurrenceLabel.isSelectable = true
 		blockingSection.setViews([heading(String(localized: "Blocking")), blockingList], in: .top)
 		orphanSection.setViews([heading(String(localized: "Other Attributes")), orphanList], in: .top)
@@ -88,10 +91,7 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 				section(String(localized: "Description"), [descriptionField]),
 				section(String(localized: "Project"), [projectField]),
 				section(String(localized: "Tags"), [tagList, tagField]),
-				section(String(localized: "Due"), [dueEditor]),
-				section(String(localized: "Scheduled"), [scheduledEditor]),
-				section(String(localized: "Wait"), [waitEditor]),
-				section(String(localized: "Until"), [untilEditor]),
+			] + dateEditors.map { section($0.title, [$0.editor]) } + [
 				udaStack,
 				recurrenceSection,
 				section(String(localized: "Depends On"), [dependencyList, dependencyPopUp]),
@@ -177,6 +177,15 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 		observe { [weak self] in
 			self?.updateTask()
 		}
+	}
+
+	/// An editor of the date or duration `property` that sends its edits to `store`.
+	private static func dateEditor(
+		_ property: String,
+		kind: UDAType,
+		store: StoreOf<ReplicaFeature>,
+	) -> DateEditor {
+		DateEditor(property: property, kind: kind) { store.send(.inspectorFieldSubmitted($0, $1)) }
 	}
 
 	func controlTextDidBeginEditing(_: Notification) {
@@ -406,18 +415,14 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 		show(task.project ?? "", in: projectField, isAnotherTask: isAnotherTask)
 		show("", in: tagField, isAnotherTask: isAnotherTask)
 		show("", in: annotationField, isAnotherTask: isAnotherTask)
-		let taskrc = store.runningTaskrc
-		let resolver = DateEditor.Resolver(
-			dateInput: DateInput(taskrc: taskrc, timeZone: timeZone),
-			planner: WritePlanner(taskrc: taskrc, timeZone: timeZone),
-		)
-		for editor in [dueEditor, scheduledEditor, untilEditor, waitEditor] {
-			editor.show(task, isAnotherTask: isAnotherTask, resolver: resolver)
+		let planner = WritePlanner(taskrc: store.runningTaskrc, timeZone: timeZone)
+		for (_, editor) in dateEditors {
+			editor.show(task, isAnotherTask: isAnotherTask, planner: planner)
 		}
 		for (name, uda) in udaControls {
 			switch uda.control {
 			case let editor as DateEditor:
-				editor.show(task, isAnotherTask: isAnotherTask, resolver: resolver)
+				editor.show(task, isAnotherTask: isAnotherTask, planner: planner)
 
 			case let field as NSTextField:
 				show(task.properties[name] ?? "", in: field, isAnotherTask: isAnotherTask)
@@ -468,9 +473,7 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 			}
 			let control: NSView
 			if column.type == .date || column.type == .duration {
-				let editor = DateEditor(property: column.name, kind: column.type)
-				editor.onSubmit = { [store] in store.send(.inspectorFieldSubmitted($0, $1)) }
-				control = editor
+				control = Self.dateEditor(column.name, kind: column.type, store: store)
 			} else if column.values.isEmpty {
 				let field = editableField(placeholder: String(localized: "None"))
 				field.delegate = self

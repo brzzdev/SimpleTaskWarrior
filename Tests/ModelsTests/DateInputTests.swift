@@ -94,13 +94,11 @@ struct DateInputTests {
 	/// back as the same second.
 	@Test(arguments: [(1_790_519_400, "2026-09-28T01:00"), (1_790_519_415, "2026-09-28T01:00:15")])
 	func isoLocalReadsBackAsTheSameSecond(epoch: TimeInterval, text: String) throws {
-		let dateInput = try DateInput(
-			taskrc: taskrc("dateformat=m/d/Y"),
-			timeZone: #require(TimeZone(identifier: "Australia/Lord_Howe")),
-		)
+		let timeZone = try #require(TimeZone(identifier: "Australia/Lord_Howe"))
+		let dateInput = DateInput(taskrc: taskrc("dateformat=m/d/Y"), timeZone: timeZone)
 		let date = Date(timeIntervalSince1970: epoch)
 
-		#expect(dateInput.isoLocal(date) == text)
+		#expect(date.isoLocal(in: timeZone) == text)
 		#expect(try dateInput.date(text, at: .now) == date)
 	}
 

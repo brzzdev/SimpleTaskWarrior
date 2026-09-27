@@ -57,17 +57,14 @@ public struct WritePlanner: Sendable {
 			if let tag = edit.tag, reservedTags.contains(tag) {
 				throw .reservedTag(tag)
 			}
-			if case let .setInput(property, text) = edit {
-				return try plan(ids, tasks: tasks, at: epoch) { draft throws(WritePlanError) in
-					let value = try resolve(text, for: property, at: now) { draft.read($0) }
-					draft.set(property, value)
-				}
+			let apply = { (draft: inout Draft) throws(WritePlanError) in
+				try draft.apply(edit, at: now, resolving: self)
 			}
 			guard case let .addDependency(dependency) = edit else {
-				return try plan(ids, tasks: tasks, at: epoch) { $0.apply(edit) }
+				return try plan(ids, tasks: tasks, at: epoch, change: apply)
 			}
 			let searched = try refuseCycle(dependingOn: dependency, from: ids, tasks: tasks)
-			var plan = try plan(ids, tasks: tasks, at: epoch) { $0.apply(edit) }
+			var plan = try plan(ids, tasks: tasks, at: epoch, change: apply)
 			guard !plan.operations.isEmpty else {
 				return plan
 			}
@@ -94,8 +91,32 @@ public struct WritePlanner: Sendable {
 		for property: String,
 		of properties: [String: String],
 		at now: Date,
-	) throws(WritePlanError) -> String? {
+	) throws(DateInputError) -> String? {
 		try resolve(text, for: property, at: now) { properties[$0] }
+	}
+
+	/// The value `text` stores for `property`, a date or duration, resolved at `now` against the
+	/// attributes it refers to, each of which it `read`s. Empty text removes the attribute.
+	fileprivate func resolve(
+		_ text: String,
+		for property: String,
+		at now: Date,
+		reading read: (String) -> String?,
+	) throws(DateInputError) -> String? {
+		guard !text.isEmpty else {
+			return nil
+		}
+		let references = { reference($0, reading: read) }
+		switch attributeType(property) {
+		case .date:
+			return try UDAValue.date(dateInput.date(text, at: now, references: references)).stored
+
+		case .duration:
+			return try UDAValue.duration(dateInput.duration(text, at: now, references: references)).stored
+
+		case nil, .numeric, .string, .uuid:
+			throw .invalid
+		}
 	}
 
 	/// What `task add <description>` writes: `Task::validate`'s stamps and defaults, after the
@@ -141,24 +162,21 @@ public struct WritePlanner: Sendable {
 				continue
 			}
 			let properties = draft.properties
-			let references = { reference($0) { properties[$0] } }
-			let value: UDAValue? =
+			let value: String? =
 				switch taskrc.udaTypes[name] {
-				case .date:
-					(try? dateInput.date(text, at: now, references: references)).map(UDAValue.date)
-
-				case .duration:
-					(try? dateInput.duration(text, at: now, references: references))
-						.map(UDAValue.duration)
-
-				case nil, .numeric, .string, .uuid:
-					.string(text)
+				case .date, .duration: try? resolve(text, for: name, at: now) { properties[$0] }
+				case nil, .numeric, .string, .uuid: text
 				}
 			guard let value else {
 				continue
 			}
-			draft.set(name, value.stored)
+			draft.set(name, value)
 		}
+	}
+
+	/// The type TW stores `attribute` as: a date for the built-in date attributes, else its UDA type.
+	private func attributeType(_ attribute: String) -> UDAType? {
+		dateAttributes.contains(attribute) ? .date : taskrc.udaTypes[attribute]
 	}
 
 	/// The tasks `properties` depend on, from its `dep_*` keys.
@@ -198,7 +216,7 @@ public struct WritePlanner: Sendable {
 		_ name: String,
 		reading read: (String) -> String?,
 	) -> DateInput.Reference? {
-		guard let type = dateAttributes.contains(name) ? .date : taskrc.udaTypes[name] else {
+		guard let type = attributeType(name) else {
 			return nil
 		}
 		guard let value = read(name) else {
@@ -213,34 +231,6 @@ public struct WritePlanner: Sendable {
 
 		case .numeric, .string, .uuid:
 			return .text(value)
-		}
-	}
-
-	/// The value `text` stores for `property`, a date or duration, resolved at `now` against the
-	/// attributes it refers to, each of which it `read`s. Empty text removes the attribute.
-	private func resolve(
-		_ text: String,
-		for property: String,
-		at now: Date,
-		reading read: (String) -> String?,
-	) throws(WritePlanError) -> String? {
-		guard !text.isEmpty else {
-			return nil
-		}
-		let references = { reference($0, reading: read) }
-		do throws(DateInputError) {
-			switch dateAttributes.contains(property) ? .date : taskrc.udaTypes[property] {
-			case .date:
-				return try String(dateInput.date(text, at: now, references: references).epoch)
-
-			case .duration:
-				return try dateInput.duration(text, at: now, references: references).iso
-
-			case nil, .numeric, .string, .uuid:
-				throw DateInputError.invalid
-			}
-		} catch {
-			throw .invalidInput(property: property, error)
 		}
 	}
 
@@ -496,7 +486,12 @@ private struct Draft {
 		original = properties
 	}
 
-	mutating func apply(_ edit: TaskEdit) {
+	/// Applies `edit`, resolving input with `planner` at `now`.
+	mutating func apply(
+		_ edit: TaskEdit,
+		at now: Date,
+		resolving planner: WritePlanner,
+	) throws(WritePlanError) {
 		switch edit {
 		case let .addAnnotation(description, entry):
 			var second = entry.epoch
@@ -527,8 +522,13 @@ private struct Draft {
 		case let .set(property, value):
 			set(property, value?.stored)
 
-		case .setInput:
-			preconditionFailure("The planner resolves input, which takes the Taskrc")
+		case let .setInput(property, text):
+			do throws(DateInputError) {
+				let value = try planner.resolve(text, for: property, at: now) { read($0) }
+				set(property, value)
+			} catch {
+				throw .invalidInput(property: property, error)
+			}
 		}
 	}
 

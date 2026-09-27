@@ -5,45 +5,40 @@ import Models
 import Taskrc
 
 /// Edits one date or duration attribute of the inspected task, in Taskwarrior's own syntax.
-/// Unfocused,
-/// a date shows in the Mac's locale format; focused, as ISO local time, which reads back as the
-/// same
-/// second. Beneath it, what the text resolves to as you type, or why it doesn't.
+/// Unfocused, a date shows in the Mac's locale format; focused, as ISO local time, which reads back
+/// as the same second. Beneath it, what the text resolves to as you type, or why it doesn't.
 ///
 /// Text that doesn't resolve stays, with its error, writing nothing, until Escape restores the
 /// saved
 /// value or another task drops it. A date also has a calendar popover beside it.
 final class DateEditor: NSStackView, NSPopoverDelegate, NSTextFieldDelegate {
-	/// What the editor resolves text with, for the Taskrc the window runs on.
-	struct Resolver {
-		var dateInput: DateInput
-		var planner: WritePlanner
-	}
-
-	/// Sends an edit of the attribute to the task it was made for.
-	var onSubmit: @MainActor (Models.Task.ID, TaskEdit) -> Void = { _, _ in }
-
-	/// Text that didn't resolve, kept after its edit ended.
-	private var draft: String?
-	/// The task an edit belongs to, from its first keystroke, so a click on another row writes it to
-	/// the task it was typed for. Nil while the text is unchanged, which writes nothing.
-	private var editingTask: Models.Task.ID?
 	private let field = FocusField(string: "")
+	/// Whether the field holds text that didn't resolve, kept after its edit ended.
+	private var hasDraft = false
+	/// Whether you've typed since the field last showed the saved value. Untouched text writes
+	/// nothing.
+	private var isEdited = false
 	private let kind: UDAType
 	private let messageLabel = NSTextField(wrappingLabelWithString: "")
 	@Dependency(\.date.now) private var now
+	/// Sends an edit of the attribute to the task it was made for.
+	private let onSubmit: @MainActor (Models.Task.ID, TaskEdit) -> Void
 	/// The task the popover was opened for, and the date it picks.
 	private var picking: (task: Models.Task.ID, picker: CalendarPicker)?
+	/// Resolves text for the Taskrc the window runs on.
+	private var planner: WritePlanner?
 	private let property: String
-	private var resolver: Resolver?
-	/// The value the field last showed, so a store change that leaves it alone keeps the field as it
-	/// is.
-	private var shownValue: String?
 	private var task: Models.Task?
+	@Dependency(\.timeZone) private var timeZone
 
 	/// An editor of `property`, a date, or a duration where `kind` says so.
-	init(property: String, kind: UDAType) {
+	init(
+		property: String,
+		kind: UDAType,
+		onSubmit: @escaping @MainActor (Models.Task.ID, TaskEdit) -> Void,
+	) {
 		self.kind = kind
+		self.onSubmit = onSubmit
 		self.property = property
 		super.init(frame: .zero)
 		field.delegate = self
@@ -89,8 +84,8 @@ final class DateEditor: NSStackView, NSPopoverDelegate, NSTextFieldDelegate {
 		guard selector == #selector(cancelOperation(_:)) else {
 			return false
 		}
-		draft = nil
-		editingTask = nil
+		hasDraft = false
+		isEdited = false
 		textView.string = editableText
 		textView.selectAll(nil)
 		showMessage(for: nil)
@@ -98,31 +93,34 @@ final class DateEditor: NSStackView, NSPopoverDelegate, NSTextFieldDelegate {
 	}
 
 	func controlTextDidChange(_: Notification) {
-		editingTask = editingTask ?? task?.id
+		isEdited = true
 		showMessage(for: field.stringValue)
 	}
 
-	/// Writes the text to the task it was typed for, where it resolves; otherwise keeps it as the
-	/// draft, beside its error.
+	/// Writes the text, where it resolves; otherwise keeps it as the draft, beside its error. Ending
+	/// an
+	/// edit precedes a click on another row selecting it, so the text goes to the task it was typed
+	/// for.
 	func controlTextDidEndEditing(_: Notification) {
-		let id = editingTask
-		editingTask = nil
-		guard let id, let task, task.id == id, let resolver else {
-			field.stringValue = draft ?? displayText
+		guard isEdited, let task, let planner else {
+			if !hasDraft {
+				field.stringValue = displayText(saved)
+			}
 			return
 		}
+		isEdited = false
 		let text = field.stringValue
 		let stored: String?
 		do {
-			stored = try resolver.planner.resolve(text, for: property, of: task.properties, at: now)
+			stored = try planner.resolve(text, for: property, of: task.properties, at: now)
 		} catch {
-			draft = text
+			hasDraft = true
 			return
 		}
-		draft = nil
+		hasDraft = false
 		showMessage(for: nil)
 		field.stringValue = displayText(stored)
-		onSubmit(id, .setInput(property, text))
+		onSubmit(task.id, .setInput(property, text))
 	}
 
 	func popoverDidClose(_: Notification) {
@@ -131,7 +129,7 @@ final class DateEditor: NSStackView, NSPopoverDelegate, NSTextFieldDelegate {
 			return
 		}
 		// The pick replaces any draft, as typing it would.
-		draft = nil
+		hasDraft = false
 		showMessage(for: nil)
 		field.stringValue = displayText(UDAValue.date(date).stored)
 		onSubmit(picking.task, .set(property, .date(date)))
@@ -139,32 +137,31 @@ final class DateEditor: NSStackView, NSPopoverDelegate, NSTextFieldDelegate {
 
 	/// Shows `task`'s value, unless you're editing it or a draft holds the field, so the CLI changing
 	/// it doesn't interrupt you. Another task drops the edit and the draft, keeping the cursor here.
-	func show(_ task: Models.Task, isAnotherTask: Bool, resolver: Resolver) {
-		self.resolver = resolver
+	func show(_ task: Models.Task, isAnotherTask: Bool, planner: WritePlanner) {
+		let previous = saved
+		self.planner = planner
 		self.task = task
-		let value = task.properties[property]
-		defer { shownValue = value }
 		if isAnotherTask {
-			draft = nil
-			editingTask = nil
+			hasDraft = false
+			isEdited = false
 			showMessage(for: nil)
 			guard field.currentEditor() != nil else {
-				field.stringValue = displayText
+				field.stringValue = displayText(saved)
 				return
 			}
 			field.abortEditing()
 			window?.makeFirstResponder(field)
 			return
 		}
-		guard draft == nil, value != shownValue else {
+		guard !hasDraft, saved != previous else {
 			return
 		}
 		guard let editor = field.currentEditor() else {
-			field.stringValue = displayText
+			field.stringValue = displayText(saved)
 			return
 		}
 		// Focused but untouched, as after Return commits, so it follows the value it just wrote.
-		if editingTask == nil {
+		if !isEdited {
 			editor.string = editableText
 		}
 	}
@@ -176,7 +173,11 @@ final class DateEditor: NSStackView, NSPopoverDelegate, NSTextFieldDelegate {
 		guard let task else {
 			return
 		}
-		let picker = CalendarPicker(date: value.flatMap(\.date))
+		var date: Date?
+		if case let .date(saved) = saved.map({ UDAValue($0, as: kind) }) {
+			date = saved
+		}
+		let picker = CalendarPicker(date: date)
 		picking = (task.id, picker)
 		let popover = NSPopover()
 		popover.behavior = .transient
@@ -187,35 +188,10 @@ final class DateEditor: NSStackView, NSPopoverDelegate, NSTextFieldDelegate {
 
 	/// Shows the saved text to edit, unless a draft holds the field.
 	private func fieldWillFocus() {
-		guard draft == nil else {
+		guard !hasDraft else {
 			return
 		}
 		field.stringValue = editableText
-	}
-
-	/// Shows what `text` resolves to, or why it doesn't, or nothing for nil or empty text.
-	private func showMessage(for text: String?) {
-		guard let text, !text.isEmpty, let task, let resolver else {
-			messageLabel.isHidden = true
-			return
-		}
-		messageLabel.isHidden = false
-		do {
-			let stored = try resolver.planner.resolve(
-				text,
-				for: property,
-				of: task.properties,
-				at: now,
-			)
-			messageLabel.stringValue = stored.map { UDAValue($0, as: kind) }?.preview ?? ""
-			messageLabel.textColor = .secondaryLabelColor
-		} catch let .invalidInput(_, error) {
-			messageLabel.stringValue = message(for: error)
-			messageLabel.textColor = .systemRed
-		} catch {
-			messageLabel.stringValue = message(for: .invalid)
-			messageLabel.textColor = .systemRed
-		}
 	}
 
 	private func message(for error: DateInputError) -> String {
@@ -234,65 +210,58 @@ final class DateEditor: NSStackView, NSPopoverDelegate, NSTextFieldDelegate {
 			String(localized: "Dates run from 1980 to 9999")
 		}
 	}
+
+	/// Shows what `text` resolves to, in full, or why it doesn't, or nothing for nil or empty text.
+	private func showMessage(for text: String?) {
+		guard let text, !text.isEmpty, let task, let planner else {
+			messageLabel.isHidden = true
+			return
+		}
+		messageLabel.isHidden = false
+		do {
+			let stored = try planner.resolve(text, for: property, of: task.properties, at: now)
+			messageLabel.stringValue = self.text(stored) {
+				$0.formatted(date: .complete, time: .shortened)
+			}
+			messageLabel.textColor = .secondaryLabelColor
+		} catch {
+			messageLabel.stringValue = message(for: error)
+			messageLabel.textColor = .systemRed
+		}
+	}
 }
 
 extension DateEditor {
-	/// The saved value as it shows unfocused.
-	private var displayText: String {
-		displayText(task?.properties[property])
-	}
-
 	/// The saved value as ISO local time, or a duration as it displays, to edit.
 	private var editableText: String {
-		switch value {
-		case let .date(date): resolver?.dateInput.isoLocal(date) ?? ""
+		text(saved) { [timeZone] in $0.isoLocal(in: timeZone) }
+	}
+
+	private var saved: String? {
+		task?.properties[property]
+	}
+
+	/// `stored` as it shows unfocused: a date in the Mac's locale format, without a time at midnight.
+	private func displayText(_ stored: String?) -> String {
+		text(stored) { $0.formatted(date: .abbreviated, time: $0.isMidnight ? .omitted : .shortened) }
+	}
+
+	/// `stored` as text, a date as `format` writes it and a duration in its largest exact unit. A
+	/// value that doesn't read as the attribute's type shows as stored.
+	private func text(_ stored: String?, date format: (Date) -> String) -> String {
+		switch stored.map({ UDAValue($0, as: kind) }) {
+		case let .date(date): format(date)
 		case let .duration(duration): duration.description
 		case let .string(text): text
 		case nil, .numeric, .uuid: ""
 		}
 	}
-
-	private var value: UDAValue? {
-		task?.properties[property].map { UDAValue($0, as: kind) }
-	}
-
-	/// `stored` as it shows unfocused: a date in the Mac's locale format, without a time at midnight,
-	/// and a duration in its largest exact unit.
-	private func displayText(_ stored: String?) -> String {
-		switch stored.map({ UDAValue($0, as: kind) }) {
-		case let .date(date):
-			let isMidnight = Calendar.current.startOfDay(for: date) == date
-			return date.formatted(date: .abbreviated, time: isMidnight ? .omitted : .shortened)
-
-		case let .duration(duration):
-			return duration.description
-
-		case let .string(text):
-			return text
-
-		case nil, .numeric, .uuid:
-			return ""
-		}
-	}
 }
 
-extension UDAValue {
-	fileprivate var date: Date? {
-		guard case let .date(date) = self else {
-			return nil
-		}
-		return date
-	}
-
-	/// The value in full, as the editor previews it.
-	fileprivate var preview: String {
-		switch self {
-		case let .date(date): date.formatted(date: .complete, time: .shortened)
-		case let .duration(duration): duration.description
-		case let .numeric(number): number.formatted()
-		case let .string(text): text
-		case let .uuid(uuid): uuid.uuidString.lowercased()
-		}
+extension Date {
+	/// Whether the date is the start of its day, as a date without a time resolves.
+	fileprivate var isMidnight: Bool {
+		Calendar.current.startOfDay(for: self) == self
 	}
 }
 
@@ -327,7 +296,7 @@ private final class CalendarPicker: NSViewController {
 		dayPicker.datePickerElements = .yearMonthDay
 		dayPicker.datePickerStyle = .clockAndCalendar
 		dayPicker.dateValue = date
-		timeCheckbox.state = Calendar.current.startOfDay(for: date) == date ? .off : .on
+		timeCheckbox.state = date.isMidnight ? .off : .on
 		timePicker.datePickerElements = .hourMinute
 		timePicker.datePickerStyle = .textFieldAndStepper
 		timePicker.dateValue = date
