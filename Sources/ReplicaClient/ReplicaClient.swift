@@ -10,14 +10,24 @@ import Synchronization
 public struct ReplicaClient: Sendable {
 	/// Commits `plan` as one Undo point to the Replica a `tasks` stream has open in `directory`,
 	/// unless a value it read has changed since, then reads every task again. That read doesn't
-	/// reach the stream, which yields only what changes after it.
-	public var apply: @Sendable (_ plan: WritePlan, _ directory: URL) async throws -> ApplyOutcome
+	/// reach the stream, which yields only what changes after it. The window can undo the Undo
+	/// point by `name`, which the Edit menu shows.
+	public var apply: @Sendable (_ plan: WritePlan, _ name: String, _ directory: URL) async throws
+		-> ApplyOutcome
+
+	/// Re-applies the Undo point the window last undid, as a new one it can undo again, provided
+	/// nothing has written since. Reads every task again, as `apply` does.
+	public var redo: @Sendable (_ directory: URL) async throws -> UndoOutcome
 
 	/// Opens the Replica in `directory` for one window, yielding its tasks at once and again
 	/// whenever anything, the CLI included, commits to it. Holds the directory's security scope
 	/// while it reads. Ending iteration closes the Replica once any open or read in flight returns.
 	public var tasks: @Sendable (_ directory: URL)
 		-> AsyncThrowingStream<TaskSnapshot, any Error> = { _ in .finished() }
+
+	/// Reverts the window's newest Undo point, provided it's still the Replica's newest, so a CLI
+	/// change is never undone on the CLI's behalf. Reads every task again, as `apply` does.
+	public var undo: @Sendable (_ directory: URL) async throws -> UndoOutcome
 
 	/// Opens the Replica in `directory` and closes it again, so Open Replica… can refuse a folder
 	/// before a window exists.
@@ -41,10 +51,37 @@ public struct TaskSnapshot: Equatable, Sendable {
 	/// Counts the Replica's reads from 0. `apply` and the `tasks` stream each read, and deliver
 	/// separately, so a read can arrive after a later one.
 	public var readIndex: Int
+	/// The name of the Undo point `redo` would re-apply, as of the read.
+	public var redoName: String?
 	public var tasks: [StoredTask]
+	/// The name of the window's Undo point `undo` would revert, as of the read. Nil where the
+	/// Replica's newest isn't the window's, such as after a CLI change.
+	public var undoName: String?
 
-	public init(readIndex: Int, tasks: [StoredTask]) {
+	public init(
+		readIndex: Int,
+		redoName: String? = nil,
+		tasks: [StoredTask],
+		undoName: String? = nil,
+	) {
 		self.readIndex = readIndex
+		self.redoName = redoName
+		self.tasks = tasks
+		self.undoName = undoName
+	}
+}
+
+public struct UndoOutcome: Equatable, Sendable {
+	/// False where the Undo point wasn't reverted or re-applied, or an error followed it.
+	public var isApplied: Bool
+	/// Every task, read after the change, or in place of it.
+	public var snapshot: TaskSnapshot
+	/// The tasks the Undo point changed.
+	public var tasks: Set<Models.Task.ID>
+
+	public init(isApplied: Bool, snapshot: TaskSnapshot, tasks: Set<Models.Task.ID>) {
+		self.isApplied = isApplied
+		self.snapshot = snapshot
 		self.tasks = tasks
 	}
 }
@@ -81,11 +118,11 @@ private let pollInterval = Duration.milliseconds(500)
 
 extension ReplicaClient: DependencyKey {
 	public static let liveValue = Self(
-		apply: { plan, directory in
-			guard let replica = openReplicas.withLock({ $0[directory] }) else {
-				throw ReplicaError.notOpen
-			}
-			return try await replica.apply(plan)
+		apply: { plan, name, directory in
+			try await openReplica(directory).apply(plan, name: name)
+		},
+		redo: { directory in
+			try await openReplica(directory).redo()
 		},
 		tasks: { directory in
 			AsyncThrowingStream { continuation in
@@ -138,12 +175,23 @@ extension ReplicaClient: DependencyKey {
 				continuation.onTermination = { _ in polling.cancel() }
 			}
 		},
+		undo: { directory in
+			try await openReplica(directory).undo()
+		},
 		validate: { directory in
 			_ = try await Replica.open(directory: directory)
 		},
 	)
 
 	public static let testValue = Self()
+}
+
+/// The Replica a window's `tasks` stream has open in `directory`.
+private func openReplica(_ directory: URL) throws(ReplicaError) -> Replica {
+	guard let replica = openReplicas.withLock({ $0[directory] }) else {
+		throw .notOpen
+	}
+	return replica
 }
 
 extension DependencyValues {
@@ -157,11 +205,28 @@ extension DependencyValues {
 /// actor runs on its own serial queue rather than the cooperative pool, and its methods are
 /// synchronous, so none of them interleave. The engine handle never leaves it.
 actor Replica {
+	/// One of the window's own Undo points, as it committed it.
+	private struct UndoPoint {
+		var name: String
+		/// Exactly what the engine committed, its leading Undo point and timestamps included, which
+		/// the Replica's newest undo operations must equal for it to be undone.
+		var operations: [UndoOperation]
+
+		var tasks: Set<Models.Task.ID> {
+			Set(operations.compactMap { UUID(uuidString: $0.uuid ?? "") })
+		}
+	}
+
 	private let engine: EngineHandle
 	private let queue: DispatchSerialQueue
 	private var readCount = 0
 	/// The `data_version` the last tasks were read at, nil before the first read.
 	private var readVersion: Int64?
+	/// The Undo point last undone, while the `data_version` read just after the undo holds: any
+	/// write since, the window's own included, moves it.
+	private var redoPoint: (point: UndoPoint, dataVersion: Int64)?
+	/// The window's Undo points, newest last, for the window's lifetime.
+	private var undoPoints: [UndoPoint] = []
 
 	nonisolated var unownedExecutor: UnownedSerialExecutor {
 		queue.asUnownedSerialExecutor()
@@ -201,12 +266,64 @@ actor Replica {
 	}
 
 	/// Commits `plan` unless the engine refuses it as stale, then reads every task again.
-	func apply(_ plan: WritePlan) throws -> ApplyOutcome {
+	func apply(_ plan: WritePlan, name: String) throws -> ApplyOutcome {
 		let outcome = try engine.apply(
 			operations: plan.operations.map(PlannedOperation.init),
 			expectations: plan.expectations.map(Expectation.init),
 		)
-		return try ApplyOutcome(isCommitted: outcome == .committed, snapshot: readTasks())
+		guard case let .committed(operations) = outcome else {
+			return try ApplyOutcome(isCommitted: false, snapshot: readTasks())
+		}
+		// A plan that changes nothing commits nothing, so there's nothing to undo.
+		if !operations.isEmpty {
+			undoPoints.append(UndoPoint(name: name, operations: operations))
+		}
+		return try ApplyOutcome(isCommitted: true, snapshot: readTasks())
+	}
+
+	/// Re-applies the Undo point last undone, through the same writes a plan makes, where nothing
+	/// has written since. A CLI write landing between the check and the commit still gets through.
+	func redo() throws -> UndoOutcome {
+		guard let redoPoint, try engine.dataVersion() == redoPoint.dataVersion else {
+			return try UndoOutcome(isApplied: false, snapshot: readTasks(), tasks: [])
+		}
+		let point = redoPoint.point
+		let outcome = try engine.apply(
+			operations: point.operations.compactMap(PlannedOperation.init),
+			expectations: [],
+		)
+		guard case let .committed(operations) = outcome, !operations.isEmpty else {
+			return try UndoOutcome(isApplied: false, snapshot: readTasks(), tasks: [])
+		}
+		undoPoints.append(UndoPoint(name: point.name, operations: operations))
+		return try UndoOutcome(isApplied: true, snapshot: readTasks(), tasks: point.tasks)
+	}
+
+	/// Reverts the newest Undo point, which the engine does only while it's the Replica's newest.
+	/// An error can follow a reversal that landed, so every outcome reads the tasks again, which
+	/// checks the Undo points afresh.
+	func undo() throws -> UndoOutcome {
+		guard let point = undoPoints.last else {
+			return try UndoOutcome(isApplied: false, snapshot: readTasks(), tasks: [])
+		}
+		let outcome: Engine.UndoOutcome
+		do {
+			outcome = try engine.commitReversedOperations(operations: point.operations)
+		} catch {
+			return try UndoOutcome(isApplied: false, snapshot: readTasks(), tasks: [])
+		}
+		switch outcome {
+		case let .applied(error):
+			undoPoints.removeLast()
+			return try UndoOutcome(
+				isApplied: error == nil,
+				snapshot: readTasks(redoing: error == nil ? point : nil),
+				tasks: point.tasks,
+			)
+
+		case .notApplied:
+			return try UndoOutcome(isApplied: false, snapshot: readTasks(), tasks: [])
+		}
 	}
 
 	/// Yields every task when anything has committed since the last read.
@@ -218,10 +335,18 @@ actor Replica {
 		try continuation.yield(readTasks())
 	}
 
-	/// Every task, recording the `data_version` they were read at.
-	private func readTasks() throws -> TaskSnapshot {
+	/// Every task, recording the `data_version` they were read at, and which Undo points still
+	/// apply. `redoing` is the point an undo just reverted, which can be re-applied until anything
+	/// writes after this read.
+	private func readTasks(redoing: UndoPoint? = nil) throws -> TaskSnapshot {
 		let snapshot = try engine.snapshot()
 		readVersion = snapshot.dataVersion
+		if let redoing {
+			redoPoint = (redoing, snapshot.dataVersion)
+		} else if redoPoint?.dataVersion != snapshot.dataVersion {
+			redoPoint = nil
+		}
+		let undoName = try reconcileUndoPoints()
 		let workingSetIDs = Dictionary(
 			snapshot.workingSet.map { ($0.uuid, Int($0.id)) },
 			uniquingKeysWith: { first, _ in first },
@@ -236,7 +361,30 @@ actor Replica {
 		defer {
 			readCount += 1
 		}
-		return TaskSnapshot(readIndex: readCount, tasks: tasks)
+		return TaskSnapshot(
+			readIndex: readCount,
+			redoName: redoPoint?.point.name,
+			tasks: tasks,
+			undoName: undoName,
+		)
+	}
+
+	/// Drops the Undo points the CLI undid, and names the one `undo` would revert, if any. The log
+	/// only grows or loses its newest Undo point, so points newer than the one that's the log's
+	/// newest were undone by `task undo`. Where none is, they're only covered by newer writes, and
+	/// revive should those be undone, so they're kept.
+	private func reconcileUndoPoints() throws -> String? {
+		// Reading the log costs a pass over every unsynced operation, which a window that has
+		// written nothing can skip.
+		guard !undoPoints.isEmpty else {
+			return nil
+		}
+		let newest = try engine.getUndoOperations()
+		guard let index = undoPoints.lastIndex(where: { $0.operations == newest }) else {
+			return nil
+		}
+		undoPoints.removeSubrange((index + 1)...)
+		return undoPoints[index].name
 	}
 }
 
@@ -247,6 +395,16 @@ extension Engine.Status {
 		case .deleted: self = .deleted
 		case .pending: self = .pending
 		case .recurring: self = .recurring
+		}
+	}
+}
+
+extension UndoOperation {
+	/// The task the operation changes, nil for an Undo point.
+	fileprivate var uuid: String? {
+		switch self {
+		case let .create(uuid), let .delete(uuid, _), let .update(uuid, _, _, _, _): uuid
+		case .undoPoint: nil
 		}
 	}
 }
@@ -262,6 +420,21 @@ extension Expectation {
 }
 
 extension PlannedOperation {
+	/// The write that makes `operation` again, nil for an Undo point. The app never deletes a task
+	/// outright, so it never commits a delete to redo.
+	fileprivate init?(_ operation: UndoOperation) {
+		switch operation {
+		case let .create(uuid):
+			self = .create(uuid: uuid)
+
+		case .delete, .undoPoint:
+			return nil
+
+		case let .update(uuid, property, _, value, _):
+			self = .setValue(uuid: uuid, property: property, value: value)
+		}
+	}
+
 	fileprivate init(_ operation: WritePlan.Operation) {
 		switch operation {
 		case let .create(uuid):

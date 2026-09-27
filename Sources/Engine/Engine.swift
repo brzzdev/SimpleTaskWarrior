@@ -1027,7 +1027,12 @@ public func FfiConverterTypeWorkingSetEntry_lower(_ value: WorkingSetEntry) -> R
 
 public enum ApplyOutcome: Equatable, Hashable {
     
-    case committed
+    /**
+     * `operations` are exactly what was committed, its leading Undo point included, for
+     * `commit_reversed_operations` to undo. They're empty where the batch changed nothing.
+     */
+    case committed(operations: [UndoOperation]
+    )
     /**
      * Nothing was committed, because these tasks no longer match the expectations, or already
      * exist where the batch creates them.
@@ -1055,7 +1060,8 @@ public struct FfiConverterTypeApplyOutcome: FfiConverterRustBuffer {
         let variant: Int32 = try readInt(&buf)
         switch variant {
         
-        case 1: return .committed
+        case 1: return .committed(operations: try FfiConverterSequenceTypeUndoOperation.read(from: &buf)
+        )
         
         case 2: return .conflict(uuids: try FfiConverterSequenceString.read(from: &buf)
         )
@@ -1068,9 +1074,10 @@ public struct FfiConverterTypeApplyOutcome: FfiConverterRustBuffer {
         switch value {
         
         
-        case .committed:
+        case let .committed(operations):
             writeInt(&buf, Int32(1))
-        
+            FfiConverterSequenceTypeUndoOperation.write(operations, into: &buf)
+            
         
         case let .conflict(uuids):
             writeInt(&buf, Int32(2))
