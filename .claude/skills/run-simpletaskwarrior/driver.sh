@@ -12,13 +12,23 @@ window_x=100
 window_y=100
 header_y=$((window_y + 66))
 
-# se SCRIPT [ARG...]: runs SCRIPT against the app, frontmost. Data goes in as ARGs, which SCRIPT
-# reads as `item n of argv`, so a quote or backslash in a path can't change the script.
+# The dev build's PID, by executable path: `just run` leaves an installed release copy running
+# under the same process name.
+dev_pid() {
+	pgrep -xf "$app/Contents/MacOS/SimpleTaskWarrior"
+}
+
+# se SCRIPT [ARG...]: runs SCRIPT against the dev build, frontmost. Data goes in as ARGs, which
+# SCRIPT reads as `item n of argv`, so a quote or backslash in a path can't change the script.
 se() {
-	local script=$1
+	local script=$1 pid
 	shift
+	if ! pid="$(dev_pid)"; then
+		echo "the dev build isn't running; run \`driver.sh launch\`" >&2
+		exit 1
+	fi
 	osascript -e "on run argv" \
-		-e "tell application \"System Events\" to tell process \"SimpleTaskWarrior\"" \
+		-e "tell application \"System Events\" to tell (first process whose unix id is $pid)" \
 		-e "set frontmost to true" -e "$script" -e "end tell" -e "end run" "$@"
 }
 
@@ -137,8 +147,7 @@ relaunch)
 	# ⌘Q, then launch with no file, so only window restoration can bring windows back.
 	se 'keystroke "q" using command down' >/dev/null
 	sleep 3
-	# The dev build's executable only, so an installed copy left running doesn't count.
-	if pgrep -xf "$app/Contents/MacOS/SimpleTaskWarrior" >/dev/null; then
+	if dev_pid >/dev/null; then
 		echo "still running after ⌘Q" >&2
 		exit 1
 	fi
