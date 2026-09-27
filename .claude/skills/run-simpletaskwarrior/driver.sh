@@ -33,12 +33,13 @@ mouse() {
 case "${1:-help}" in
 fixture)
 	# fixture DIR: a Replica and a Taskrc with UDAs, made by the real `task`.
-	# Fresh only: rerunning `task add` into an existing Replica duplicates every task.
-	if [ -n "$(find "$2" -mindepth 1 -print -quit 2>/dev/null)" ]; then
+	# Fresh only: rerunning `task add` into an existing Replica duplicates every task. Checked on
+	# the resolved path, since `find` doesn't descend into a symlink named as its start.
+	dir="$(mkdir -p "$2" && cd "$2" && pwd -P)"
+	if [ -n "$(find "$dir" -mindepth 1 -print -quit)" ]; then
 		echo "fixture: $2 isn't empty" >&2
 		exit 1
 	fi
-	dir="$(mkdir -p "$2" && cd "$2" && pwd -P)"
 	mkdir -p "$dir/replica"
 	cat >"$dir/taskrc" <<-EOF
 		data.location=$dir/replica
