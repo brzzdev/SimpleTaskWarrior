@@ -236,6 +236,7 @@ extension NSTableView {
 }
 
 /// A label that tail-truncates.
+@MainActor
 func truncatingLabel() -> NSTextField {
 	let label = NSTextField(labelWithString: "")
 	label.lineBreakMode = .byTruncatingTail

@@ -289,11 +289,41 @@ edit:
 
 # Build the app
 build: ensure-generated
-	xcodebuild -workspace {{ workspace }} -scheme {{ scheme }} -destination '{{ destination }}' -allowProvisioningUpdates -derivedDataPath {{ derived_data }} build | xcbeautify
+	just --no-deps xcodebuild-strict -workspace {{ workspace }} -scheme {{ scheme }} -destination '{{ destination }}' -allowProvisioningUpdates -derivedDataPath {{ derived_data }} build
 
 # Run the test plan (all package test targets)
 test: ensure-generated
-	xcodebuild -workspace {{ workspace }} -scheme {{ scheme }} -destination '{{ destination }}' CODE_SIGNING_ALLOWED=NO -derivedDataPath {{ derived_data }} test | xcbeautify
+	just --no-deps xcodebuild-strict -workspace {{ workspace }} -scheme {{ scheme }} -destination '{{ destination }}' CODE_SIGNING_ALLOWED=NO -derivedDataPath {{ derived_data }} test
+
+# `treatAllWarnings` can't catch every warning: Swift 6.4 downgrades a nonisolated
+# call into AppKit's imported main actor API to a warning that
+# `-warnings-as-errors` leaves alone. So this reads the raw log, which xcbeautify
+# reformats, and fails on any warning located in our own sources. Dependencies'
+# checkouts sit under `.build`, outside those directories.
+#
+# It sees only what this run compiled, so an incremental build passes over a
+# warning in an unchanged file. CI builds from scratch and sees them all.
+[positional-arguments]
+[private]
+xcodebuild-strict *args:
+	#!/usr/bin/env bash
+	set -euo pipefail
+
+	log="$(mktemp)"
+	trap 'rm -f "$log"' EXIT
+	xcodebuild "$@" 2>&1 | tee "$log" | xcbeautify
+
+	# `index` rather than a regex, since a worktree path can hold regex syntax
+	# such as a branch's `fix(ci)` scope.
+	warnings="$(awk -v root="$PWD/" '
+		index($0, root) != 1 { next }
+		{ path = substr($0, length(root) + 1) }
+		path ~ /^(AppHost|Sources|Tests)\/[^:]+:[0-9]+:[0-9]+: warning: / { print path }
+	' "$log" | sort -u)"
+	if [ -n "$warnings" ]; then
+		printf 'warnings in our sources:\n%s\n' "$warnings" >&2
+		exit 1
+	fi
 
 # Build (signed) and launch the app
 run: build
