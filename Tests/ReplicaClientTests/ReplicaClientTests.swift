@@ -34,7 +34,7 @@ final class ReplicaClientTests {
 		let plan = try WritePlanner(taskrc: .defaults, timeZone: .gmt)
 			.plan(.create(uuid, description: "Buy milk"), tasks: [:], at: .now)
 
-		let outcome = try await replicaClient.apply(plan, directory)
+		let outcome = try await replicaClient.apply(plan, "New Task", directory)
 
 		#expect(outcome.isCommitted)
 		#expect(outcome.snapshot.tasks.map(\.uuid) == [uuid.uuidString.lowercased()])
@@ -52,19 +52,38 @@ final class ReplicaClientTests {
 		let stored = try #require(try await tasks.next()?.tasks.first)
 		let plan = try WritePlanner(taskrc: .defaults, timeZone: .gmt)
 			.plan(.complete([uuid]), tasks: [uuid: stored.properties], at: .now)
-		let cliChange = try cli.apply(
-			operations: [.setValue(uuid: uuid.uuidString, property: "start", value: "1790000000")],
-			expectations: [],
-		)
-		try #require(cliChange == .committed)
+		commit([.setValue(uuid: uuid.uuidString, property: "start", value: "1790000000")], with: cli)
 		let before = try cli.getUndoOperations()
 
-		let outcome = try await replicaClient.apply(plan, directory)
+		let outcome = try await replicaClient.apply(plan, "Complete Task", directory)
 
 		#expect(!outcome.isCommitted)
 		#expect(outcome.snapshot.tasks.first?.properties["start"] == "1790000000")
 		#expect(outcome.snapshot.tasks.first?.properties["status"] == "pending")
 		#expect(try cli.getUndoOperations() == before)
+	}
+
+	@Test
+	func redoReappliesTheUndoneChangeUntilAnythingWrites() async throws {
+		let cli = try createReplica()
+		let uuid = try addPendingTask("Buy milk", with: cli)
+		var tasks = replicaClient.tasks(directory).makeAsyncIterator()
+		let stored = try #require(try await tasks.next()?.tasks.first)
+		try await complete(uuid, stored, as: "Complete Task")
+		_ = try await replicaClient.undo(directory)
+
+		let redone = try await replicaClient.redo(directory)
+
+		#expect(redone.isApplied)
+		#expect(redone.snapshot.tasks.first?.properties["status"] == "completed")
+		#expect(redone.snapshot.undoName == "Complete Task")
+		#expect(redone.snapshot.redoName == nil)
+
+		let undone = try await replicaClient.undo(directory)
+		#expect(undone.snapshot.redoName == "Complete Task")
+		commit([.setValue(uuid: uuid.uuidString, property: "project", value: "Home")], with: cli)
+		#expect(try await tasks.next()?.redoName == nil)
+		#expect(try await replicaClient.redo(directory).isApplied == false)
 	}
 
 	@Test
@@ -94,6 +113,42 @@ final class ReplicaClientTests {
 				pendingTask("Buy milk", id: uuid),
 			],
 		)
+	}
+
+	@Test
+	func undoRefusesWhenACLIChangeIsNewest() async throws {
+		let cli = try createReplica()
+		let uuid = try addPendingTask("Buy milk", with: cli)
+		var tasks = replicaClient.tasks(directory).makeAsyncIterator()
+		let stored = try #require(try await tasks.next()?.tasks.first)
+		let completed = try await complete(uuid, stored, as: "Complete Task")
+		#expect(completed.undoName == "Complete Task")
+
+		commit([.setValue(uuid: uuid.uuidString, property: "project", value: "Home")], with: cli)
+
+		#expect(try await tasks.next()?.undoName == nil)
+		let outcome = try await replicaClient.undo(directory)
+		#expect(!outcome.isApplied)
+		#expect(outcome.snapshot.tasks.first?.properties["project"] == "Home")
+		#expect(outcome.snapshot.tasks.first?.properties["status"] == "completed")
+	}
+
+	@Test
+	func undoRevertsTheWindowsNewestChange() async throws {
+		let cli = try createReplica()
+		let uuid = try addPendingTask("Buy milk", with: cli)
+		var tasks = replicaClient.tasks(directory).makeAsyncIterator()
+		let stored = try #require(try await tasks.next()?.tasks.first)
+		try await complete(uuid, stored, as: "Complete Task")
+
+		let outcome = try await replicaClient.undo(directory)
+
+		#expect(outcome.isApplied)
+		#expect(outcome.tasks == [uuid])
+		#expect(outcome.snapshot.tasks == [pendingTask("Buy milk", id: uuid)])
+		#expect(outcome.snapshot.undoName == nil)
+		// The CLI's change is next in the log, and the window's to leave alone.
+		#expect(try cli.getUndoOperations().count { $0 == .undoPoint } == 1)
 	}
 
 	@Test
@@ -128,16 +183,40 @@ final class ReplicaClientTests {
 
 	private func addPendingTask(_ description: String, with cli: EngineHandle) throws -> UUID {
 		let uuid = UUID()
-		let outcome = try cli.apply(
-			operations: [
+		commit(
+			[
 				.create(uuid: uuid.uuidString),
 				.setValue(uuid: uuid.uuidString, property: "description", value: description),
 				.setStatus(uuid: uuid.uuidString, status: Engine.Status.pending),
 			],
-			expectations: [],
+			with: cli,
 		)
-		try #require(outcome == .committed)
 		return uuid
+	}
+
+	/// Commits `operations` through `cli`, as the CLI would.
+	private func commit(_ operations: [PlannedOperation], with cli: EngineHandle) {
+		do {
+			if case let .conflict(uuids) = try cli.apply(operations: operations, expectations: []) {
+				Issue.record("The CLI's write conflicted on \(uuids)")
+			}
+		} catch {
+			Issue.record(error)
+		}
+	}
+
+	/// Completes the task `uuid`, read as `stored`, through the window, as the Undo point `name`.
+	@discardableResult
+	private func complete(
+		_ uuid: UUID,
+		_ stored: StoredTask,
+		as name: String,
+	) async throws -> TaskSnapshot {
+		let plan = try WritePlanner(taskrc: .defaults, timeZone: .gmt)
+			.plan(.complete([uuid]), tasks: [uuid: stored.properties], at: .now)
+		let outcome = try await replicaClient.apply(plan, name, directory)
+		try #require(outcome.isCommitted)
+		return outcome.snapshot
 	}
 
 	/// A task `addPendingTask` adds, as the Replica reads it back.

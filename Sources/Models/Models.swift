@@ -272,7 +272,7 @@ extension UDAValue {
 
 extension Date {
 	/// The date as TW stores it, to the second.
-	var epoch: Int {
+	public var epoch: Int {
 		Int(timeIntervalSince1970.rounded(.down))
 	}
 

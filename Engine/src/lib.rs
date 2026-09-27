@@ -133,7 +133,9 @@ pub struct Expectation {
 
 #[derive(uniffi::Enum)]
 pub enum ApplyOutcome {
-	Committed,
+	/// `operations` are exactly what was committed, its leading Undo point included, for
+	/// `commit_reversed_operations` to undo. They're empty where the batch changed nothing.
+	Committed { operations: Vec<UndoOperation> },
 	/// Nothing was committed, because these tasks no longer match the expectations, or already
 	/// exist where the batch creates them.
 	Conflict { uuids: Vec<String> },
@@ -360,7 +362,7 @@ impl EngineHandle {
 			}
 			// A lone Undo point would still land in the shared log, where `task undo` sees it.
 			if operations.is_empty() {
-				return Ok(ApplyOutcome::Committed);
+				return Ok(ApplyOutcome::Committed { operations: Vec::new() });
 			}
 
 			let mut batch = vec![Operation::UndoPoint];
@@ -389,8 +391,13 @@ impl EngineHandle {
 					}
 				}
 			}
-			replica.commit_operations(batch).await?;
-			Ok(ApplyOutcome::Committed)
+			replica.commit_operations(batch.clone()).await?;
+			Ok(ApplyOutcome::Committed {
+				operations: batch
+					.into_iter()
+					.map(UndoOperation::try_from)
+					.collect::<Result<_, _>>()?,
+			})
 		})
 	}
 

@@ -67,8 +67,13 @@ func mainMenu(openRecent openRecentDelegate: any NSMenuDelegate) -> NSMenu {
 
 	let edit = NSMenu(title: "Edit")
 	edit.items = [
-		menuItem("Undo", Selector(("undo:")), key: "z"),
-		menuItem("Redo", Selector(("redo:")), key: "z", modifiers: [.command, .shift]),
+		menuItem("Undo", #selector(ReplicaWindowController.undo(_:)), key: "z"),
+		menuItem(
+			"Redo",
+			#selector(ReplicaWindowController.redo(_:)),
+			key: "z",
+			modifiers: [.command, .shift],
+		),
 		.separator(),
 		menuItem("Cut", #selector(NSText.cut(_:)), key: "x"),
 		menuItem("Copy", #selector(NSText.copy(_:)), key: "c"),

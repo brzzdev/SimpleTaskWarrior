@@ -48,7 +48,7 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 		store = Store(initialState: ReplicaFeature.State(bookmark: bookmark)) {
 			ReplicaFeature()
 		}
-		let window = NSWindow(
+		let window = ReplicaWindow(
 			contentRect: NSRect(origin: .zero, size: windowSize),
 			styleMask: [.closable, .fullSizeContentView, .miniaturizable, .resizable, .titled],
 			backing: .buffered,
@@ -175,6 +175,12 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 		store.send(.newTaskButtonTapped)
 	}
 
+	/// Re-applies the Undo point the window last undid.
+	@objc
+	public func redo(_: Any?) {
+		store.send(.redoButtonTapped)
+	}
+
 	@objc
 	public func selectNextTask(_: Any?) {
 		selectAdjacentTask(.nextTaskButtonTapped)
@@ -239,6 +245,12 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 		]
 	}
 
+	/// Undoes the window's newest Undo point.
+	@objc
+	public func undo(_: Any?) {
+		store.send(.undoButtonTapped)
+	}
+
 	@objc
 	public func useTaskwarriorDefaults(_: Any?) {
 		store.send(.useTaskwarriorDefaultsButtonTapped)
@@ -255,11 +267,27 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 		case #selector(newTask(_:)):
 			store.canCreateTask
 
+		case #selector(redo(_:)):
+			validate(
+				menuItem,
+				title: store.redoName.map { String(localized: "Redo \($0)") }
+					?? String(localized: "Can’t Redo"),
+				isEnabled: store.canRedo,
+			)
+
 		case #selector(selectNextTask(_:)):
 			store.state.adjacentTask(1) != nil
 
 		case #selector(selectPreviousTask(_:)):
 			store.state.adjacentTask(-1) != nil
+
+		case #selector(undo(_:)):
+			validate(
+				menuItem,
+				title: store.undoName.map { String(localized: "Undo \($0)") }
+					?? String(localized: "Can’t Undo"),
+				isEnabled: store.canUndo,
+			)
 
 		case #selector(useTaskwarriorDefaults(_:)):
 			store.hasTaskrc
@@ -352,6 +380,12 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 		startStopItem.toolTip = startStopItem.label
 	}
 
+	/// Titles Undo or Redo for the Undo point it acts on, returning whether it's enabled.
+	private func validate(_ menuItem: NSMenuItem, title: String, isEnabled: Bool) -> Bool {
+		menuItem.title = title
+		return isEnabled
+	}
+
 	/// Whether a task command's menu item is enabled, titling Start/Stop for what it will do.
 	private func validate(_ menuItem: NSMenuItem, for command: ReplicaFeature.TaskCommand) -> Bool {
 		if command == .startStop {
@@ -363,6 +397,28 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 		}
 		// The menu keeps the commands Mark Pending replaces, disabled, where the toolbar hides them.
 		return store.enabledCommands.contains(command) && store.state.isOffered(command)
+	}
+}
+
+/// Leaves ⌘Z and ⌘⇧Z to the window's own undo manager while a field being edited has typing to
+/// undo or redo. Otherwise the window disowns them, so they reach the controller, which undoes the
+/// Replica's changes: `NSWindow` handles `undo:` and `redo:` itself, ahead of its controller. A
+/// field can keep the cursor once its edit is written, as a date field does after Return, so it's
+/// the typing that decides, not the cursor.
+private final class ReplicaWindow: NSWindow {
+	override func responds(to selector: Selector!) -> Bool {
+		let isUndo = selector == #selector(ReplicaWindowController.undo(_:))
+		guard isUndo || selector == #selector(ReplicaWindowController.redo(_:)) else {
+			return super.responds(to: selector)
+		}
+		// Only AppKit's search for an action's target asks about these, on the main thread.
+		return MainActor.assumeIsolated {
+			// The field editor's own undo manager, which its field may supply, not the window's.
+			guard let undoManager = (firstResponder as? NSText)?.undoManager else {
+				return false
+			}
+			return isUndo ? undoManager.canUndo : undoManager.canRedo
+		}
 	}
 }
 

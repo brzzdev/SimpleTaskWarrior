@@ -89,14 +89,16 @@ struct ReplicaFeatureTests {
 		let dog = storedTask(1, "Walk the dog", workingSetID: 2)
 		let milkDone = storedTask(0, "Buy milk", status: "completed", workingSetID: 1)
 		let plans = LockIsolated<[WritePlan]>([])
+		let undoNames = LockIsolated<[String]>([])
 		let initialState = try loadedState([milk, dog], selection: [UUID(0)])
 		let store = TestStore(initialState: initialState) {
 			ReplicaFeature()
 		} withDependencies: {
 			$0.continuousClock = TestClock()
 			$0.date.now = now
-			$0.replicaClient.apply = { plan, _ in
+			$0.replicaClient.apply = { plan, name, _ in
 				plans.withValue { $0.append(plan) }
+				undoNames.withValue { $0.append(name) }
 				return ApplyOutcome(isCommitted: true, snapshot: snapshot([milkDone, dog]))
 			}
 			$0.timeZone = .gmt
@@ -117,6 +119,7 @@ struct ReplicaFeatureTests {
 			$0.leavingTasks = []
 			$0.writeProgress = nil
 		}
+		#expect(undoNames.value == ["Complete Task"])
 		#expect(
 			try plans.value == [
 				planner.plan(
@@ -142,7 +145,7 @@ struct ReplicaFeatureTests {
 		} withDependencies: {
 			$0.continuousClock = TestClock()
 			$0.date.now = now
-			$0.replicaClient.apply = { plan, _ in
+			$0.replicaClient.apply = { plan, _, _ in
 				plans.withValue { $0.append(plan) }
 				return ApplyOutcome(isCommitted: true, snapshot: snapshot([milkUntagged, dog]))
 			}
@@ -197,7 +200,7 @@ struct ReplicaFeatureTests {
 		} withDependencies: {
 			$0.continuousClock = TestClock()
 			$0.date.now = now
-			$0.replicaClient.apply = { plan, _ in
+			$0.replicaClient.apply = { plan, _, _ in
 				plans.withValue { $0.append(plan) }
 				for await _ in commits {
 					break
@@ -257,7 +260,7 @@ struct ReplicaFeatureTests {
 		} withDependencies: {
 			$0.continuousClock = TestClock()
 			$0.date.now = now
-			$0.replicaClient.apply = { plan, _ in
+			$0.replicaClient.apply = { plan, _, _ in
 				for await _ in commits {
 					break
 				}
@@ -397,7 +400,7 @@ struct ReplicaFeatureTests {
 		} withDependencies: {
 			$0.continuousClock = TestClock()
 			$0.date.now = now
-			$0.replicaClient.apply = { plan, _ in
+			$0.replicaClient.apply = { plan, _, _ in
 				plans.withValue { $0.append(plan) }
 				return ApplyOutcome(isCommitted: true, snapshot: snapshot([taxes, milk]))
 			}
@@ -449,7 +452,7 @@ struct ReplicaFeatureTests {
 		} withDependencies: {
 			$0.continuousClock = TestClock()
 			$0.date.now = now
-			$0.replicaClient.apply = { _, _ in ApplyOutcome(isCommitted: true, snapshot: snapshot([])) }
+			$0.replicaClient.apply = { _, _, _ in ApplyOutcome(isCommitted: true, snapshot: snapshot([])) }
 			$0.timeZone = .gmt
 			$0.uuid = .incrementing
 		}
@@ -509,7 +512,7 @@ struct ReplicaFeatureTests {
 		} withDependencies: {
 			$0.continuousClock = clock
 			$0.date.now = now
-			$0.replicaClient.apply = { _, _ in
+			$0.replicaClient.apply = { _, _, _ in
 				for await _ in commits {
 					break
 				}
@@ -560,7 +563,7 @@ struct ReplicaFeatureTests {
 		} withDependencies: {
 			$0.continuousClock = TestClock()
 			$0.date.now = now
-			$0.replicaClient.apply = { plan, _ in
+			$0.replicaClient.apply = { plan, _, _ in
 				plans.withValue { $0.append(plan) }
 				return plans.value.count == 1
 					? ApplyOutcome(isCommitted: false, snapshot: snapshot([milkStarted]))
@@ -605,7 +608,7 @@ struct ReplicaFeatureTests {
 		} withDependencies: {
 			$0.continuousClock = TestClock()
 			$0.date.now = now
-			$0.replicaClient.apply = { _, _ in
+			$0.replicaClient.apply = { _, _, _ in
 				attempts.withValue { $0 += 1 }
 				return ApplyOutcome(isCommitted: false, snapshot: snapshot([milk]))
 			}
@@ -650,6 +653,44 @@ struct ReplicaFeatureTests {
 		}
 		// A write's read, delivered after the stream's later one.
 		await store.send(.tasksLoaded(snapshot([], readIndex: 1)))
+	}
+
+	@Test
+	func undoRevertsTheWindowsChangeAndSelectsTheTasksItChanged() async throws {
+		let milk = storedTask(0, "Buy milk", workingSetID: 1)
+		let dog = storedTask(1, "Walk the dog", workingSetID: 2)
+		var initialState = try loadedState([milk, dog])
+		initialState.undoName = "Complete Task"
+		let store = TestStore(initialState: initialState) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.date.now = now
+			$0.replicaClient.undo = { _ in
+				UndoOutcome(
+					isApplied: true,
+					snapshot: snapshot([milk, dog], readIndex: 1, redoName: "Complete Task"),
+					tasks: [UUID(0)],
+				)
+			}
+			$0.timeZone = .gmt
+		}
+
+		await store.send(.undoButtonTapped) {
+			$0.writeProgress = .running
+		}
+		await store.receive(\.tasksLoaded) {
+			$0.readIndex = 1
+			$0.redoName = "Complete Task"
+			$0.storedTasks = [milk, dog]
+			$0.undoName = nil
+		}
+		await store.receive(\.undoOrRedoFinished) {
+			$0.inspectedTask = UUID(0)
+			$0.selection = [UUID(0)]
+			$0.writeProgress = nil
+		}
+		#expect(!store.state.canUndo)
+		#expect(store.state.canRedo)
 	}
 
 	@Test
@@ -1219,8 +1260,12 @@ private func loadedState(
 }
 
 /// `tasks` as the Replica's read number `readIndex`.
-private func snapshot(_ tasks: [StoredTask], readIndex: Int = 0) -> TaskSnapshot {
-	TaskSnapshot(readIndex: readIndex, tasks: tasks)
+private func snapshot(
+	_ tasks: [StoredTask],
+	readIndex: Int = 0,
+	redoName: String? = nil,
+) -> TaskSnapshot {
+	TaskSnapshot(readIndex: readIndex, redoName: redoName, tasks: tasks)
 }
 
 /// The planner a window on TW's defaults writes with.

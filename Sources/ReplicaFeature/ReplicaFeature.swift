@@ -1,4 +1,5 @@
 // One Replica as its window shows it: the tasks, the Taskrc it runs on and their order.
+import AppKit
 import BookmarkClient
 import ComposableArchitecture
 import Foundation
@@ -45,6 +46,8 @@ struct ReplicaFeature {
 		/// The read `storedTasks` came from. A snapshot read before it is dropped, since a write's read
 		/// and the stream's are delivered separately and can arrive out of order.
 		var readIndex = 0
+		/// The Undo point Redo would re-apply, as of the last read.
+		var redoName: String?
 		/// The tasks the sidebar and search leave, in `sortOrder`.
 		var rows: IdentifiedArrayOf<TaskRow> = []
 		/// Narrows the table after the sidebar.
@@ -61,6 +64,9 @@ struct ReplicaFeature {
 		var taskrcSaveFailure: TaskrcSaveFailure?
 		/// The running Taskrc's UDAs, which the table offers as columns.
 		var udaColumns = UDAColumn.all(in: .defaults)
+		/// The window's Undo point Undo would revert, as of the last read. Nil where the Replica's
+		/// newest isn't the window's own.
+		var undoName: String?
 		/// The write in progress, which disables every other.
 		var writeProgress: WriteProgress?
 
@@ -81,6 +87,17 @@ struct ReplicaFeature {
 				return true
 			}
 			return false
+		}
+
+		/// Whether Redo applies: while nothing has written since the undo, and no write is in progress.
+		var canRedo: Bool {
+			redoName != nil && writeProgress == nil
+		}
+
+		/// Whether Undo applies: while the window's newest Undo point is the Replica's newest, and no
+		/// write is in progress.
+		var canUndo: Bool {
+			undoName != nil && writeProgress == nil
 		}
 
 		/// The commands that apply to every selected task. None applies while a write is in progress,
@@ -257,6 +274,7 @@ struct ReplicaFeature {
 		case openFailed(String)
 		case pairingChanged
 		case previousTaskButtonTapped
+		case redoButtonTapped
 		case savingDelayElapsed
 		/// A column header was clicked, or the table restored the Replica's sort.
 		case sortOrderChanged([TaskSort])
@@ -268,6 +286,8 @@ struct ReplicaFeature {
 		case tasksLoaded(TaskSnapshot)
 		case timerTicked
 		case tryAgainButtonTapped
+		case undoButtonTapped
+		case undoOrRedoFinished(UndoOutcome)
 		case useTaskwarriorDefaultsButtonTapped
 		case writeCommitted
 		case writeFailed
@@ -431,6 +451,12 @@ struct ReplicaFeature {
 				selectAdjacentTask(-1, &state)
 				return .none
 
+			case .redoButtonTapped:
+				guard state.canRedo else {
+					return .none
+				}
+				return undoOrRedo(&state) { [replicaClient] in try await replicaClient.redo($0) }
+
 			case .savingDelayElapsed:
 				// The delay can elapse just as the write ends.
 				if state.writeProgress != nil {
@@ -475,7 +501,9 @@ struct ReplicaFeature {
 					return .none
 				}
 				state.readIndex = snapshot.readIndex
+				state.redoName = snapshot.redoName
 				state.storedTasks = snapshot.tasks
+				state.undoName = snapshot.undoName
 				updateRows(&state)
 				return .none
 
@@ -486,6 +514,26 @@ struct ReplicaFeature {
 			case .tryAgainButtonTapped:
 				state.fileImporter = state.taskrcSaveFailure?.retry
 				return .none
+
+			case .undoButtonTapped:
+				guard state.canUndo else {
+					return .none
+				}
+				return undoOrRedo(&state) { [replicaClient] in try await replicaClient.undo($0) }
+
+			case let .undoOrRedoFinished(outcome):
+				// The tasks it changed that the view shows, tracked by UUID, since an undo can give a
+				// pending task a new ID.
+				let changed = state.rows.ids.filter(outcome.tasks.contains)
+				if !changed.isEmpty {
+					state.selection = Set(changed)
+					inspectSelection(&state)
+				}
+				let finish = finishWrite(&state)
+				guard !outcome.isApplied else {
+					return finish
+				}
+				return .merge(.run { _ in NSSound.beep() }, finish)
 
 			case .useTaskwarriorDefaultsButtonTapped:
 				state.isTaskrcHintPresented = false
@@ -548,6 +596,7 @@ struct ReplicaFeature {
 			return .none
 		}
 		state.writeProgress = .running
+		let name = undoName(for: action, udaColumns: state.udaColumns)
 		let planner = WritePlanner(taskrc: state.runningTaskrc, timeZone: timeZone)
 		return .run { [clock, now, replicaClient, storedTasks = state.storedTasks] send in
 			// A child of the write, so it's cancelled as the write ends, however it ends.
@@ -558,7 +607,7 @@ struct ReplicaFeature {
 			var tasks = storedTasks
 			for _ in 1 ... planAttempts {
 				let plan = try planner.plan(action, tasks: properties(of: tasks), at: now)
-				let outcome = try await replicaClient.apply(plan, directory)
+				let outcome = try await replicaClient.apply(plan, name, directory)
 				// The stream won't yield these, having been read already.
 				await send(.tasksLoaded(outcome.snapshot))
 				guard !outcome.isCommitted else {
@@ -570,6 +619,27 @@ struct ReplicaFeature {
 			await send(.writeFailed)
 		} catch: { _, send in
 			await send(.writeFailed)
+		}
+	}
+
+	/// Undoes or redoes through `change`, holding every write back until it ends as a write would.
+	/// A change that didn't apply cleanly beeps, and its read has checked Undo and Redo afresh.
+	private func undoOrRedo(
+		_ state: inout State,
+		_ change: @escaping @Sendable (_ directory: URL) async throws -> UndoOutcome,
+	) -> Effect<Action> {
+		guard let directory = state.directory else {
+			return .none
+		}
+		state.writeProgress = .running
+		return .run { send in
+			let outcome = try await change(directory)
+			// The stream won't yield these, having been read already.
+			await send(.tasksLoaded(outcome.snapshot))
+			await send(.undoOrRedoFinished(outcome))
+		} catch: { _, send in
+			await send(.writeFailed)
+			NSSound.beep()
 		}
 	}
 
@@ -824,10 +894,76 @@ private let savingDelay = Duration.milliseconds(500)
 /// How often an open window computes its tasks' Urgency again.
 private let urgencyInterval = Duration.seconds(60)
 
+/// How an Undo point's name refers to `attribute`: a UDA by its label.
+private func attributeName(_ attribute: String, udaColumns: [UDAColumn]) -> String {
+	switch attribute {
+	case "description": String(localized: "Description")
+	case "due": String(localized: "Due Date")
+	case "project": String(localized: "Project")
+	case "scheduled": String(localized: "Scheduled Date")
+	case "until": String(localized: "Until Date")
+	case "wait": String(localized: "Wait Date")
+	default: udaColumns.first { $0.name == attribute }?.label ?? attribute
+	}
+}
+
+/// `single` where `ids` is one task, else `multiple`, which counts them.
+private func counted(_ ids: [Models.Task.ID], _ single: String, _ multiple: String) -> String {
+	ids.count == 1 ? single : multiple
+}
+
 /// Every task's properties, as the planner reads them.
 private func properties(of tasks: [StoredTask]) -> [Models.Task.ID: [String: String]] {
 	Dictionary(
 		tasks.compactMap { task in UUID(uuidString: task.uuid).map { ($0, task.properties) } },
 		uniquingKeysWith: { first, _ in first },
 	)
+}
+
+/// The name the Edit menu gives `action`'s Undo point, as in "Undo Change Due Date".
+private func undoName(for action: WriteAction, udaColumns: [UDAColumn]) -> String {
+	switch action {
+	case let .complete(ids):
+		counted(ids, String(localized: "Complete Task"), String(localized: "Complete \(ids.count) Tasks"))
+
+	case .create:
+		newTaskTitle
+
+	case let .delete(ids):
+		counted(ids, String(localized: "Delete Task"), String(localized: "Delete \(ids.count) Tasks"))
+
+	case .edit(_, .addAnnotation):
+		String(localized: "Add Annotation")
+
+	case .edit(_, .addDependency):
+		String(localized: "Add Dependency")
+
+	case .edit(_, .addTag):
+		String(localized: "Add Tag")
+
+	case .edit(_, .removeAnnotation):
+		String(localized: "Remove Annotation")
+
+	case .edit(_, .removeDependency):
+		String(localized: "Remove Dependency")
+
+	case .edit(_, .removeTag):
+		String(localized: "Remove Tag")
+
+	case let .edit(_, .set(attribute, _)), let .edit(_, .setInput(attribute, _)):
+		String(localized: "Change \(attributeName(attribute, udaColumns: udaColumns))")
+
+	case let .markPending(ids):
+		counted(
+			ids,
+			String(localized: "Mark Task Pending"),
+			String(localized: "Mark \(ids.count) Tasks Pending"),
+		)
+
+	case let .start(ids):
+		counted(ids, String(localized: "Start Task"), String(localized: "Start \(ids.count) Tasks"))
+
+	case let .stop(ids):
+		counted(ids, String(localized: "Stop Task"), String(localized: "Stop \(ids.count) Tasks"))
+	}
 }
