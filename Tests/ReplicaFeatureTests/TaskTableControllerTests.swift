@@ -16,8 +16,9 @@ struct TaskTableControllerTests {
 				UserDefaults.standard.removeObject(forKey: "\(prefix) \(autosaveName)")
 			}
 		}
-		let saving = TaskTableController(autosaveName: autosaveName, store: store(taskrc: loaded))
-		let savingTable = try table(in: saving)
+		let savingTable = try table(
+			in: TaskTableController(autosaveName: autosaveName, store: store(taskrc: loaded)),
+		)
 		try #require(savingTable.tableColumn(withIdentifier: identifier(.tags))).isHidden = true
 		savingTable.moveColumn(savingTable.column(withIdentifier: identifier(.due)), toColumn: 0)
 		// Saved fitting the table, as a window saves it, so restoring it changes no column's width.
@@ -50,6 +51,7 @@ struct TaskTableControllerTests {
 	}
 }
 
+/// A Taskrc with a file, so loading it doesn't offer the Taskrc hint.
 private let loaded = TaskrcClient.Loaded(
 	taskrc: .defaults,
 	url: URL(filePath: "/Users/paul/.taskrc"),
