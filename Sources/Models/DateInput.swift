@@ -57,6 +57,33 @@ public struct DateInput: Sendable {
 	}
 }
 
+extension Date {
+	/// The date as ISO 8601 local time in `timeZone`, as in `2026-09-27T14:30`, with seconds only
+	/// where they aren't zero: text to edit that reads back as the same second under any Taskrc.
+	/// Local time alone reads back as the first pass through an hour the clocks go back over, so the
+	/// second pass adds its offset. UTC's is `Z`, as TW reads `+00:00` as local time.
+	public func isoLocal(in timeZone: TimeZone) -> String {
+		let clock = WallClock(now: self, timeZone: timeZone)
+		let time = clock.brokenDown(epoch)
+		let extended = time.isoLocalExtended
+		let text = time.second == 0 ? String(extended.dropLast(3)) : extended
+		guard clock.epoch(time) != epoch else {
+			return text
+		}
+		let offset = timeZone.secondsFromGMT(for: self)
+		guard offset != 0 else {
+			return text + "Z"
+		}
+		let magnitude = abs(offset)
+		let sign = offset < 0 ? "-" : "+"
+		return text + sign + String(
+			format: "%02d:%02d",
+			magnitude / secondsPerHour,
+			magnitude % secondsPerHour / secondsPerMinute,
+		)
+	}
+}
+
 public enum DateInputError: Error, Equatable, Sendable {
 	/// A holiday such as `easter` or `midsommar`, which the CLI resolves and the app doesn't.
 	case holiday(String)

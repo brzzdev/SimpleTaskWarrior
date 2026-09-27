@@ -5,13 +5,15 @@ import Models
 import SwiftNavigation
 import Taskrc
 
-/// Edits the inspected task's non-date fields, writing each when you finish editing it, with no
-/// Save. Below them, the Replica's full path, which the window's subtitle cuts short.
+/// Edits the inspected task's fields, writing each when you finish editing it, with no Save. Below
+/// them, the Replica's full path, which the window's subtitle cuts short.
 final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDelegate {
 	private let annotationField = editableField(placeholder: String(localized: "Add Annotation"))
 	private let annotationList = verticalStack()
 	private let blockingList = verticalStack()
 	private let blockingSection = verticalStack()
+	/// The built-in date attributes' editors under their headings, in the order they show.
+	private let dateEditors: [(title: String, editor: DateEditor)]
 	private let dependencyList = verticalStack()
 	private let dependencyPopUp = NSPopUpButton(frame: .zero, pullsDown: true)
 	private let descriptionField = editableField(placeholder: String(localized: "Description"))
@@ -42,6 +44,7 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 	private let tagField = editableField(placeholder: String(localized: "Add Tag"))
 	private let tagList = verticalStack()
 	private let taskForm = verticalStack()
+	@Dependency(\.timeZone) private var timeZone
 	/// Each editable UDA's control, kept across Taskrc reloads that leave its definition alone, so a
 	/// half-edited value survives them.
 	private var udaControls: [String: UDAControl] = [:]
@@ -54,6 +57,14 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 
 	init(store: StoreOf<ReplicaFeature>) {
 		self.store = store
+		dateEditors = [
+			(String(localized: "Due"), "due"),
+			(String(localized: "Scheduled"), "scheduled"),
+			(String(localized: "Wait"), "wait"),
+			(String(localized: "Until"), "until"),
+		].map { title, property in
+			(title, dateEditor(property, kind: .date, store: store))
+		}
 		super.init(nibName: nil, bundle: nil)
 	}
 
@@ -80,6 +91,7 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 				section(String(localized: "Description"), [descriptionField]),
 				section(String(localized: "Project"), [projectField]),
 				section(String(localized: "Tags"), [tagList, tagField]),
+			] + dateEditors.map { section($0.title, [$0.editor]) } + [
 				udaStack,
 				recurrenceSection,
 				section(String(localized: "Depends On"), [dependencyList, dependencyPopUp]),
@@ -394,11 +406,21 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 		show(task.project ?? "", in: projectField, isAnotherTask: isAnotherTask)
 		show("", in: tagField, isAnotherTask: isAnotherTask)
 		show("", in: annotationField, isAnotherTask: isAnotherTask)
+		let planner = WritePlanner(taskrc: store.runningTaskrc, timeZone: timeZone)
+		for (_, editor) in dateEditors {
+			editor.show(task, isAnotherTask: isAnotherTask, planner: planner)
+		}
 		for (name, uda) in udaControls {
-			guard let field = uda.control as? NSTextField else {
+			switch uda.control {
+			case let editor as DateEditor:
+				editor.show(task, isAnotherTask: isAnotherTask, planner: planner)
+
+			case let field as NSTextField:
+				show(task.properties[name] ?? "", in: field, isAnotherTask: isAnotherTask)
+
+			default:
 				continue
 			}
-			show(task.properties[name] ?? "", in: field, isAnotherTask: isAnotherTask)
 		}
 
 		let rows = store.allRows
@@ -428,9 +450,9 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 
 	/// Makes a control for each UDA the inspector edits, reusing one whose definition is unchanged.
 	/// Only the sections that changed come and go, since moving the one being edited would end its
-	/// edit. Dates and durations are left for the date editor. Returns whether it made any.
+	/// edit. Returns whether it made any.
 	private func updateUDAControls() -> Bool {
-		let columns = store.udaColumns.filter { $0.type != .date && $0.type != .duration }
+		let columns = store.udaColumns
 		guard columns != udaControls.values.map(\.column).sorted(by: { $0.name < $1.name }) else {
 			return false
 		}
@@ -440,8 +462,10 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 				controls[column.name] = existing
 				continue
 			}
-			let control: NSControl
-			if column.values.isEmpty {
+			let control: NSView
+			if column.type == .date || column.type == .duration {
+				control = dateEditor(column.name, kind: column.type, store: store)
+			} else if column.values.isEmpty {
 				let field = editableField(placeholder: String(localized: "None"))
 				field.delegate = self
 				control = field
@@ -496,6 +520,16 @@ extension TaskRow {
 }
 
 private let addDependencyTitle = String(localized: "Add Dependency…")
+
+/// An editor of the date or duration `property` that sends its edits to `store`.
+@MainActor
+private func dateEditor(
+	_ property: String,
+	kind: UDAType,
+	store: StoreOf<ReplicaFeature>,
+) -> DateEditor {
+	DateEditor(property: property, kind: kind) { store.send(.inspectorFieldSubmitted($0, $1)) }
+}
 
 /// A single-line field, edited in place, that wraps what it shows.
 @MainActor
@@ -623,6 +657,6 @@ private struct InspectedLists: Equatable {
 /// A UDA's control in the inspector, under its heading, with the definition it was made for.
 private struct UDAControl {
 	var column: UDAColumn
-	var control: NSControl
+	var control: NSView
 	var section: NSView
 }

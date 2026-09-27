@@ -486,7 +486,7 @@ private func unsignedInt32(_ value: Int) -> Int {
 
 extension BrokenDownTime {
 	/// `Datetime::toISOLocalExtended`: `YYYY-MM-DDThh:mm:ss`.
-	fileprivate var isoLocalExtended: String {
+	var isoLocalExtended: String {
 		String(
 			format: "%04d-%02d-%02dT%02d:%02d:%02d",
 			year,
