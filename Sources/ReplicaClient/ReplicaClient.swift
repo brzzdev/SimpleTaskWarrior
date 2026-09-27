@@ -87,7 +87,19 @@ extension ReplicaClient: DependencyKey {
 					}
 					do {
 						let replica = try await Replica.open(directory: directory)
-						openReplicas.withLock { $0[directory] = replica }
+						// Cancelled while `open` waited, the window has closed, and one reopened on the
+						// folder may have registered its own already. Checked under the lock, since a
+						// window can only reopen once this one is cancelled.
+						let isRegistered = openReplicas.withLock { replicas in
+							guard !_Concurrency.Task.isCancelled else {
+								return false
+							}
+							replicas[directory] = replica
+							return true
+						}
+						guard isRegistered else {
+							throw CancellationError()
+						}
 						defer {
 							// A window reopened on the folder may have registered its own by now.
 							openReplicas.withLock { replicas in
