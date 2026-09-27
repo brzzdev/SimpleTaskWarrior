@@ -539,7 +539,7 @@ private final class TextCell: NSTableCellView {
 
 /// The description, with a dot before an active task and markers after it.
 private final class DescriptionCell: NSTableCellView {
-	private let activeDot = NSView()
+	private let activeDot = ActiveDot()
 	private let annotationCount = captionLabel("", color: .secondaryLabelColor)
 	private let annotations: NSStackView
 	private let blocked = captionLabel(String(localized: "Blocked"), color: .systemRed)
@@ -556,8 +556,6 @@ private final class DescriptionCell: NSTableCellView {
 		annotations.setAccessibilityRole(.staticText)
 		super.init(frame: .zero)
 
-		activeDot.wantsLayer = true
-		activeDot.layer?.cornerRadius = activeDotSize / 2
 		activeDot.setAccessibilityElement(true)
 		activeDot.setAccessibilityLabel(String(localized: "Active"))
 		activeDot.setAccessibilityRole(.image)
@@ -583,13 +581,6 @@ private final class DescriptionCell: NSTableCellView {
 		fatalError("init(coder:) has not been implemented")
 	}
 
-	override func viewDidChangeEffectiveAppearance() {
-		super.viewDidChangeEffectiveAppearance()
-		effectiveAppearance.performAsCurrentDrawingAppearance {
-			activeDot.layer?.backgroundColor = NSColor.systemGreen.cgColor
-		}
-	}
-
 	func configure(_ row: TaskRow) {
 		let count = row.task.annotations.count
 		activeDot.isHidden = row.task.start == nil
@@ -605,6 +596,30 @@ private final class DescriptionCell: NSTableCellView {
 }
 
 private let activeDotSize: CGFloat = 7
+
+/// Colours itself in `updateLayer`, which AppKit calls on first display and again on every
+/// appearance change with the view's appearance current, since a layer's `CGColor` doesn't follow
+/// the appearance and `viewDidChangeEffectiveAppearance` doesn't fire on first display.
+private final class ActiveDot: NSView {
+	override var wantsUpdateLayer: Bool {
+		true
+	}
+
+	init() {
+		super.init(frame: .zero)
+		wantsLayer = true
+		layer?.cornerRadius = activeDotSize / 2
+	}
+
+	@available(*, unavailable)
+	required init?(coder: NSCoder) {
+		fatalError("init(coder:) has not been implemented")
+	}
+
+	override func updateLayer() {
+		layer?.backgroundColor = NSColor.systemGreen.cgColor
+	}
+}
 
 /// The new-task row's description, which takes the cursor as the row opens.
 private final class NewTaskCell: NSTableCellView {
