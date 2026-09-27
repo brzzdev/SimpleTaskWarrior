@@ -29,6 +29,9 @@ struct ReplicaFeature {
 		/// Set once the Replica's tasks first arrive, by which point `apply` can reach it.
 		var isReplicaOpen = false
 		var isTaskrcHintPresented = false
+		/// The tasks a Done or Delete in progress is writing, which the table drops as the write
+		/// starts rather than once it commits, since that can wait seconds on the Replica's lock.
+		var leavingTasks: Set<Models.Task.ID> = []
 		/// The tasks the sidebar and search leave, in `sortOrder`.
 		var rows: IdentifiedArrayOf<TaskRow> = []
 		/// Narrows the table after the sidebar.
@@ -499,7 +502,10 @@ struct ReplicaFeature {
 	/// Ends the write in progress, whatever became of it.
 	private func finishWrite(_ state: inout State) {
 		state.creatingTask = nil
+		state.leavingTasks = []
 		state.writeProgress = nil
+		// A failed Done or Delete puts its tasks back.
+		filterRows(&state)
 	}
 
 	/// Writes `command` over the selected tasks, where it applies to every one.
@@ -515,7 +521,13 @@ struct ReplicaFeature {
 			case .markPending: .markPending(ids)
 			case .startStop: if state.isStopping { .stop(ids) } else { .start(ids) }
 			}
-		return write(action, &state)
+		let effect = write(action, &state)
+		// Only once the write has started, since only its end brings them back.
+		if state.writeProgress != nil, command == .delete || command == .done {
+			state.leavingTasks = Set(ids)
+			filterRows(&state)
+		}
+		return effect
 	}
 
 	/// Selects the task New Task created, clearing a search that hides it. New Task already showed
@@ -593,7 +605,7 @@ struct ReplicaFeature {
 				filter = SidebarFilter(state.sidebarSelection),
 				search = state.searchText,
 			] in
-				filter.includes($0) && $0.matches(search: search)
+				!state.leavingTasks.contains($0.id) && filter.includes($0) && $0.matches(search: search)
 			},
 		)
 		state.highestUrgency = state.rows.map(\.urgency).max() ?? 0

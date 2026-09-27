@@ -102,16 +102,19 @@ struct ReplicaFeatureTests {
 			$0.timeZone = .gmt
 		}
 
+		// It leaves before the write commits.
 		await store.send(.doneButtonTapped) {
+			$0.leavingTasks = [UUID(0)]
+			$0.rows = try [row(dog)]
+			$0.selection = []
 			$0.writeProgress = .running
 		}
 		await store.receive(\.tasksLoaded) {
 			$0.allRows = try [row(dog), row(milkDone, view: .completed)]
-			$0.rows = try [row(dog)]
-			$0.selection = []
 			$0.storedTasks = [milkDone, dog]
 		}
 		await store.receive(\.writeCommitted) {
+			$0.leavingTasks = []
 			$0.writeProgress = nil
 		}
 		#expect(
@@ -219,6 +222,9 @@ struct ReplicaFeatureTests {
 		}
 
 		await store.send(.doneButtonTapped) {
+			$0.leavingTasks = [UUID(0)]
+			$0.rows = []
+			$0.selection = []
 			$0.writeProgress = .running
 		}
 		await store.send(.deleteButtonTapped)
@@ -231,11 +237,10 @@ struct ReplicaFeatureTests {
 		commit.yield()
 		await store.receive(\.tasksLoaded) {
 			$0.allRows = try [row(milkDone, view: .completed)]
-			$0.rows = []
-			$0.selection = []
 			$0.storedTasks = [milkDone]
 		}
 		await store.receive(\.writeCommitted) {
+			$0.leavingTasks = []
 			$0.writeProgress = nil
 		}
 		await store.finish()
@@ -268,23 +273,22 @@ struct ReplicaFeatureTests {
 		}
 
 		await store.send(.doneButtonTapped) {
+			$0.leavingTasks = [UUID(0)]
+			$0.rows = []
+			$0.selection = []
 			$0.writeProgress = .running
 		}
 		// Active, so the CLI's start raised its Urgency.
 		await store.receive(\.tasksLoaded) {
 			$0.allRows = try [row(milkStarted, urgency: 4)]
-			$0.highestUrgency = 4
-			$0.rows = try [row(milkStarted, urgency: 4)]
 			$0.storedTasks = [milkStarted]
 		}
 		await store.receive(\.tasksLoaded) {
 			$0.allRows = try [row(milkDone, view: .completed)]
-			$0.highestUrgency = 0
-			$0.rows = []
-			$0.selection = []
 			$0.storedTasks = [milkDone]
 		}
 		await store.receive(\.writeCommitted) {
+			$0.leavingTasks = []
 			$0.writeProgress = nil
 		}
 		#expect(
@@ -312,12 +316,18 @@ struct ReplicaFeatureTests {
 		}
 
 		await store.send(.doneButtonTapped) {
+			$0.leavingTasks = [UUID(0)]
+			$0.rows = []
+			$0.selection = []
 			$0.writeProgress = .running
 		}
 		await store.receive(\.tasksLoaded)
 		await store.receive(\.tasksLoaded)
 		await store.receive(\.tasksLoaded)
+		// The task it dropped comes back.
 		await store.receive(\.writeFailed) {
+			$0.leavingTasks = []
+			$0.rows = try [row(milk)]
 			$0.writeProgress = nil
 		}
 		#expect(attempts.value == 3)
