@@ -105,15 +105,15 @@ final class DateEditor: NSStackView, NSPopoverDelegate, NSTextFieldDelegate {
 		}
 		isEdited = false
 		let text = field.stringValue
-		let stored: String?
 		do {
-			stored = try resolve(text)
+			_ = try resolve(text)
 		} catch {
 			hasDraft = true
 			return
 		}
 		clearDraft()
-		field.stringValue = displayText(stored)
+		// The saved value until the write is read back, so a write that fails leaves it showing.
+		field.stringValue = displayText(saved)
 		onSubmit(task.id, .setInput(property, text: text))
 	}
 
@@ -124,7 +124,7 @@ final class DateEditor: NSStackView, NSPopoverDelegate, NSTextFieldDelegate {
 		}
 		// The pick replaces any draft, as typing it would.
 		clearDraft()
-		field.stringValue = displayText(UDAValue.date(date).stored)
+		field.stringValue = displayText(saved)
 		onSubmit(picking.task, .set(property, .date(date)))
 	}
 
@@ -144,7 +144,7 @@ final class DateEditor: NSStackView, NSPopoverDelegate, NSTextFieldDelegate {
 			window?.makeFirstResponder(field)
 			return
 		}
-		guard !hasDraft, saved != previous else {
+		guard !hasDraft else {
 			return
 		}
 		guard let editor = field.currentEditor() else {
@@ -152,7 +152,7 @@ final class DateEditor: NSStackView, NSPopoverDelegate, NSTextFieldDelegate {
 			return
 		}
 		// Focused but untouched, as after Return commits, so it follows the value it just wrote.
-		if !isEdited {
+		if !isEdited, saved != previous {
 			editor.string = editableText
 		}
 	}
