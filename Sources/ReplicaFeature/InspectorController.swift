@@ -181,7 +181,9 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 		switch field {
 		case annotationField:
 			field.stringValue = ""
-			guard !text.trimmingCharacters(in: .whitespaces).isEmpty else {
+			// Spaces alone are what the planner refuses as blank; tabs and no-break spaces are text
+			// `task annotate` keeps.
+			guard !text.allSatisfy({ $0 == " " }) else {
 				return
 			}
 			store.send(.annotationSubmitted(id, text))
