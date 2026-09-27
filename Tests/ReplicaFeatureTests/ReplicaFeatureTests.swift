@@ -283,6 +283,33 @@ struct ReplicaFeatureTests {
 	}
 
 	@Test
+	func inspectorTakesTheTaskASelectionIsNarrowedTo() async throws {
+		let milk = storedTask(0, "Buy milk", workingSetID: 1)
+		let dog = storedTask(1, "Walk the dog", workingSetID: 2)
+		let milkDone = storedTask(0, "Buy milk", status: "completed", workingSetID: nil)
+		let initialState = try loadedState([milk, dog])
+		let store = TestStore(initialState: initialState) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.date.now = now
+			$0.timeZone = .gmt
+		}
+
+		await store.send(\.binding.selection, [UUID(0), UUID(1)]) {
+			$0.selection = [UUID(0), UUID(1)]
+		}
+		// The CLI completes one of the two, leaving the other selected alone.
+		await store.send(.tasksLoaded(snapshot([milkDone, dog], readIndex: 1))) {
+			$0.allRows = try [row(dog), row(milkDone, view: .completed)]
+			$0.inspectedTask = UUID(1)
+			$0.readIndex = 1
+			$0.rows = try [row(dog)]
+			$0.selection = [UUID(1)]
+			$0.storedTasks = [milkDone, dog]
+		}
+	}
+
+	@Test
 	func inspectorStaysOnATaskTheCLIMovesOutOfTheView() async throws {
 		let milk = storedTask(0, "Buy milk", workingSetID: 1)
 		let dog = storedTask(1, "Walk the dog", workingSetID: 2)
@@ -808,8 +835,10 @@ struct ReplicaFeatureTests {
 
 		let milkDone = storedTask(0, "Buy milk", status: "completed", workingSetID: 1)
 		continuation.yield(snapshot([dog, taxes, milkDone]))
+		// Down to one selected task, which the inspector takes.
 		await store.receive(\.tasksLoaded) {
 			$0.allRows = try [row(dog), row(taxes, view: .completed), row(milkDone, view: .completed)]
+			$0.inspectedTask = UUID(1)
 			$0.storedTasks = [dog, taxes, milkDone]
 			$0.rows = try [row(dog)]
 			$0.selection = [UUID(1)]

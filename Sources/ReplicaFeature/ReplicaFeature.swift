@@ -738,7 +738,8 @@ struct ReplicaFeature {
 	}
 
 	/// Narrows the ranked rows by the sidebar, then the search, keeping the task an inspector edit
-	/// may have moved out, and drops selected tasks that left the table.
+	/// may have moved out. Drops selected tasks that left the table, and inspects the one task a
+	/// selection is narrowed to.
 	private func filterRows(_ state: inout State) {
 		// Filtering keeps `allRows`' order, so the table needs no sort of its own.
 		state.rows = IdentifiedArray(
@@ -754,7 +755,13 @@ struct ReplicaFeature {
 			},
 		)
 		state.highestUrgency = state.rows.map(\.urgency).max() ?? 0
+		let selectedCount = state.selection.count
 		state.selection.formIntersection(state.rows.ids)
+		// A selection narrowed to one task inspects it, as selecting it would. A task already
+		// inspected is kept by UUID, even once it leaves.
+		if state.inspectedTask == nil, selectedCount > 1, state.selection.count == 1 {
+			state.inspectedTask = state.selection.first
+		}
 	}
 
 	/// Sorts the ranked rows by `sortOrder`, then narrows them to the table. Ties break by ID, then
