@@ -399,6 +399,87 @@ struct WritePlannerTests {
 		#expect(plan == WritePlan())
 	}
 
+	/// Relative input means the moment the plan is made, not when it was typed.
+	@Test
+	func settingInputResolvesItAsPlanned() throws {
+		let planner = WritePlanner(taskrc: .defaults, timeZone: .gmt)
+		let id = UUID()
+
+		let plan = try planner.plan(
+			.edit([id], .setInput("wait", "tomorrow")),
+			tasks: [id: ["status": "pending"]],
+			at: newYear2030,
+		)
+
+		#expect(plan.operations.contains(.setValue(id, property: "wait", value: "1893542400")))
+	}
+
+	/// So a `due` the CLI changes before the plan commits fails it, rather than leaving `wait` a week
+	/// before the old one.
+	@Test
+	func settingInputThatRefersToAnAttributeExpectsIt() throws {
+		let planner = WritePlanner(taskrc: .defaults, timeZone: .gmt)
+		let id = UUID()
+
+		let plan = try planner.plan(
+			.edit([id], .setInput("wait", "due-1wk")),
+			tasks: [id: ["due": "1893456000", "status": "pending"]],
+			at: .now,
+		)
+
+		#expect(plan.operations.contains(.setValue(id, property: "wait", value: "1892851200")))
+		#expect(plan.expectations.contains(WritePlan.Expectation(
+			property: "due",
+			uuid: id,
+			value: "1893456000",
+		)))
+	}
+
+	@Test
+	func settingDurationInputStoresItNormalised() throws {
+		let taskrc = Taskrc(path: "/taskrc", environment: .fixture) { path, _ throws(Taskrc.ReadError) in
+			Taskrc.File(contents: "uda.estimate.type=duration", realPath: path)
+		}
+		let planner = WritePlanner(taskrc: taskrc, timeZone: .gmt)
+		let id = UUID()
+
+		let plan = try planner.plan(
+			.edit([id], .setInput("estimate", "1mo")),
+			tasks: [id: ["status": "pending"]],
+			at: .now,
+		)
+
+		#expect(plan.operations.contains(.setValue(id, property: "estimate", value: "P30D")))
+	}
+
+	@Test
+	func settingEmptyInputRemovesTheAttribute() throws {
+		let planner = WritePlanner(taskrc: .defaults, timeZone: .gmt)
+		let id = UUID()
+
+		let plan = try planner.plan(
+			.edit([id], .setInput("due", "")),
+			tasks: [id: ["due": "1893456000", "status": "pending"]],
+			at: .now,
+		)
+
+		#expect(plan.operations.contains(.setValue(id, property: "due", value: nil)))
+	}
+
+	@Test(arguments: [("due", "bogus", DateInputError.invalid), ("project", "tomorrow", .invalid)])
+	func settingInputThatDoesNotResolveThrows(property: String, text: String, error: DateInputError) {
+		let planner = WritePlanner(taskrc: .defaults, timeZone: .gmt)
+		let id = UUID()
+
+		#expect(throws: WritePlanError.invalidInput(property: property, error)) {
+			try planner.plan(
+				.edit([id], .setInput(property, text)),
+				tasks: [id: ["status": "pending"]],
+				at: .now,
+			)
+		}
+	}
+
 	@Test
 	func addingATagExpectsTheOtherTags() throws {
 		let planner = WritePlanner(taskrc: .defaults, timeZone: .gmt)

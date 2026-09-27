@@ -52,6 +52,21 @@ public struct DateInput: Sendable {
 		try TaskDuration(seconds: expression(at: now).duration(text, references: references))
 	}
 
+	/// `date` as ISO 8601 local time, as in `2026-09-27T14:30`, with seconds only where they aren't
+	/// zero: text to edit that reads back as the same second under any Taskrc.
+	public func isoLocal(_ date: Date) -> String {
+		let time = WallClock(now: date, timeZone: timeZone).brokenDown(date.epoch)
+		let minutes = String(
+			format: "%04d-%02d-%02dT%02d:%02d",
+			time.year,
+			time.month + 1,
+			time.day,
+			time.hour,
+			time.minute,
+		)
+		return time.second == 0 ? minutes : minutes + String(format: ":%02d", time.second)
+	}
+
 	private func expression(at now: Date) -> DateExpression {
 		DateExpression(clock: WallClock(now: now, timeZone: timeZone), format: format, settings: settings)
 	}

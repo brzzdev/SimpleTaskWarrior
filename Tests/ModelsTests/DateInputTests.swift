@@ -90,6 +90,20 @@ struct DateInputTests {
 		#expect(try DateInput(taskrc: taskrc(""), timeZone: .gmt).duration(display, at: .now) == duration)
 	}
 
+	/// Under a `dateformat` of its own and in a zone off UTC by a fraction of an hour, the text reads
+	/// back as the same second.
+	@Test(arguments: [(1_790_519_400, "2026-09-28T01:00"), (1_790_519_415, "2026-09-28T01:00:15")])
+	func isoLocalReadsBackAsTheSameSecond(epoch: TimeInterval, text: String) throws {
+		let dateInput = try DateInput(
+			taskrc: taskrc("dateformat=m/d/Y"),
+			timeZone: #require(TimeZone(identifier: "Australia/Lord_Howe")),
+		)
+		let date = Date(timeIntervalSince1970: epoch)
+
+		#expect(dateInput.isoLocal(date) == text)
+		#expect(try dateInput.date(text, at: .now) == date)
+	}
+
 	/// A Taskrc of `contents` over TW's defaults.
 	private func taskrc(_ contents: String) -> Taskrc {
 		Taskrc(path: "/taskrc", environment: .fixture) { path, _ throws(Taskrc.ReadError) in
