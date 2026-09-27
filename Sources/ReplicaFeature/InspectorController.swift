@@ -166,7 +166,7 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 		editingTask = shownTask
 	}
 
-	/// Writes the field to the task it was editing, where its value changed.
+	/// Writes the field to the task it was editing, once you've typed in it.
 	func controlTextDidEndEditing(_ notification: Notification) {
 		let id = editingTask
 		editingTask = nil
@@ -187,17 +187,17 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 			store.send(.annotationSubmitted(id, text))
 
 		case descriptionField:
-			submit(.string(text), for: "description", of: task)
+			submit(.string(text), for: "description", of: id)
 
 		case projectField:
-			submit(.string(text), for: "project", of: task)
+			submit(.string(text), for: "project", of: id)
 
 		case tagField:
 			field.stringValue = ""
 			// Tags hold no spaces, so each word is one, as `task modify +a +b` adds them.
 			for word in text.split(whereSeparator: \.isWhitespace) {
 				let tag = String(word.drop { $0 == "+" })
-				guard !tag.isEmpty, !task.tags.contains(tag) else {
+				guard !tag.isEmpty else {
 					continue
 				}
 				store.send(.inspectorFieldSubmitted(id, .addTag(tag)))
@@ -213,7 +213,7 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 				field.stringValue = task.properties[name] ?? ""
 				return
 			}
-			submit(value, for: name, of: task)
+			submit(value, for: name, of: id)
 		}
 	}
 
@@ -281,7 +281,7 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 		else {
 			return
 		}
-		submit(.string(value), for: name, of: task)
+		submit(.string(value), for: name, of: task.id)
 	}
 
 	/// Shows `value` in `field`, unless you're editing it, so the CLI changing it doesn't interrupt
@@ -299,13 +299,12 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 		view.window?.makeFirstResponder(field)
 	}
 
-	/// Writes `value` to `property`, where it differs from what `task` stores. The last writer wins:
-	/// the write plans against the tasks as last read, whatever the CLI did while you typed.
-	private func submit(_ value: UDAValue, for property: String, of task: Models.Task) {
-		guard value.stored != task.properties[property] else {
-			return
-		}
-		store.send(.inspectorFieldSubmitted(task.id, .set(property, value)))
+	/// Writes `value` to `property` of the task `id`. The last writer wins: the write plans against
+	/// the tasks as last read, whatever the CLI did while you typed. A value the task already shows
+	/// is still sent, since an edit still writing may be about to change it; a write that changes
+	/// nothing commits nothing.
+	private func submit(_ value: UDAValue, for property: String, of id: Models.Task.ID) {
+		store.send(.inspectorFieldSubmitted(id, .set(property, value)))
 	}
 
 	/// Shows the inspected task's lists and read-only sections, and its UDAs' menus.

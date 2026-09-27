@@ -38,6 +38,8 @@ struct ReplicaFeature {
 		/// The task an inspector edit may move out of the table, which the table keeps until the
 		/// selection changes.
 		var keptTask: Models.Task.ID?
+		/// The entry the last annotation added was given.
+		var lastAnnotationEntry: Date?
 		/// The tasks a Done or Delete in progress is writing, which the table drops as the write
 		/// starts rather than once it commits, since that can wait seconds on the Replica's lock.
 		var leavingTasks: Set<Models.Task.ID> = []
@@ -296,7 +298,15 @@ struct ReplicaFeature {
 				return edit(id, .removeAnnotation(entry: entry), &state)
 
 			case let .annotationSubmitted(id, text):
-				return edit(id, .addAnnotation(text, entry: now), &state)
+				// Within a second of the last, it takes the next free second, as `task annotate` does.
+				// Given the same second, the planner would read a note with the same text as a retry of
+				// the last and drop it. A clock set back bumps nothing, rather than every later note.
+				var entry = now
+				if let last = state.lastAnnotationEntry, (0 ..< 1).contains(entry.timeIntervalSince(last)) {
+					entry = last.addingTimeInterval(1)
+				}
+				state.lastAnnotationEntry = entry
+				return edit(id, .addAnnotation(text, entry: entry), &state)
 
 			case .binding(\.searchText), .binding(\.sidebarSelection):
 				state.keptTask = nil

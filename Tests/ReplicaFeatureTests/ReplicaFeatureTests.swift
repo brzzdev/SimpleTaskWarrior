@@ -213,6 +213,7 @@ struct ReplicaFeatureTests {
 			$0.writeProgress = .running
 		}
 		await store.send(.annotationSubmitted(UUID(0), "Oat, not dairy")) {
+			$0.lastAnnotationEntry = now
 			$0.queuedWrites = [.edit([UUID(0)], .addAnnotation("Oat, not dairy", entry: now))]
 		}
 		commit.yield()
@@ -243,6 +244,33 @@ struct ReplicaFeatureTests {
 		)
 		commit.finish()
 		await store.finish()
+	}
+
+	@Test
+	func annotationsAddedWithinASecondTakeTheSecondsAfterIt() async throws {
+		let milk = storedTask(0, "Buy milk", workingSetID: 1)
+		let initialState = try loadedState([milk], selection: [UUID(0)])
+		let store = TestStore(initialState: initialState) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.continuousClock = TestClock()
+			$0.date.now = now
+			$0.replicaClient.apply = { _, _ in
+				try await _Concurrency.Task.never()
+			}
+			$0.timeZone = .gmt
+		}
+		store.exhaustivity = .off(showSkippedAssertions: false)
+
+		await store.send(.annotationSubmitted(UUID(0), "Oat")) {
+			$0.lastAnnotationEntry = now
+		}
+		// The same text, which the planner would otherwise take for a retry of the first.
+		await store.send(.annotationSubmitted(UUID(0), "Oat")) {
+			$0.lastAnnotationEntry = now.addingTimeInterval(1)
+			$0.queuedWrites = [.edit([UUID(0)], .addAnnotation("Oat", entry: now.addingTimeInterval(1)))]
+		}
+		await store.skipInFlightEffects()
 	}
 
 	@Test
