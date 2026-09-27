@@ -13,8 +13,8 @@ func menuItem(
 	return item
 }
 
-/// The app's menu bar. Commands go to the first responder that handles them: the Taskrc commands
-/// to the Replica window in front, and Open Replica… to the app delegate.
+/// The app's menu bar. Commands go to the first responder that handles them: the Taskrc and task
+/// commands to the Replica window in front, and Open Replica… to the app delegate.
 @MainActor
 func mainMenu(openRecent openRecentDelegate: any NSMenuDelegate) -> NSMenu {
 	let name = ProcessInfo.processInfo.processName
@@ -45,6 +45,8 @@ func mainMenu(openRecent openRecentDelegate: any NSMenuDelegate) -> NSMenu {
 	openRecent.delegate = openRecentDelegate
 	let file = NSMenu(title: "File")
 	file.items = [
+		menuItem("New Task", #selector(ReplicaWindowController.newTask(_:)), key: "n"),
+		.separator(),
 		menuItem("Open Replica…", #selector(AppDelegate.openReplica(_:)), key: "o"),
 		submenu(openRecent),
 		.separator(),
@@ -99,6 +101,9 @@ func mainMenu(openRecent openRecentDelegate: any NSMenuDelegate) -> NSMenu {
 		),
 	]
 
+	let task = NSMenu(title: "Task")
+	task.items = ReplicaWindowController.taskCommandMenuItems()
+
 	let window = NSMenu(title: "Window")
 	NSApp.windowsMenu = window
 	window.items = [
@@ -113,7 +118,7 @@ func mainMenu(openRecent openRecentDelegate: any NSMenuDelegate) -> NSMenu {
 	NSApp.helpMenu = help
 
 	let menu = NSMenu()
-	menu.items = [app, file, edit, view, window, help].map(submenu)
+	menu.items = [app, file, edit, view, task, window, help].map(submenu)
 	return menu
 }
 

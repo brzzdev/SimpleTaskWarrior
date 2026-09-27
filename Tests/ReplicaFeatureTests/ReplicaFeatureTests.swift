@@ -49,6 +49,353 @@ struct ReplicaFeatureTests {
 	}
 
 	@Test
+	func commandsAreEnabledOnlyWhenTheyApplyToEverySelectedTask() throws {
+		let pending = storedTask(0, "Buy milk", workingSetID: 1)
+		let active = storedTask(
+			1,
+			"Walk the dog",
+			workingSetID: 2,
+			["start": String(Int(now.timeIntervalSince1970))],
+		)
+		let completed = storedTask(2, "File taxes", status: "completed", workingSetID: nil)
+		var state = try loadedState([pending, active, completed])
+
+		#expect(state.enabledCommands.isEmpty)
+
+		state.selection = [UUID(0), UUID(1)]
+		#expect(state.enabledCommands == [.delete, .done, .startStop])
+		#expect(!state.isStopping)
+
+		state.selection = [UUID(1)]
+		#expect(state.isStopping)
+
+		state.selection = [UUID(2)]
+		#expect(state.enabledCommands == [.delete, .markPending])
+
+		state.selection = [UUID(0), UUID(2)]
+		#expect(state.enabledCommands == [.delete])
+
+		state.isNewTaskRowPresented = true
+		#expect(state.enabledCommands.isEmpty)
+
+		state.isNewTaskRowPresented = false
+		state.writeProgress = .running
+		#expect(state.enabledCommands.isEmpty)
+	}
+
+	@Test
+	func doneCompletesTheSelectedTaskAndItLeavesTheList() async throws {
+		let milk = storedTask(0, "Buy milk", workingSetID: 1)
+		let dog = storedTask(1, "Walk the dog", workingSetID: 2)
+		let milkDone = storedTask(0, "Buy milk", status: "completed", workingSetID: 1)
+		let plans = LockIsolated<[WritePlan]>([])
+		let initialState = try loadedState([milk, dog], selection: [UUID(0)])
+		let store = TestStore(initialState: initialState) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.continuousClock = TestClock()
+			$0.date.now = now
+			$0.replicaClient.apply = { plan, _ in
+				plans.withValue { $0.append(plan) }
+				return ApplyOutcome(isCommitted: true, snapshot: snapshot([milkDone, dog]))
+			}
+			$0.timeZone = .gmt
+		}
+
+		// It leaves before the write commits.
+		await store.send(.doneButtonTapped) {
+			$0.leavingTasks = [UUID(0)]
+			$0.rows = try [row(dog)]
+			$0.selection = []
+			$0.writeProgress = .running
+		}
+		await store.receive(\.tasksLoaded) {
+			$0.allRows = try [row(dog), row(milkDone, view: .completed)]
+			$0.storedTasks = [milkDone, dog]
+		}
+		await store.receive(\.writeCommitted) {
+			$0.leavingTasks = []
+			$0.writeProgress = nil
+		}
+		#expect(
+			try plans.value == [
+				planner.plan(
+					.complete([UUID(0)]),
+					tasks: [UUID(0): milk.properties, UUID(1): dog.properties],
+					at: now,
+				),
+			],
+		)
+		await store.finish()
+	}
+
+	@Test
+	func newTaskShowsInPendingAndIsSelectedOnceItsCreated() async throws {
+		let taxes = storedTask(1, "File taxes", status: "completed", workingSetID: nil)
+		let milk = storedTask(0, "Buy milk", workingSetID: 1)
+		let plans = LockIsolated<[WritePlan]>([])
+		var initialState = try loadedState([taxes])
+		initialState.searchText = "taxes"
+		initialState.sidebarSelection = [.view(.completed)]
+		let store = TestStore(initialState: initialState) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.continuousClock = TestClock()
+			$0.date.now = now
+			$0.replicaClient.apply = { plan, _ in
+				plans.withValue { $0.append(plan) }
+				return ApplyOutcome(isCommitted: true, snapshot: snapshot([taxes, milk]))
+			}
+			$0.timeZone = .gmt
+			$0.uuid = .incrementing
+		}
+
+		await store.send(.newTaskButtonTapped) {
+			$0.isNewTaskRowPresented = true
+			$0.rows = []
+			$0.sidebarSelection = [.view(.pending)]
+		}
+		await store.send(.newTaskDescriptionSubmitted("Buy milk")) {
+			$0.creatingTask = UUID(0)
+			$0.isNewTaskRowPresented = false
+			$0.writeProgress = .running
+		}
+		await store.receive(\.tasksLoaded) {
+			$0.allRows = try [row(milk), row(taxes, view: .completed)]
+			$0.storedTasks = [taxes, milk]
+		}
+		// The search would hide it, so it's cleared.
+		await store.receive(\.writeCommitted) {
+			$0.creatingTask = nil
+			$0.rows = try [row(milk)]
+			$0.searchText = ""
+			$0.selection = [UUID(0)]
+			$0.writeProgress = nil
+		}
+		#expect(plans.value.first?.operations.first == .create(UUID(0)))
+		await store.finish()
+	}
+
+	@Test
+	func newTaskChecksItsSidebarAgainWhenTheTaskrcChangesBeforeReturn() async throws {
+		func taskrc(defaultProject: String) -> TaskrcClient.Loaded {
+			let taskrc = Taskrc(path: taskrcFile.path(), environment: .fixture) { path, _ in
+				Taskrc.File(contents: "default.project=\(defaultProject)", realPath: path)
+			}
+			return TaskrcClient.Loaded(taskrc: taskrc, url: taskrcFile)
+		}
+		var initialState = try loadedState([])
+		initialState.sidebarSelection = [.project("Home")]
+		initialState.taskrc = taskrc(defaultProject: "Home")
+		let store = TestStore(initialState: initialState) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.continuousClock = TestClock()
+			$0.date.now = now
+			$0.replicaClient.apply = { _, _ in ApplyOutcome(isCommitted: true, snapshot: snapshot([])) }
+			$0.timeZone = .gmt
+			$0.uuid = .incrementing
+		}
+
+		await store.send(.newTaskButtonTapped) {
+			$0.isNewTaskRowPresented = true
+		}
+		await store.send(.taskrcLoaded(taskrc(defaultProject: "Work"))) {
+			$0.taskrc = taskrc(defaultProject: "Work")
+		}
+		await store.send(.newTaskDescriptionSubmitted("Buy milk")) {
+			$0.creatingTask = UUID(0)
+			$0.isNewTaskRowPresented = false
+			$0.sidebarSelection = [.view(.pending)]
+			$0.writeProgress = .running
+		}
+		await store.receive(\.tasksLoaded)
+		await store.receive(\.writeCommitted) {
+			$0.creatingTask = nil
+			$0.writeProgress = nil
+		}
+	}
+
+	@Test
+	func newTaskWaitsForTheReplicaAndTheTaskrc() async {
+		var initialState = ReplicaFeature.State(bookmark: Data())
+		initialState.directory = replicaDirectory
+		let store = TestStore(initialState: initialState) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.date.now = now
+			$0.timeZone = .gmt
+		}
+
+		// Tasks with no Taskrc yet would create on TW's defaults.
+		await store.send(.tasksLoaded(snapshot([]))) {
+			$0.isReplicaOpen = true
+		}
+		await store.send(.newTaskButtonTapped)
+		await store.send(.taskrcLoaded(TaskrcClient.Loaded(taskrc: .defaults, url: taskrcFile))) {
+			$0.taskrc = TaskrcClient.Loaded(taskrc: .defaults, url: taskrcFile)
+		}
+		await store.send(.newTaskButtonTapped) {
+			$0.isNewTaskRowPresented = true
+		}
+	}
+
+	@Test
+	func savingShowsAfterHalfASecondAndOtherWritesWaitUntilTheWriteEnds() async throws {
+		let milk = storedTask(0, "Buy milk", workingSetID: 1)
+		let milkDone = storedTask(0, "Buy milk", status: "completed", workingSetID: 1)
+		let (commits, commit) = AsyncStream<Void>.makeStream()
+		let clock = TestClock()
+		let initialState = try loadedState([milk], selection: [UUID(0)])
+		let store = TestStore(initialState: initialState) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.continuousClock = clock
+			$0.date.now = now
+			$0.replicaClient.apply = { _, _ in
+				for await _ in commits {
+					break
+				}
+				return ApplyOutcome(isCommitted: true, snapshot: snapshot([milkDone]))
+			}
+			$0.timeZone = .gmt
+		}
+
+		await store.send(.doneButtonTapped) {
+			$0.leavingTasks = [UUID(0)]
+			$0.rows = []
+			$0.selection = []
+			$0.writeProgress = .running
+		}
+		await store.send(.deleteButtonTapped)
+		await clock.advance(by: .milliseconds(499))
+		await clock.advance(by: .milliseconds(1))
+		await store.receive(\.savingDelayElapsed) {
+			$0.writeProgress = .saving
+		}
+
+		commit.yield()
+		await store.receive(\.tasksLoaded) {
+			$0.allRows = try [row(milkDone, view: .completed)]
+			$0.storedTasks = [milkDone]
+		}
+		await store.receive(\.writeCommitted) {
+			$0.leavingTasks = []
+			$0.writeProgress = nil
+		}
+		await store.finish()
+	}
+
+	@Test
+	func stalePlanIsPlannedAgainAgainstTheTasksTheEngineRead() async throws {
+		let milk = storedTask(0, "Buy milk", workingSetID: 1)
+		let milkStarted = storedTask(
+			0,
+			"Buy milk",
+			workingSetID: 1,
+			["start": String(Int(now.timeIntervalSince1970))],
+		)
+		let milkDone = storedTask(0, "Buy milk", status: "completed", workingSetID: 1)
+		let plans = LockIsolated<[WritePlan]>([])
+		let initialState = try loadedState([milk], selection: [UUID(0)])
+		let store = TestStore(initialState: initialState) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.continuousClock = TestClock()
+			$0.date.now = now
+			$0.replicaClient.apply = { plan, _ in
+				plans.withValue { $0.append(plan) }
+				return plans.value.count == 1
+					? ApplyOutcome(isCommitted: false, snapshot: snapshot([milkStarted]))
+					: ApplyOutcome(isCommitted: true, snapshot: snapshot([milkDone]))
+			}
+			$0.timeZone = .gmt
+		}
+
+		await store.send(.doneButtonTapped) {
+			$0.leavingTasks = [UUID(0)]
+			$0.rows = []
+			$0.selection = []
+			$0.writeProgress = .running
+		}
+		// Active, so the CLI's start raised its Urgency.
+		await store.receive(\.tasksLoaded) {
+			$0.allRows = try [row(milkStarted, urgency: 4)]
+			$0.storedTasks = [milkStarted]
+		}
+		await store.receive(\.tasksLoaded) {
+			$0.allRows = try [row(milkDone, view: .completed)]
+			$0.storedTasks = [milkDone]
+		}
+		await store.receive(\.writeCommitted) {
+			$0.leavingTasks = []
+			$0.writeProgress = nil
+		}
+		#expect(
+			try plans.value.last
+				== planner.plan(.complete([UUID(0)]), tasks: [UUID(0): milkStarted.properties], at: now),
+		)
+		await store.finish()
+	}
+
+	@Test
+	func stalePlanFailsTheWriteAfterThreeAttempts() async throws {
+		let milk = storedTask(0, "Buy milk", workingSetID: 1)
+		let attempts = LockIsolated(0)
+		let initialState = try loadedState([milk], selection: [UUID(0)])
+		let store = TestStore(initialState: initialState) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.continuousClock = TestClock()
+			$0.date.now = now
+			$0.replicaClient.apply = { _, _ in
+				attempts.withValue { $0 += 1 }
+				return ApplyOutcome(isCommitted: false, snapshot: snapshot([milk]))
+			}
+			$0.timeZone = .gmt
+		}
+
+		await store.send(.doneButtonTapped) {
+			$0.leavingTasks = [UUID(0)]
+			$0.rows = []
+			$0.selection = []
+			$0.writeProgress = .running
+		}
+		await store.receive(\.tasksLoaded)
+		await store.receive(\.tasksLoaded)
+		await store.receive(\.tasksLoaded)
+		// The task it dropped comes back.
+		await store.receive(\.writeFailed) {
+			$0.leavingTasks = []
+			$0.rows = try [row(milk)]
+			$0.writeProgress = nil
+		}
+		#expect(attempts.value == 3)
+		await store.finish()
+	}
+
+	@Test
+	func snapshotReadBeforeTheLastIsDropped() async throws {
+		let milk = storedTask(0, "Buy milk", workingSetID: 1)
+		let initialState = try loadedState([])
+		let store = TestStore(initialState: initialState) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.date.now = now
+			$0.timeZone = .gmt
+		}
+
+		await store.send(.tasksLoaded(snapshot([milk], readIndex: 2))) {
+			$0.allRows = try [row(milk)]
+			$0.readIndex = 2
+			$0.rows = try [row(milk)]
+			$0.storedTasks = [milk]
+		}
+		// A write's read, delivered after the stream's later one.
+		await store.send(.tasksLoaded(snapshot([], readIndex: 1)))
+	}
+
+	@Test
 	func failedSaveIsReportedAndTryAgainReopensThePanel() async {
 		struct Gone: LocalizedError {
 			var errorDescription: String? { "The file is gone." }
@@ -206,7 +553,7 @@ struct ReplicaFeatureTests {
 	@Test
 	func listsPendingTasksSortedAndDropsSelectedTasksThatLeave() async {
 		let directory = URL(filePath: "/Users/paul/.task")
-		let (tasks, continuation) = AsyncThrowingStream<[StoredTask], any Error>.makeStream()
+		let (tasks, continuation) = AsyncThrowingStream<TaskSnapshot, any Error>.makeStream()
 		let store = TestStore(initialState: ReplicaFeature.State(bookmark: Data())) {
 			ReplicaFeature()
 		} withDependencies: {
@@ -229,9 +576,10 @@ struct ReplicaFeatureTests {
 		}
 
 		// Tied on Urgency, so in ID order.
-		continuation.yield([dog, taxes, milk])
+		continuation.yield(snapshot([dog, taxes, milk]))
 		await store.receive(\.tasksLoaded) {
 			$0.allRows = try [row(milk), row(dog), row(taxes, view: .completed)]
+			$0.isReplicaOpen = true
 			$0.storedTasks = [dog, taxes, milk]
 			$0.rows = try [row(milk), row(dog)]
 		}
@@ -245,7 +593,7 @@ struct ReplicaFeatureTests {
 		}
 
 		let milkDone = storedTask(0, "Buy milk", status: "completed", workingSetID: 1)
-		continuation.yield([dog, taxes, milkDone])
+		continuation.yield(snapshot([dog, taxes, milkDone]))
 		await store.receive(\.tasksLoaded) {
 			$0.allRows = try [row(dog), row(taxes, view: .completed), row(milkDone, view: .completed)]
 			$0.storedTasks = [dog, taxes, milkDone]
@@ -259,7 +607,7 @@ struct ReplicaFeatureTests {
 
 	@Test
 	func recomputesUrgencyEveryMinute() async {
-		let (tasks, continuation) = AsyncThrowingStream<[StoredTask], any Error>.makeStream()
+		let (tasks, continuation) = AsyncThrowingStream<TaskSnapshot, any Error>.makeStream()
 		let clock = TestClock()
 		let time = LockIsolated(now)
 		let store = TestStore(initialState: ReplicaFeature.State(bookmark: Data())) {
@@ -287,9 +635,10 @@ struct ReplicaFeatureTests {
 			$0.directory = replicaDirectory
 		}
 		// Tied on Urgency, so in ID order.
-		continuation.yield([call, post])
+		continuation.yield(snapshot([call, post]))
 		await store.receive(\.tasksLoaded) {
 			$0.allRows = try [row(post), row(call)]
+			$0.isReplicaOpen = true
 			$0.rows = try [row(post), row(call)]
 			$0.storedTasks = [call, post]
 		}
@@ -321,13 +670,14 @@ struct ReplicaFeatureTests {
 		let template = storedTask(3, "Water the plants", status: "recurring", workingSetID: nil)
 		let storedTasks = [blocked, blocker, estimated, template]
 
-		await store.send(.tasksLoaded(storedTasks)) {
+		await store.send(.tasksLoaded(snapshot(storedTasks))) {
 			$0.allRows = try [
 				row(blocker, urgency: 8),
 				row(estimated),
 				row(blocked, isBlocked: true, urgency: -5),
 			]
 			$0.highestUrgency = 8
+			$0.isReplicaOpen = true
 			$0.storedTasks = storedTasks
 			$0.rows = try [
 				row(blocker, urgency: 8),
@@ -370,7 +720,7 @@ struct ReplicaFeatureTests {
 			workingSetID: 2,
 			["annotation_\(Int(now.timeIntervalSince1970))": "about the cafe"],
 		)
-		await store.send(.tasksLoaded([book, call]))
+		await store.send(.tasksLoaded(snapshot([book, call])))
 
 		// TW's defaults set `search.case.sensitive`, which the search ignores.
 		await store.send(\.binding.searchText, "CAFE")
@@ -428,7 +778,7 @@ struct ReplicaFeatureTests {
 		store.exhaustivity = .off
 		let later = String(Int(now.timeIntervalSince1970) + 3_600)
 		await store.send(
-			.tasksLoaded([
+			.tasksLoaded(snapshot([
 				storedTask(0, "Call the plumber", workingSetID: 1, ["project": "Home", "tag_phone": "x"]),
 				storedTask(1, "Dig the beds", workingSetID: 2, ["project": "Home.Garden"]),
 				storedTask(2, "Essay", workingSetID: 3, ["project": "Homework", "tag_phone": "x"]),
@@ -440,7 +790,7 @@ struct ReplicaFeatureTests {
 					["project": "Work", "tag_phone": "x", "wait": later],
 				),
 				storedTask(5, "Paint", status: "completed", workingSetID: nil, ["project": "Home"]),
-			]),
+			])),
 		)
 		let descriptions = { store.state.rows.map(\.task.description).sorted() }
 
@@ -506,15 +856,15 @@ struct ReplicaFeatureTests {
 		await store.send(\.binding.sidebarSelection, [.view(.completed)])
 
 		// Tied on Urgency and without IDs, so in UUID order whichever order the Replica reads them in.
-		await store.send(.tasksLoaded([sweep, paint]))
+		await store.send(.tasksLoaded(snapshot([sweep, paint])))
 		#expect(store.state.rows.map(\.id) == [UUID(0), UUID(1)])
-		await store.send(.tasksLoaded([paint, sweep]))
+		await store.send(.tasksLoaded(snapshot([paint, sweep])))
 		#expect(store.state.rows.map(\.id) == [UUID(0), UUID(1)])
 	}
 
 	@Test
 	func waitingTaskMovesToPendingAsItsWaitPasses() async {
-		let (tasks, continuation) = AsyncThrowingStream<[StoredTask], any Error>.makeStream()
+		let (tasks, continuation) = AsyncThrowingStream<TaskSnapshot, any Error>.makeStream()
 		let clock = TestClock()
 		let time = LockIsolated(now)
 		let store = TestStore(initialState: ReplicaFeature.State(bookmark: Data())) {
@@ -538,7 +888,7 @@ struct ReplicaFeatureTests {
 		)
 
 		let task = await store.send(.fetchRequested)
-		continuation.yield([call])
+		continuation.yield(snapshot([call]))
 		await store.receive(\.tasksLoaded)
 		#expect(store.state.rows.isEmpty)
 		#expect(store.state.sidebar.views.map(\.count) == [0, 1, 0, 0])
@@ -590,6 +940,34 @@ extension AsyncStream where Element: Sendable {
 		}
 	}
 }
+
+/// A window on the Replica, showing `tasks` in the order given, as the table shows them on TW's
+/// defaults.
+private func loadedState(
+	_ tasks: [StoredTask],
+	selection: Set<UUID> = [],
+) throws -> ReplicaFeature.State {
+	var state = ReplicaFeature.State(bookmark: Data())
+	state.allRows = try tasks.map { stored in
+		let task = Models.Task(stored, udaTypes: Taskrc.defaults.udaTypes)
+		return try row(stored, view: #require(task.flatMap { TaskView($0, at: now) }))
+	}
+	state.directory = replicaDirectory
+	state.isReplicaOpen = true
+	state.rows = IdentifiedArray(uniqueElements: state.allRows)
+	state.selection = selection
+	state.storedTasks = tasks
+	state.taskrc = TaskrcClient.Loaded(taskrc: .defaults, url: nil)
+	return state
+}
+
+/// `tasks` as the Replica's read number `readIndex`.
+private func snapshot(_ tasks: [StoredTask], readIndex: Int = 0) -> TaskSnapshot {
+	TaskSnapshot(readIndex: readIndex, tasks: tasks)
+}
+
+/// The planner a window on TW's defaults writes with.
+private let planner = WritePlanner(taskrc: .defaults, timeZone: .gmt)
 
 /// `stored` as the table shows it on TW's defaults.
 private func row(

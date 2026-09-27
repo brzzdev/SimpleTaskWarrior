@@ -550,24 +550,6 @@ private struct Changes: Equatable {
 }
 
 extension WritePlan {
-	/// `tasks` with the plan applied.
-	fileprivate func applied(to tasks: [Task.ID: [String: String]]) -> [Task.ID: [String: String]] {
-		var tasks = tasks
-		for operation in operations {
-			switch operation {
-			case let .create(id):
-				tasks[id] = [:]
-
-			case let .setStatus(id, status):
-				tasks[id]?["status"] = status.rawValue
-
-			case let .setValue(id, property, value):
-				tasks[id]?[property] = value
-			}
-		}
-		return tasks
-	}
-
 	fileprivate func changes(from before: [Task.ID: [String: String]]) -> Changes {
 		var changes = Changes()
 		for operation in operations {

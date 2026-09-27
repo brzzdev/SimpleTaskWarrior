@@ -129,6 +129,7 @@ let package = Package(
 				"Engine",
 				"Models",
 				"ReplicaClient",
+				"Taskrc",
 			],
 		),
 		.testTarget(

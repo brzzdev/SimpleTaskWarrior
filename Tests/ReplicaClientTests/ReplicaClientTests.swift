@@ -3,6 +3,7 @@ import Foundation
 import Models
 import ReplicaClient
 import SQLite3
+import Taskrc
 import Testing
 
 /// End to end across the Swift/Rust seam, on a Replica in a temporary folder. A second engine
@@ -25,15 +26,57 @@ final class ReplicaClientTests {
 	}
 
 	@Test
+	func applyCommitsOneActionAsOneUndoPoint() async throws {
+		let cli = try createReplica()
+		var tasks = replicaClient.tasks(directory).makeAsyncIterator()
+		_ = try await tasks.next()
+		let uuid = UUID()
+		let plan = try WritePlanner(taskrc: .defaults, timeZone: .gmt)
+			.plan(.create(uuid, description: "Buy milk"), tasks: [:], at: .now)
+
+		let outcome = try await replicaClient.apply(plan, directory)
+
+		#expect(outcome.isCommitted)
+		#expect(outcome.snapshot.tasks.map(\.uuid) == [uuid.uuidString.lowercased()])
+		let undoOperations = try cli.getUndoOperations()
+		#expect(undoOperations.first == .undoPoint)
+		#expect(undoOperations.count { $0 == .undoPoint } == 1)
+		#expect(undoOperations.count == plan.operations.count + 1)
+	}
+
+	@Test
+	func applyRefusesAStalePlanAndCommitsNothing() async throws {
+		let cli = try createReplica()
+		let uuid = try addPendingTask("Buy milk", with: cli)
+		var tasks = replicaClient.tasks(directory).makeAsyncIterator()
+		let stored = try #require(try await tasks.next()?.tasks.first)
+		let plan = try WritePlanner(taskrc: .defaults, timeZone: .gmt)
+			.plan(.complete([uuid]), tasks: [uuid: stored.properties], at: .now)
+		let cliChange = try cli.apply(
+			operations: [.setValue(uuid: uuid.uuidString, property: "start", value: "1790000000")],
+			expectations: [],
+		)
+		try #require(cliChange == .committed)
+		let before = try cli.getUndoOperations()
+
+		let outcome = try await replicaClient.apply(plan, directory)
+
+		#expect(!outcome.isCommitted)
+		#expect(outcome.snapshot.tasks.first?.properties["start"] == "1790000000")
+		#expect(outcome.snapshot.tasks.first?.properties["status"] == "pending")
+		#expect(try cli.getUndoOperations() == before)
+	}
+
+	@Test
 	func tasksReadsAgainWhenTheCLICommits() async throws {
 		let cli = try createReplica()
 		var tasks = replicaClient.tasks(directory).makeAsyncIterator()
-		#expect(try await tasks.next()?.isEmpty == true)
+		#expect(try await tasks.next()?.tasks.isEmpty == true)
 
 		let uuid = try addPendingTask("Buy milk", with: cli)
 
 		#expect(
-			try await tasks.next() == [
+			try await tasks.next()?.tasks == [
 				pendingTask("Buy milk", id: uuid),
 			],
 		)
@@ -47,7 +90,7 @@ final class ReplicaClientTests {
 		var tasks = replicaClient.tasks(directory).makeAsyncIterator()
 
 		#expect(
-			try await tasks.next() == [
+			try await tasks.next()?.tasks == [
 				pendingTask("Buy milk", id: uuid),
 			],
 		)
