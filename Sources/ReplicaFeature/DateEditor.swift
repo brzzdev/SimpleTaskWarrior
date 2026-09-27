@@ -159,14 +159,23 @@ final class DateEditor: NSStackView, NSPopoverDelegate, NSTextFieldDelegate {
 
 	@objc
 	private func calendarButtonClicked(_ button: NSButton) {
-		// Ends an edit first, writing it, so the popover starts from its value.
-		window?.makeFirstResponder(nil)
 		guard let task else {
 			return
 		}
+		// Typed text the edit ending below writes, which the task won't show until the write is read
+		// back, so the picker starts from it rather than the value it replaces.
+		var start = saved
+		if isEdited, let planner {
+			do {
+				start = try planner.resolve(field.stringValue, for: property, of: task.properties, at: now)
+			} catch {
+				// Text that doesn't resolve stays as the draft, writing nothing.
+			}
+		}
+		window?.makeFirstResponder(nil)
 		var date: Date?
-		if case let .date(saved) = saved.map({ UDAValue($0, as: kind) }) {
-			date = saved
+		if case let .date(typed) = start.map({ UDAValue($0, as: kind) }) {
+			date = typed
 		}
 		let picker = CalendarPicker(date: date)
 		picking = (task.id, picker)
