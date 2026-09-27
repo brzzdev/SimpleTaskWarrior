@@ -212,6 +212,21 @@ actor Replica {
 		/// the Replica's newest undo operations must equal for it to be undone.
 		var operations: [UndoOperation]
 
+		/// What each property the point changes held before it, which a redo must find there still:
+		/// only then has nothing written it since the undo.
+		var redoExpectations: [Expectation] {
+			var seen: Set<[String]> = []
+			return operations.compactMap { operation in
+				guard
+					case let .update(uuid, property, oldValue, _, _) = operation,
+					seen.insert([uuid, property]).inserted
+				else {
+					return nil
+				}
+				return Expectation(uuid: uuid, property: property, value: oldValue)
+			}
+		}
+
 		var tasks: Set<Models.Task.ID> {
 			Set(operations.compactMap { $0.uuid.flatMap(UUID.init(uuidString:)) })
 		}
@@ -282,9 +297,10 @@ actor Replica {
 	}
 
 	/// Re-applies the Undo point last undone, through the same writes a plan makes, where nothing
-	/// has written since, stamping `modified` afresh as any change does. A CLI write landing between
-	/// the check and the commit still gets through. One attempt only: a redo that fails isn't
-	/// offered again.
+	/// has written since, stamping `modified` afresh as any change does. The engine checks the
+	/// point's properties just before it commits, as it does a plan's, so a CLI write landing after
+	/// the `data_version` check refuses the redo rather than being overwritten. One attempt only: a
+	/// redo that fails isn't offered again.
 	func redo() throws -> UndoOutcome {
 		guard let redoPoint, try engine.dataVersion() == redoPoint.dataVersion else {
 			return try notApplied()
@@ -294,7 +310,7 @@ actor Replica {
 		let modified = String(Date.now.epoch)
 		let outcome = try engine.apply(
 			operations: point.operations.compactMap { PlannedOperation($0, modified: modified) },
-			expectations: [],
+			expectations: point.redoExpectations,
 		)
 		guard case let .committed(operations) = outcome, !operations.isEmpty else {
 			return try notApplied()
