@@ -13,9 +13,17 @@ window_y=100
 header_y=$((window_y + 66))
 
 # The dev build's PID, by executable path: `just run` leaves an installed release copy running
-# under the same process name.
+# under the same process name. Compared as a string, since `pgrep -f` would read the path as a
+# regex and miss a checkout under a name like `fix(ci)`.
 dev_pid() {
-	pgrep -xf "$app/Contents/MacOS/SimpleTaskWarrior"
+	local binary="$app/Contents/MacOS/SimpleTaskWarrior" pid
+	for pid in $(pgrep -x SimpleTaskWarrior || true); do
+		if [ "$(ps -o comm= -p "$pid")" = "$binary" ]; then
+			echo "$pid"
+			return 0
+		fi
+	done
+	return 1
 }
 
 # se SCRIPT [ARG...]: runs SCRIPT against the dev build, frontmost. Data goes in as ARGs, which
