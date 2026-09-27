@@ -213,12 +213,12 @@ struct ReplicaFeatureTests {
 			$0.writeProgress = .running
 		}
 		await store.send(.annotationSubmitted(UUID(0), "Oat, not dairy")) {
-			$0.queuedEdits = [.edit([UUID(0)], .addAnnotation("Oat, not dairy", entry: now))]
+			$0.queuedWrites = [.edit([UUID(0)], .addAnnotation("Oat, not dairy", entry: now))]
 		}
 		commit.yield()
 		await store.receive(\.tasksLoaded)
 		await store.receive(\.writeCommitted) {
-			$0.queuedEdits = []
+			$0.queuedWrites = []
 			$0.writeProgress = .running
 		}
 		commit.yield()

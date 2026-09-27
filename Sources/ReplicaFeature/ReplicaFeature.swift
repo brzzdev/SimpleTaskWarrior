@@ -41,8 +41,9 @@ struct ReplicaFeature {
 		/// The tasks a Done or Delete in progress is writing, which the table drops as the write
 		/// starts rather than once it commits, since that can wait seconds on the Replica's lock.
 		var leavingTasks: Set<Models.Task.ID> = []
-		/// Inspector edits made while another write was in progress, written in order once it ends.
-		var queuedEdits: [WriteAction] = []
+		/// Writes asked for while another was in progress, written in order once it ends. Only inspector
+		/// edits get here: every other write is disabled while one runs.
+		var queuedWrites: [WriteAction] = []
 		/// The read `storedTasks` came from. A snapshot read before it is dropped, since a write's read
 		/// and the stream's are delivered separately and can arrive out of order.
 		var readIndex = 0
@@ -396,7 +397,6 @@ struct ReplicaFeature {
 				guard state.canCreateTask else {
 					return .none
 				}
-				state.focusesDescription = false
 				state.isNewTaskRowPresented = true
 				showNewTaskSidebar(&state)
 				return .none
@@ -539,9 +539,13 @@ struct ReplicaFeature {
 
 	/// The one path every write takes. Plans `action` against the tasks as last read, and while the
 	/// engine refuses the plan as stale, plans it again against the tasks it read instead, up to
-	/// `planAttempts` times. Every other write waits until it finishes.
+	/// `planAttempts` times. Every other write queues until it finishes.
 	private func write(_ action: WriteAction, _ state: inout State) -> Effect<Action> {
-		guard state.writeProgress == nil, let directory = state.directory else {
+		guard let directory = state.directory else {
+			return .none
+		}
+		guard state.writeProgress == nil else {
+			state.queuedWrites.append(action)
 			return .none
 		}
 		state.writeProgress = .running
@@ -570,8 +574,7 @@ struct ReplicaFeature {
 		}
 	}
 
-	/// Writes an inspector edit to the task `id`, keeping it in the table should the edit move it out,
-	/// or queues the edit behind the write in progress.
+	/// Writes an inspector edit to the task `id`, keeping it in the table should the edit move it out.
 	private func edit(
 		_ id: Models.Task.ID,
 		_ edit: TaskEdit,
@@ -580,25 +583,20 @@ struct ReplicaFeature {
 		if state.rows[id: id] != nil {
 			state.keptTask = id
 		}
-		let action = WriteAction.edit([id], edit)
-		guard state.writeProgress == nil else {
-			state.queuedEdits.append(action)
-			return .none
-		}
-		return write(action, &state)
+		return write(.edit([id], edit), &state)
 	}
 
-	/// Ends the write in progress, whatever became of it, and starts the next queued edit.
+	/// Ends the write in progress, whatever became of it, and starts the next queued one.
 	private func finishWrite(_ state: inout State) -> Effect<Action> {
 		state.creatingTask = nil
 		state.leavingTasks = []
 		state.writeProgress = nil
 		// A failed Done or Delete puts its tasks back.
 		filterRows(&state)
-		guard !state.queuedEdits.isEmpty else {
+		guard !state.queuedWrites.isEmpty else {
 			return .none
 		}
-		return write(state.queuedEdits.removeFirst(), &state)
+		return write(state.queuedWrites.removeFirst(), &state)
 	}
 
 	/// Inspects the one selected task, and lets go of a task the table kept for the inspector.

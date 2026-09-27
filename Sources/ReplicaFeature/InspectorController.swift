@@ -18,12 +18,14 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 	/// The task a field's edit belongs to, from its first keystroke, so a click on another row writes
 	/// it to the task it was typed for. Nil while no field has changed, which writes nothing.
 	private var editingTask: Models.Task.ID?
-	private var focusesDescription = false
 	private let noSelectionView = EmptyStateView(
 		symbolName: "sidebar.trailing",
 		title: String(localized: "No Selection"),
 	)
-	private let notInViewNote = NSTextField(labelWithString: String(localized: "Not in this view"))
+	private let notInViewNote = captionLabel(
+		String(localized: "Not in this view"),
+		color: .secondaryLabelColor,
+	)
 	private let orphanList = verticalStack()
 	private let orphanSection = verticalStack()
 	private let pathField = WrappingLabel(wrappingLabelWithString: "")
@@ -31,6 +33,9 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 	private let projectField = editableField(placeholder: String(localized: "None"))
 	private let recurrenceLabel = WrappingLabel(wrappingLabelWithString: "")
 	private let recurrenceSection = verticalStack()
+	/// What the lists last showed, so a store change that leaves them alone, such as a search, doesn't
+	/// build their rows again.
+	private var shownLists: InspectedLists?
 	/// The task the fields show.
 	private var shownTask: Models.Task.ID?
 	private let store: StoreOf<ReplicaFeature>
@@ -64,8 +69,6 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 		// A pull-down's first item is its title.
 		dependencyPopUp.addItem(withTitle: addDependencyTitle)
 		dependencyPopUp.menu?.delegate = self
-		notInViewNote.font = .preferredFont(forTextStyle: .caption1)
-		notInViewNote.textColor = .secondaryLabelColor
 		recurrenceLabel.isSelectable = true
 		blockingSection.setViews([heading(String(localized: "Blocking")), blockingList], in: .top)
 		orphanSection.setViews([heading(String(localized: "Other Attributes")), orphanList], in: .top)
@@ -221,7 +224,7 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 		guard let task = store.inspectedRow?.task else {
 			return
 		}
-		for row in store.allRows where row.isOpen && row.id != task.id {
+		for row in store.allRows where row.task.status.isOpen && row.id != task.id {
 			guard !task.dependencies.contains(row.id) else {
 				continue
 			}
@@ -246,7 +249,10 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 
 	@objc
 	private func dependencyChosen(_ item: NSMenuItem) {
-		guard let id = shownTask, let dependency = item.representedObject as? Models.Task.ID else {
+		guard
+			let id = store.inspectedTask,
+			let dependency = item.representedObject as? Models.Task.ID
+		else {
 			return
 		}
 		store.send(.dependencyChosen(id, dependency: dependency))
@@ -290,11 +296,11 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 
 	/// Makes a control for each UDA the inspector edits, reusing one whose definition is unchanged,
 	/// and lays them out again only when one changed, since that would end an edit. Dates and
-	/// durations are left for the date editor.
-	private func updateUDAControls() {
+	/// durations are left for the date editor. Returns whether it made any.
+	private func updateUDAControls() -> Bool {
 		let columns = store.udaColumns.filter { $0.type != .date && $0.type != .duration }
 		guard columns != udaControls.values.map(\.column).sorted(by: { $0.name < $1.name }) else {
-			return
+			return false
 		}
 		var controls: [String: (column: UDAColumn, control: NSControl)] = [:]
 		for column in columns {
@@ -324,11 +330,14 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 			in: .top,
 		)
 		udaStack.isHidden = columns.isEmpty
+		return true
 	}
 
 	/// Shows the inspected task's fields, or why there's none.
 	private func updateTask() {
-		updateUDAControls()
+		if updateUDAControls() {
+			shownLists = nil
+		}
 		let row = store.inspectedRow
 		let isAnotherTask = row?.id != shownTask
 		shownTask = row?.id
@@ -344,9 +353,42 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 		show(task.project ?? "", in: projectField, isAnotherTask: isAnotherTask)
 		show("", in: tagField, isAnotherTask: isAnotherTask)
 		show("", in: annotationField, isAnotherTask: isAnotherTask)
+		for (name, (_, control)) in udaControls {
+			guard let field = control as? NSTextField else {
+				continue
+			}
+			show(task.properties[name] ?? "", in: field, isAnotherTask: isAnotherTask)
+		}
+
+		let rows = store.allRows
+		let lists = InspectedLists(
+			blocking: rows
+				.filter { $0.task.status.isOpen && $0.task.dependencies.contains(task.id) }
+				.map(\.inspectorTitle),
+			dependencies: task.dependencies.sorted { $0.uuidString < $1.uuidString }.map { dependency in
+				InspectedLists.Dependency(
+					title: rows.first { $0.id == dependency }?.inspectorTitle,
+					uuid: dependency,
+				)
+			},
+			task: task,
+		)
+		if lists != shownLists {
+			shownLists = lists
+			updateLists(lists)
+		}
+
+		if isAnotherTask, store.focusesDescription, isShown {
+			view.window?.makeFirstResponder(descriptionField)
+		}
+	}
+
+	/// Shows the inspected task's lists and read-only sections, and its UDAs' menus.
+	private func updateLists(_ lists: InspectedLists) {
+		let task = lists.task
 		tagList.setViews(
 			task.tags.sorted().map { tag in
-				removableRow(tag) { [store] in
+				removableRow(selectableLabel(tag)) { [store] in
 					store.send(.tagRemoveButtonTapped(task.id, tag: tag))
 				}
 			},
@@ -354,17 +396,10 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 		)
 
 		for (name, (column, control)) in udaControls {
-			let stored = task.properties[name]
-			switch control {
-			case let field as NSTextField:
-				show(stored ?? "", in: field, isAnotherTask: isAnotherTask)
-
-			case let popUp as NSPopUpButton:
-				updateValues(of: popUp, column: column, stored: stored ?? "")
-
-			default:
-				break
+			guard let popUp = control as? NSPopUpButton else {
+				continue
 			}
+			updateValues(of: popUp, column: column, stored: task.properties[name] ?? "")
 		}
 
 		recurrenceSection.isHidden = task.recur == nil
@@ -375,27 +410,24 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 			recurrenceLabel.stringValue = recur + (ends ?? "")
 		}
 
-		let rows = store.allRows
 		dependencyList.setViews(
-			task.dependencies.sorted { $0.uuidString < $1.uuidString }.map { dependency in
-				let title = rows.first { $0.id == dependency }?.inspectorTitle
-				return removableRow(title ?? dependency.uuidString.lowercased()) { [store] in
-					store.send(.dependencyRemoveButtonTapped(task.id, dependency: dependency))
+			lists.dependencies.map { dependency in
+				let label = selectableLabel(dependency.title ?? dependency.uuid.uuidString.lowercased())
+				return removableRow(label) { [store] in
+					store.send(.dependencyRemoveButtonTapped(task.id, dependency: dependency.uuid))
 				}
 			},
 			in: .top,
 		)
-		let blocking = rows.filter { $0.isOpen && $0.task.dependencies.contains(task.id) }
-		blockingList.setViews(blocking.map { selectableLabel($0.inspectorTitle) }, in: .top)
-		blockingSection.isHidden = blocking.isEmpty
+		blockingList.setViews(lists.blocking.map(selectableLabel), in: .top)
+		blockingSection.isHidden = lists.blocking.isEmpty
 
 		annotationList.setViews(
 			task.annotations.map { annotation in
-				let date = NSTextField(
-					labelWithString: annotation.entry.formatted(date: .abbreviated, time: .shortened),
+				let date = captionLabel(
+					annotation.entry.formatted(date: .abbreviated, time: .shortened),
+					color: .secondaryLabelColor,
 				)
-				date.font = .preferredFont(forTextStyle: .caption1)
-				date.textColor = .secondaryLabelColor
 				let entry = verticalStack()
 				entry.spacing = 2
 				entry.setViews([date, selectableLabel(annotation.description)], in: .top)
@@ -409,17 +441,10 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 		let orphans = task.orphans.sorted { $0.key < $1.key }
 		orphanList.setViews(orphans.map { selectableLabel("\($0.key): \($0.value)") }, in: .top)
 		orphanSection.isHidden = orphans.isEmpty
-
-		let focusesDescription = store.focusesDescription
-		if focusesDescription, !self.focusesDescription, isShown {
-			view.window?.makeFirstResponder(descriptionField)
-		}
-		self.focusesDescription = focusesDescription
 	}
 
 	/// Lists `column`'s values in `popUp`, with None where the Taskrc allows an empty one, and a
-	/// stored
-	/// value the list doesn't name, then selects `stored`.
+	/// stored value the list doesn't name, then selects `stored`.
 	private func updateValues(of popUp: NSPopUpButton, column: UDAColumn, stored: String) {
 		let values = column.values.contains(stored) ? column.values : column.values + [stored]
 		popUp.removeAllItems()
@@ -435,11 +460,6 @@ extension TaskRow {
 	/// The task as the inspector names it: its ID, where it has one, before its description.
 	fileprivate var inspectorTitle: String {
 		task.workingSetID.map { "\($0) \(task.description)" } ?? task.description
-	}
-
-	/// Neither completed nor deleted: a task another can depend on, and that TW counts as blocked.
-	fileprivate var isOpen: Bool {
-		view == .pending || view == .waiting
 	}
 }
 
@@ -477,11 +497,6 @@ private func removableRow(_ view: NSView, remove: @escaping @MainActor () -> Voi
 	return row
 }
 
-@MainActor
-private func removableRow(_ text: String, remove: @escaping @MainActor () -> Void) -> NSView {
-	removableRow(selectableLabel(text), remove: remove)
-}
-
 /// A heading over `views`.
 @MainActor
 private func section(_ title: String, _ views: [NSView]) -> NSStackView {
@@ -507,11 +522,12 @@ private func udaValue(_ text: String, type: UDAType) -> UDAValue? {
 	guard !text.isEmpty else {
 		return .string("")
 	}
-	switch type {
-	case .date, .duration, .string: return .string(text)
-	case .numeric: return Double(text).map(UDAValue.numeric)
-	case .uuid: return UUID(uuidString: text).map(UDAValue.uuid)
+	let value = UDAValue(text, as: type)
+	// Text that doesn't read as the UDA's type comes back as a string, which `task modify` refuses.
+	if case .string = value, type != .string {
+		return nil
 	}
+	return value
 }
 
 /// A stack laying out its views top to bottom at its full width.
@@ -538,6 +554,19 @@ private final class ClosureButton: NSButton {
 	private func clicked(_: Any?) {
 		onClick()
 	}
+}
+
+/// What the inspector's lists show: the task, and the titles of the tasks it depends on and blocks.
+private struct InspectedLists: Equatable {
+	struct Dependency: Equatable {
+		var title: String?
+		var uuid: UUID
+	}
+
+	var blocking: [String]
+	/// Each dependency's title, where the Replica still has it, beside its UUID.
+	var dependencies: [Dependency]
+	var task: Models.Task
 }
 
 /// A vertical stack that sizes its views to its own width, which an alignment alone doesn't.
