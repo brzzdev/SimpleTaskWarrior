@@ -213,7 +213,6 @@ struct ReplicaFeatureTests {
 			$0.writeProgress = .running
 		}
 		await store.send(.annotationSubmitted(UUID(0), "Oat, not dairy")) {
-			$0.lastAnnotationEntry = now
 			$0.queuedWrites = [.edit([UUID(0)], .addAnnotation("Oat, not dairy", entry: now))]
 		}
 		commit.yield()
@@ -247,22 +246,36 @@ struct ReplicaFeatureTests {
 	}
 
 	@Test
-	func annotationsAddedWithinASecondTakeTheSecondsAfterIt() async throws {
+	func annotationsAddedWithinASecondEachKeepTheirOwnSecond() async throws {
+		let second = Int(now.timeIntervalSince1970)
 		// The CLI already annotated it this second.
-		let milk = storedTask(
-			0,
-			"Buy milk",
-			workingSetID: 1,
-			["annotation_\(Int(now.timeIntervalSince1970))": "Oat"],
-		)
+		let milk = storedTask(0, "Buy milk", workingSetID: 1, ["annotation_\(second)": "Oat"])
+		let (commits, commit) = AsyncStream<Void>.makeStream()
+		let replica = LockIsolated([UUID(0): milk.properties])
 		let initialState = try loadedState([milk], selection: [UUID(0)])
 		let store = TestStore(initialState: initialState) {
 			ReplicaFeature()
 		} withDependencies: {
 			$0.continuousClock = TestClock()
 			$0.date.now = now
-			$0.replicaClient.apply = { _, _ in
-				try await _Concurrency.Task.never()
+			$0.replicaClient.apply = { plan, _ in
+				for await _ in commits {
+					break
+				}
+				let tasks = replica.withValue { tasks in
+					let isFirst = tasks[UUID(0)]?["annotation_\(second + 1)"] == nil
+					tasks = plan.applied(to: tasks)
+					// The CLI annotates it again just after the first add lands, in the second the next
+					// add would have asked for when it was submitted.
+					if isFirst {
+						tasks[UUID(0)]?["annotation_\(second + 2)"] = "Oat"
+					}
+					return tasks
+				}
+				let stored = tasks.map { id, properties in
+					StoredTask(properties: properties, uuid: id.uuidString.lowercased(), workingSetID: 1)
+				}
+				return ApplyOutcome(isCommitted: true, snapshot: snapshot(stored))
 			}
 			$0.timeZone = .gmt
 		}
@@ -272,14 +285,18 @@ struct ReplicaFeatureTests {
 		for _ in 1 ... 3 {
 			await store.send(.annotationSubmitted(UUID(0), "Oat"))
 		}
-		// The first add, a second on, is the write in flight; the other two queue behind it.
+		for _ in 1 ... 3 {
+			commit.yield()
+			await store.receive(\.writeCommitted)
+		}
+		let annotations = replica.value[UUID(0)]?.filter { $0.key.hasPrefix("annotation_") }
 		#expect(
-			store.state.queuedWrites == [2, 3].map { second in
-				.edit([UUID(0)], .addAnnotation("Oat", entry: now.addingTimeInterval(second)))
-			},
+			annotations == Dictionary(
+				uniqueKeysWithValues: (0 ... 4).map { ("annotation_\(second + $0)", "Oat") },
+			),
 		)
-		#expect(store.state.lastAnnotationEntry == now.addingTimeInterval(3))
-		await store.skipInFlightEffects()
+		commit.finish()
+		await store.finish()
 	}
 
 	@Test

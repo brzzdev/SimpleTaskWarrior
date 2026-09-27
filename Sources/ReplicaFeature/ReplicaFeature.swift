@@ -38,8 +38,6 @@ struct ReplicaFeature {
 		/// The task an inspector edit may move out of the table, which the table keeps until the
 		/// selection changes.
 		var keptTask: Models.Task.ID?
-		/// The entry the last annotation added was given.
-		var lastAnnotationEntry: Date?
 		/// The tasks a Done or Delete in progress is writing, which the table drops as the write
 		/// starts rather than once it commits, since that can wait seconds on the Replica's lock.
 		var leavingTasks: Set<Models.Task.ID> = []
@@ -298,9 +296,8 @@ struct ReplicaFeature {
 				return edit(id, .removeAnnotation(entry: entry), &state)
 
 			case let .annotationSubmitted(id, text):
-				let entry = annotationEntry(for: id, state)
-				state.lastAnnotationEntry = entry
-				return edit(id, .addAnnotation(text, entry: entry), &state)
+				// Should it queue, `finishWrite` gives it its entry again as it starts.
+				return edit(id, .addAnnotation(text, entry: annotationEntry(for: id, state)), &state)
 
 			case .binding(\.searchText), .binding(\.sidebarSelection):
 				state.keptTask = nil
@@ -579,7 +576,8 @@ struct ReplicaFeature {
 	}
 
 	/// The entry an annotation added to the task `id` now asks for: the second after the latest of
-	/// the task's annotations and the last one added, where that's this second or later, else now.
+	/// the task's annotations, where that's this second or later, else now. Read from the tasks as
+	/// last read, so it's only sound as the write starts, with every earlier write read back.
 	///
 	/// A taken second would make the planner read a note with the same text there as a retry of it,
 	/// and drop it. Only entries less than `annotationWindow` ahead count, so a clock set back
@@ -587,7 +585,7 @@ struct ReplicaFeature {
 	private func annotationEntry(for id: Models.Task.ID, _ state: State) -> Date {
 		let second = Date(timeIntervalSince1970: now.timeIntervalSince1970.rounded(.down))
 		let annotations = state.allRows.first { $0.id == id }?.task.annotations.map(\.entry) ?? []
-		let taken = (annotations + [state.lastAnnotationEntry].compactMap(\.self)).filter {
+		let taken = annotations.filter {
 			$0 >= second && $0.timeIntervalSince(now) < annotationWindow
 		}
 		return taken.max().map { $0.addingTimeInterval(annotationSpacing) } ?? now
@@ -615,7 +613,14 @@ struct ReplicaFeature {
 		guard !state.queuedWrites.isEmpty else {
 			return .none
 		}
-		return write(state.queuedWrites.removeFirst(), &state)
+		var next = state.queuedWrites.removeFirst()
+		// An annotation queued behind the write just ended takes its entry now, past every note that
+		// write, or the CLI meanwhile, left in the second it asked for. The inspector adds one to a
+		// single task.
+		if case let .edit(ids, .addAnnotation(text, _)) = next, let id = ids.first {
+			next = .edit(ids, .addAnnotation(text, entry: annotationEntry(for: id, state)))
+		}
+		return write(next, &state)
 	}
 
 	/// Inspects the one selected task, and lets go of a task the table kept for the inspector.
