@@ -9,14 +9,13 @@ import Taskrc
 /// as the same second. Beneath it, what the text resolves to as you type, or why it doesn't.
 ///
 /// Text that doesn't resolve stays, with its error, writing nothing, until Escape restores the
-/// saved
-/// value or another task drops it. A date also has a calendar popover beside it.
+/// saved value or another task drops it. A date also has a calendar popover beside it.
 final class DateEditor: NSStackView, NSPopoverDelegate, NSTextFieldDelegate {
 	private let field = FocusField(string: "")
 	/// Whether the field holds text that didn't resolve, kept after its edit ended.
 	private var hasDraft = false
-	/// Whether you've typed since the field last showed the saved value. Untouched text writes
-	/// nothing.
+	/// Whether you've typed since the field last showed the saved value, since untouched text
+	/// writes nothing.
 	private var isEdited = false
 	private let kind: UDAType
 	private let messageLabel = NSTextField(wrappingLabelWithString: "")
@@ -84,11 +83,9 @@ final class DateEditor: NSStackView, NSPopoverDelegate, NSTextFieldDelegate {
 		guard selector == #selector(cancelOperation(_:)) else {
 			return false
 		}
-		hasDraft = false
-		isEdited = false
+		clearDraft()
 		textView.string = editableText
 		textView.selectAll(nil)
-		showMessage(for: nil)
 		return true
 	}
 
@@ -97,10 +94,8 @@ final class DateEditor: NSStackView, NSPopoverDelegate, NSTextFieldDelegate {
 		showMessage(for: field.stringValue)
 	}
 
-	/// Writes the text, where it resolves; otherwise keeps it as the draft, beside its error. Ending
-	/// an
-	/// edit precedes a click on another row selecting it, so the text goes to the task it was typed
-	/// for.
+	/// Writes the text, where it resolves; otherwise keeps it as the draft, beside its error.
+	/// Editing ends before a click on another row selects it, so the text goes to its own task.
 	func controlTextDidEndEditing(_: Notification) {
 		guard isEdited, let task, let planner else {
 			if !hasDraft {
@@ -117,10 +112,9 @@ final class DateEditor: NSStackView, NSPopoverDelegate, NSTextFieldDelegate {
 			hasDraft = true
 			return
 		}
-		hasDraft = false
-		showMessage(for: nil)
+		clearDraft()
 		field.stringValue = displayText(stored)
-		onSubmit(task.id, .setInput(property, text))
+		onSubmit(task.id, .setInput(property, text: text))
 	}
 
 	func popoverDidClose(_: Notification) {
@@ -129,8 +123,7 @@ final class DateEditor: NSStackView, NSPopoverDelegate, NSTextFieldDelegate {
 			return
 		}
 		// The pick replaces any draft, as typing it would.
-		hasDraft = false
-		showMessage(for: nil)
+		clearDraft()
 		field.stringValue = displayText(UDAValue.date(date).stored)
 		onSubmit(picking.task, .set(property, .date(date)))
 	}
@@ -142,9 +135,7 @@ final class DateEditor: NSStackView, NSPopoverDelegate, NSTextFieldDelegate {
 		self.planner = planner
 		self.task = task
 		if isAnotherTask {
-			hasDraft = false
-			isEdited = false
-			showMessage(for: nil)
+			clearDraft()
 			guard field.currentEditor() != nil else {
 				field.stringValue = displayText(saved)
 				return
@@ -186,6 +177,13 @@ final class DateEditor: NSStackView, NSPopoverDelegate, NSTextFieldDelegate {
 		popover.show(relativeTo: button.bounds, of: button, preferredEdge: .maxY)
 	}
 
+	/// Forgets the typed text and its message, leaving the field as if untouched.
+	private func clearDraft() {
+		hasDraft = false
+		isEdited = false
+		showMessage(for: nil)
+	}
+
 	/// Shows the saved text to edit, unless a draft holds the field.
 	private func fieldWillFocus() {
 		guard !hasDraft else {
@@ -221,7 +219,8 @@ final class DateEditor: NSStackView, NSPopoverDelegate, NSTextFieldDelegate {
 		do {
 			let stored = try planner.resolve(text, for: property, of: task.properties, at: now)
 			messageLabel.stringValue = self.text(stored) {
-				$0.formatted(date: .complete, time: .shortened)
+				// With seconds where there are any, so the preview is what's stored.
+				$0.formatted(date: .complete, time: $0.hasSeconds ? .standard : .shortened)
 			}
 			messageLabel.textColor = .secondaryLabelColor
 		} catch {
@@ -259,6 +258,10 @@ extension DateEditor {
 }
 
 extension Date {
+	fileprivate var hasSeconds: Bool {
+		Calendar.current.component(.second, from: self) != 0
+	}
+
 	/// Whether the date is the start of its day, as a date without a time resolves.
 	fileprivate var isMidnight: Bool {
 		Calendar.current.startOfDay(for: self) == self

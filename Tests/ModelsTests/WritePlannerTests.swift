@@ -406,7 +406,7 @@ struct WritePlannerTests {
 		let id = UUID()
 
 		let plan = try planner.plan(
-			.edit([id], .setInput("wait", "tomorrow")),
+			.edit([id], .setInput("wait", text: "tomorrow")),
 			tasks: [id: ["status": "pending"]],
 			at: newYear2030,
 		)
@@ -422,7 +422,7 @@ struct WritePlannerTests {
 		let id = UUID()
 
 		let plan = try planner.plan(
-			.edit([id], .setInput("wait", "due-1wk")),
+			.edit([id], .setInput("wait", text: "due-1wk")),
 			tasks: [id: ["due": "1893456000", "status": "pending"]],
 			at: .now,
 		)
@@ -444,7 +444,7 @@ struct WritePlannerTests {
 		let id = UUID()
 
 		let plan = try planner.plan(
-			.edit([id], .setInput("estimate", "1mo")),
+			.edit([id], .setInput("estimate", text: "1mo")),
 			tasks: [id: ["status": "pending"]],
 			at: .now,
 		)
@@ -458,7 +458,7 @@ struct WritePlannerTests {
 		let id = UUID()
 
 		let plan = try planner.plan(
-			.edit([id], .setInput("due", "")),
+			.edit([id], .setInput("due", text: "")),
 			tasks: [id: ["due": "1893456000", "status": "pending"]],
 			at: .now,
 		)
@@ -473,7 +473,7 @@ struct WritePlannerTests {
 
 		#expect(throws: WritePlanError.invalidInput(property: property, error)) {
 			try planner.plan(
-				.edit([id], .setInput(property, text)),
+				.edit([id], .setInput(property, text: text)),
 				tasks: [id: ["status": "pending"]],
 				at: .now,
 			)

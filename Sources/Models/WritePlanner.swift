@@ -119,6 +119,11 @@ public struct WritePlanner: Sendable {
 		}
 	}
 
+	/// The type TW stores `attribute` as: a date for the built-in date attributes, else its UDA type.
+	private func attributeType(_ attribute: String) -> UDAType? {
+		dateAttributes.contains(attribute) ? .date : taskrc.udaTypes[attribute]
+	}
+
 	/// What `task add <description>` writes: `Task::validate`'s stamps and defaults, after the
 	/// active Context's `project:` and `+tag` modifications, which the CLI applies as if typed.
 	/// Throws where `default.due` or `default.scheduled` doesn't resolve.
@@ -172,11 +177,6 @@ public struct WritePlanner: Sendable {
 			}
 			draft.set(name, value)
 		}
-	}
-
-	/// The type TW stores `attribute` as: a date for the built-in date attributes, else its UDA type.
-	private func attributeType(_ attribute: String) -> UDAType? {
-		dateAttributes.contains(attribute) ? .date : taskrc.udaTypes[attribute]
 	}
 
 	/// The tasks `properties` depend on, from its `dep_*` keys.
@@ -317,7 +317,7 @@ public enum TaskEdit: Equatable, Sendable {
 	/// resolved as the plan is made, so a relative date means the moment it's written. The attributes
 	/// it refers to, as in `wait:due-1wk`, must still hold for the plan to commit. Empty text removes
 	/// the attribute.
-	case setInput(String, String)
+	case setInput(String, text: String)
 }
 
 extension TaskEdit {

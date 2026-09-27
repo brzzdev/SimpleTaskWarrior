@@ -12,11 +12,11 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 	private let annotationList = verticalStack()
 	private let blockingList = verticalStack()
 	private let blockingSection = verticalStack()
+	/// The built-in date attributes' editors under their headings, in the order they show.
+	private let dateEditors: [(title: String, editor: DateEditor)]
 	private let dependencyList = verticalStack()
 	private let dependencyPopUp = NSPopUpButton(frame: .zero, pullsDown: true)
 	private let descriptionField = editableField(placeholder: String(localized: "Description"))
-	/// The built-in date attributes' editors under their headings, in the order they show.
-	private let dateEditors: [(title: String, editor: DateEditor)]
 	/// The task a field's edit belongs to, from its first keystroke, so a click on another row writes
 	/// it to the task it was typed for. Nil while no field has changed, which writes nothing.
 	private var editingTask: Models.Task.ID?
@@ -63,7 +63,7 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 			(String(localized: "Wait"), "wait"),
 			(String(localized: "Until"), "until"),
 		].map { title, property in
-			(title, Self.dateEditor(property, kind: .date, store: store))
+			(title, dateEditor(property, kind: .date, store: store))
 		}
 		super.init(nibName: nil, bundle: nil)
 	}
@@ -177,15 +177,6 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 		observe { [weak self] in
 			self?.updateTask()
 		}
-	}
-
-	/// An editor of the date or duration `property` that sends its edits to `store`.
-	private static func dateEditor(
-		_ property: String,
-		kind: UDAType,
-		store: StoreOf<ReplicaFeature>,
-	) -> DateEditor {
-		DateEditor(property: property, kind: kind) { store.send(.inspectorFieldSubmitted($0, $1)) }
 	}
 
 	func controlTextDidBeginEditing(_: Notification) {
@@ -473,7 +464,7 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 			}
 			let control: NSView
 			if column.type == .date || column.type == .duration {
-				control = Self.dateEditor(column.name, kind: column.type, store: store)
+				control = dateEditor(column.name, kind: column.type, store: store)
 			} else if column.values.isEmpty {
 				let field = editableField(placeholder: String(localized: "None"))
 				field.delegate = self
@@ -529,6 +520,16 @@ extension TaskRow {
 }
 
 private let addDependencyTitle = String(localized: "Add Dependency…")
+
+/// An editor of the date or duration `property` that sends its edits to `store`.
+@MainActor
+private func dateEditor(
+	_ property: String,
+	kind: UDAType,
+	store: StoreOf<ReplicaFeature>,
+) -> DateEditor {
+	DateEditor(property: property, kind: kind) { store.send(.inspectorFieldSubmitted($0, $1)) }
+}
 
 /// A single-line field, edited in place, that wraps what it shows.
 @MainActor
