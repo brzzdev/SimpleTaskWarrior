@@ -289,17 +289,16 @@ edit:
 
 # Build the app
 build: ensure-generated
-	just --no-deps xcodebuild-strict -workspace {{ workspace }} -scheme {{ scheme }} -destination '{{ destination }}' -allowProvisioningUpdates -derivedDataPath {{ derived_data }} build
+	just xcodebuild-strict -allowProvisioningUpdates build
 
 # Run the test plan (all package test targets)
 test: ensure-generated
-	just --no-deps xcodebuild-strict -workspace {{ workspace }} -scheme {{ scheme }} -destination '{{ destination }}' CODE_SIGNING_ALLOWED=NO -derivedDataPath {{ derived_data }} test
+	just xcodebuild-strict CODE_SIGNING_ALLOWED=NO test
 
 # `treatAllWarnings` can't catch every warning: Swift 6.4 downgrades a nonisolated
 # call into AppKit's imported main actor API to a warning that
-# `-warnings-as-errors` leaves alone. So this reads the raw log, which xcbeautify
-# reformats, and fails on any warning located in our own sources. Dependencies'
-# checkouts sit under `.build`, outside those directories.
+# `-warnings-as-errors` leaves alone. So this fails on any warning the raw log
+# locates in our own sources.
 #
 # It sees only what this run compiled, so an incremental build passes over a
 # warning in an unchanged file. CI builds from scratch and sees them all.
@@ -311,7 +310,8 @@ xcodebuild-strict *args:
 
 	log="$(mktemp)"
 	trap 'rm -f "$log"' EXIT
-	xcodebuild "$@" 2>&1 | tee "$log" | xcbeautify
+	xcodebuild -workspace {{ workspace }} -scheme {{ scheme }} -destination '{{ destination }}' \
+		-derivedDataPath {{ derived_data }} "$@" 2>&1 | tee "$log" | xcbeautify
 
 	# `index` rather than a regex, since a worktree path can hold regex syntax
 	# such as a branch's `fix(ci)` scope.
