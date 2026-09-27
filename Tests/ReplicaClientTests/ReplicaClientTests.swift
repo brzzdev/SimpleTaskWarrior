@@ -37,7 +37,7 @@ final class ReplicaClientTests {
 		let outcome = try await replicaClient.apply(plan, directory)
 
 		#expect(outcome.isCommitted)
-		#expect(outcome.tasks.map(\.uuid) == [uuid.uuidString.lowercased()])
+		#expect(outcome.snapshot.tasks.map(\.uuid) == [uuid.uuidString.lowercased()])
 		let undoOperations = try cli.getUndoOperations()
 		#expect(undoOperations.first == .undoPoint)
 		#expect(undoOperations.count { $0 == .undoPoint } == 1)
@@ -49,7 +49,7 @@ final class ReplicaClientTests {
 		let cli = try createReplica()
 		let uuid = try addPendingTask("Buy milk", with: cli)
 		var tasks = replicaClient.tasks(directory).makeAsyncIterator()
-		let stored = try #require(try await tasks.next()?.first)
+		let stored = try #require(try await tasks.next()?.tasks.first)
 		let plan = try WritePlanner(taskrc: .defaults, timeZone: .gmt)
 			.plan(.complete([uuid]), tasks: [uuid: stored.properties], at: .now)
 		let cliChange = try cli.apply(
@@ -62,8 +62,8 @@ final class ReplicaClientTests {
 		let outcome = try await replicaClient.apply(plan, directory)
 
 		#expect(!outcome.isCommitted)
-		#expect(outcome.tasks.first?.properties["start"] == "1790000000")
-		#expect(outcome.tasks.first?.properties["status"] == "pending")
+		#expect(outcome.snapshot.tasks.first?.properties["start"] == "1790000000")
+		#expect(outcome.snapshot.tasks.first?.properties["status"] == "pending")
 		#expect(try cli.getUndoOperations() == before)
 	}
 
@@ -71,12 +71,12 @@ final class ReplicaClientTests {
 	func tasksReadsAgainWhenTheCLICommits() async throws {
 		let cli = try createReplica()
 		var tasks = replicaClient.tasks(directory).makeAsyncIterator()
-		#expect(try await tasks.next()?.isEmpty == true)
+		#expect(try await tasks.next()?.tasks.isEmpty == true)
 
 		let uuid = try addPendingTask("Buy milk", with: cli)
 
 		#expect(
-			try await tasks.next() == [
+			try await tasks.next()?.tasks == [
 				pendingTask("Buy milk", id: uuid),
 			],
 		)
@@ -90,7 +90,7 @@ final class ReplicaClientTests {
 		var tasks = replicaClient.tasks(directory).makeAsyncIterator()
 
 		#expect(
-			try await tasks.next() == [
+			try await tasks.next()?.tasks == [
 				pendingTask("Buy milk", id: uuid),
 			],
 		)

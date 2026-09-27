@@ -9,15 +9,15 @@ import Synchronization
 @DependencyClient
 public struct ReplicaClient: Sendable {
 	/// Commits `plan` as one Undo point to the Replica a `tasks` stream has open in `directory`,
-	/// unless a value it read has changed since, then reads every task again. Those tasks don't
-	/// reach the stream, which yields only what changes after them.
+	/// unless a value it read has changed since, then reads every task again. That read doesn't
+	/// reach the stream, which yields only what changes after it.
 	public var apply: @Sendable (_ plan: WritePlan, _ directory: URL) async throws -> ApplyOutcome
 
 	/// Opens the Replica in `directory` for one window, yielding its tasks at once and again
 	/// whenever anything, the CLI included, commits to it. Holds the directory's security scope
 	/// while it reads. Ending iteration closes the Replica once any open or read in flight returns.
 	public var tasks: @Sendable (_ directory: URL)
-		-> AsyncThrowingStream<[StoredTask], any Error> = { _ in .finished() }
+		-> AsyncThrowingStream<TaskSnapshot, any Error> = { _ in .finished() }
 
 	/// Opens the Replica in `directory` and closes it again, so Open Replica… can refuse a folder
 	/// before a window exists.
@@ -28,10 +28,23 @@ public struct ApplyOutcome: Equatable, Sendable {
 	/// False where nothing was committed, because a value the plan read had changed.
 	public var isCommitted: Bool
 	/// Every task, read after the commit, or in place of it.
+	public var snapshot: TaskSnapshot
+
+	public init(isCommitted: Bool, snapshot: TaskSnapshot) {
+		self.isCommitted = isCommitted
+		self.snapshot = snapshot
+	}
+}
+
+/// Every task in a Replica, as one read found them.
+public struct TaskSnapshot: Equatable, Sendable {
+	/// Counts the Replica's reads from 0. `apply` and the `tasks` stream each read, and deliver
+	/// separately, so a read can arrive after a later one.
+	public var readIndex: Int
 	public var tasks: [StoredTask]
 
-	public init(isCommitted: Bool, tasks: [StoredTask]) {
-		self.isCommitted = isCommitted
+	public init(readIndex: Int, tasks: [StoredTask]) {
+		self.readIndex = readIndex
 		self.tasks = tasks
 	}
 }
@@ -146,6 +159,7 @@ extension DependencyValues {
 actor Replica {
 	private let engine: EngineHandle
 	private let queue: DispatchSerialQueue
+	private var readCount = 0
 	/// The `data_version` the last tasks were read at, nil before the first read.
 	private var readVersion: Int64?
 
@@ -192,12 +206,12 @@ actor Replica {
 			operations: plan.operations.map(PlannedOperation.init),
 			expectations: plan.expectations.map(Expectation.init),
 		)
-		return try ApplyOutcome(isCommitted: outcome == .committed, tasks: readTasks())
+		return try ApplyOutcome(isCommitted: outcome == .committed, snapshot: readTasks())
 	}
 
 	/// Yields every task when anything has committed since the last read.
 	func publishTasksIfChanged(
-		to continuation: AsyncThrowingStream<[StoredTask], any Error>.Continuation,
+		to continuation: AsyncThrowingStream<TaskSnapshot, any Error>.Continuation,
 	) throws {
 		guard try engine.dataVersion() != readVersion else { return }
 		// Decoded by the window, with its Taskrc's UDAs.
@@ -205,20 +219,24 @@ actor Replica {
 	}
 
 	/// Every task, recording the `data_version` they were read at.
-	private func readTasks() throws -> [StoredTask] {
+	private func readTasks() throws -> TaskSnapshot {
 		let snapshot = try engine.snapshot()
 		readVersion = snapshot.dataVersion
 		let workingSetIDs = Dictionary(
 			snapshot.workingSet.map { ($0.uuid, Int($0.id)) },
 			uniquingKeysWith: { first, _ in first },
 		)
-		return snapshot.tasks.map { task in
+		let tasks = snapshot.tasks.map { task in
 			StoredTask(
 				properties: task.properties,
 				uuid: task.uuid,
 				workingSetID: workingSetIDs[task.uuid],
 			)
 		}
+		defer {
+			readCount += 1
+		}
+		return TaskSnapshot(readIndex: readCount, tasks: tasks)
 	}
 }
 

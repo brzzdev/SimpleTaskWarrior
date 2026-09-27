@@ -32,6 +32,9 @@ struct ReplicaFeature {
 		/// The tasks a Done or Delete in progress is writing, which the table drops as the write
 		/// starts rather than once it commits, since that can wait seconds on the Replica's lock.
 		var leavingTasks: Set<Models.Task.ID> = []
+		/// The read `storedTasks` came from. A snapshot read before it is dropped, since a write's read
+		/// and the stream's are delivered separately and can arrive out of order.
+		var readIndex = 0
 		/// The tasks the sidebar and search leave, in `sortOrder`.
 		var rows: IdentifiedArrayOf<TaskRow> = []
 		/// Narrows the table after the sidebar.
@@ -228,7 +231,7 @@ struct ReplicaFeature {
 		case taskrcHintCloseButtonTapped
 		case taskrcLoaded(TaskrcClient.Loaded)
 		case taskrcSaveFailed(TaskrcSaveFailure)
-		case tasksLoaded([StoredTask])
+		case tasksLoaded(TaskSnapshot)
 		case timerTicked
 		case tryAgainButtonTapped
 		case useTaskwarriorDefaultsButtonTapped
@@ -291,8 +294,8 @@ struct ReplicaFeature {
 					.run { [bookmark = state.bookmark, bookmarkClient, replicaClient] send in
 						let directory = try bookmarkClient.resolve(bookmark)
 						await send(.directoryResolved(directory))
-						for try await tasks in replicaClient.tasks(directory) {
-							await send(.tasksLoaded(tasks))
+						for try await snapshot in replicaClient.tasks(directory) {
+							await send(.tasksLoaded(snapshot))
 						}
 					} catch: { error, send in
 						await send(.openFailed(error.localizedDescription))
@@ -400,9 +403,13 @@ struct ReplicaFeature {
 				state.taskrcSaveFailure = failure
 				return .none
 
-			case let .tasksLoaded(tasks):
+			case let .tasksLoaded(snapshot):
 				state.isReplicaOpen = true
-				state.storedTasks = tasks
+				guard snapshot.readIndex >= state.readIndex else {
+					return .none
+				}
+				state.readIndex = snapshot.readIndex
+				state.storedTasks = snapshot.tasks
 				updateRows(&state)
 				return .none
 
@@ -485,12 +492,12 @@ struct ReplicaFeature {
 				let plan = try planner.plan(action, tasks: properties(of: tasks), at: now)
 				let outcome = try await replicaClient.apply(plan, directory)
 				// The stream won't yield these, having been read already.
-				await send(.tasksLoaded(outcome.tasks))
+				await send(.tasksLoaded(outcome.snapshot))
 				guard !outcome.isCommitted else {
 					await send(.writeCommitted)
 					return
 				}
-				tasks = outcome.tasks
+				tasks = outcome.snapshot.tasks
 			}
 			await send(.writeFailed)
 		} catch: { _, send in

@@ -97,7 +97,7 @@ struct ReplicaFeatureTests {
 			$0.date.now = now
 			$0.replicaClient.apply = { plan, _ in
 				plans.withValue { $0.append(plan) }
-				return ApplyOutcome(isCommitted: true, tasks: [milkDone, dog])
+				return ApplyOutcome(isCommitted: true, snapshot: snapshot([milkDone, dog]))
 			}
 			$0.timeZone = .gmt
 		}
@@ -144,7 +144,7 @@ struct ReplicaFeatureTests {
 			$0.date.now = now
 			$0.replicaClient.apply = { plan, _ in
 				plans.withValue { $0.append(plan) }
-				return ApplyOutcome(isCommitted: true, tasks: [taxes, milk])
+				return ApplyOutcome(isCommitted: true, snapshot: snapshot([taxes, milk]))
 			}
 			$0.timeZone = .gmt
 			$0.uuid = .incrementing
@@ -192,7 +192,7 @@ struct ReplicaFeatureTests {
 		} withDependencies: {
 			$0.continuousClock = TestClock()
 			$0.date.now = now
-			$0.replicaClient.apply = { _, _ in ApplyOutcome(isCommitted: true, tasks: []) }
+			$0.replicaClient.apply = { _, _ in ApplyOutcome(isCommitted: true, snapshot: snapshot([])) }
 			$0.timeZone = .gmt
 			$0.uuid = .incrementing
 		}
@@ -228,7 +228,7 @@ struct ReplicaFeatureTests {
 		}
 
 		// Tasks with no Taskrc yet would create on TW's defaults.
-		await store.send(.tasksLoaded([])) {
+		await store.send(.tasksLoaded(snapshot([]))) {
 			$0.isReplicaOpen = true
 		}
 		await store.send(.newTaskButtonTapped)
@@ -256,7 +256,7 @@ struct ReplicaFeatureTests {
 				for await _ in commits {
 					break
 				}
-				return ApplyOutcome(isCommitted: true, tasks: [milkDone])
+				return ApplyOutcome(isCommitted: true, snapshot: snapshot([milkDone]))
 			}
 			$0.timeZone = .gmt
 		}
@@ -306,8 +306,8 @@ struct ReplicaFeatureTests {
 			$0.replicaClient.apply = { plan, _ in
 				plans.withValue { $0.append(plan) }
 				return plans.value.count == 1
-					? ApplyOutcome(isCommitted: false, tasks: [milkStarted])
-					: ApplyOutcome(isCommitted: true, tasks: [milkDone])
+					? ApplyOutcome(isCommitted: false, snapshot: snapshot([milkStarted]))
+					: ApplyOutcome(isCommitted: true, snapshot: snapshot([milkDone]))
 			}
 			$0.timeZone = .gmt
 		}
@@ -350,7 +350,7 @@ struct ReplicaFeatureTests {
 			$0.date.now = now
 			$0.replicaClient.apply = { _, _ in
 				attempts.withValue { $0 += 1 }
-				return ApplyOutcome(isCommitted: false, tasks: [milk])
+				return ApplyOutcome(isCommitted: false, snapshot: snapshot([milk]))
 			}
 			$0.timeZone = .gmt
 		}
@@ -372,6 +372,27 @@ struct ReplicaFeatureTests {
 		}
 		#expect(attempts.value == 3)
 		await store.finish()
+	}
+
+	@Test
+	func snapshotReadBeforeTheLastIsDropped() async throws {
+		let milk = storedTask(0, "Buy milk", workingSetID: 1)
+		let initialState = try loadedState([])
+		let store = TestStore(initialState: initialState) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.date.now = now
+			$0.timeZone = .gmt
+		}
+
+		await store.send(.tasksLoaded(snapshot([milk], readIndex: 2))) {
+			$0.allRows = try [row(milk)]
+			$0.readIndex = 2
+			$0.rows = try [row(milk)]
+			$0.storedTasks = [milk]
+		}
+		// A write's read, delivered after the stream's later one.
+		await store.send(.tasksLoaded(snapshot([], readIndex: 1)))
 	}
 
 	@Test
@@ -532,7 +553,7 @@ struct ReplicaFeatureTests {
 	@Test
 	func listsPendingTasksSortedAndDropsSelectedTasksThatLeave() async {
 		let directory = URL(filePath: "/Users/paul/.task")
-		let (tasks, continuation) = AsyncThrowingStream<[StoredTask], any Error>.makeStream()
+		let (tasks, continuation) = AsyncThrowingStream<TaskSnapshot, any Error>.makeStream()
 		let store = TestStore(initialState: ReplicaFeature.State(bookmark: Data())) {
 			ReplicaFeature()
 		} withDependencies: {
@@ -555,7 +576,7 @@ struct ReplicaFeatureTests {
 		}
 
 		// Tied on Urgency, so in ID order.
-		continuation.yield([dog, taxes, milk])
+		continuation.yield(snapshot([dog, taxes, milk]))
 		await store.receive(\.tasksLoaded) {
 			$0.allRows = try [row(milk), row(dog), row(taxes, view: .completed)]
 			$0.isReplicaOpen = true
@@ -572,7 +593,7 @@ struct ReplicaFeatureTests {
 		}
 
 		let milkDone = storedTask(0, "Buy milk", status: "completed", workingSetID: 1)
-		continuation.yield([dog, taxes, milkDone])
+		continuation.yield(snapshot([dog, taxes, milkDone]))
 		await store.receive(\.tasksLoaded) {
 			$0.allRows = try [row(dog), row(taxes, view: .completed), row(milkDone, view: .completed)]
 			$0.storedTasks = [dog, taxes, milkDone]
@@ -586,7 +607,7 @@ struct ReplicaFeatureTests {
 
 	@Test
 	func recomputesUrgencyEveryMinute() async {
-		let (tasks, continuation) = AsyncThrowingStream<[StoredTask], any Error>.makeStream()
+		let (tasks, continuation) = AsyncThrowingStream<TaskSnapshot, any Error>.makeStream()
 		let clock = TestClock()
 		let time = LockIsolated(now)
 		let store = TestStore(initialState: ReplicaFeature.State(bookmark: Data())) {
@@ -614,7 +635,7 @@ struct ReplicaFeatureTests {
 			$0.directory = replicaDirectory
 		}
 		// Tied on Urgency, so in ID order.
-		continuation.yield([call, post])
+		continuation.yield(snapshot([call, post]))
 		await store.receive(\.tasksLoaded) {
 			$0.allRows = try [row(post), row(call)]
 			$0.isReplicaOpen = true
@@ -649,7 +670,7 @@ struct ReplicaFeatureTests {
 		let template = storedTask(3, "Water the plants", status: "recurring", workingSetID: nil)
 		let storedTasks = [blocked, blocker, estimated, template]
 
-		await store.send(.tasksLoaded(storedTasks)) {
+		await store.send(.tasksLoaded(snapshot(storedTasks))) {
 			$0.allRows = try [
 				row(blocker, urgency: 8),
 				row(estimated),
@@ -699,7 +720,7 @@ struct ReplicaFeatureTests {
 			workingSetID: 2,
 			["annotation_\(Int(now.timeIntervalSince1970))": "about the cafe"],
 		)
-		await store.send(.tasksLoaded([book, call]))
+		await store.send(.tasksLoaded(snapshot([book, call])))
 
 		// TW's defaults set `search.case.sensitive`, which the search ignores.
 		await store.send(\.binding.searchText, "CAFE")
@@ -757,7 +778,7 @@ struct ReplicaFeatureTests {
 		store.exhaustivity = .off
 		let later = String(Int(now.timeIntervalSince1970) + 3_600)
 		await store.send(
-			.tasksLoaded([
+			.tasksLoaded(snapshot([
 				storedTask(0, "Call the plumber", workingSetID: 1, ["project": "Home", "tag_phone": "x"]),
 				storedTask(1, "Dig the beds", workingSetID: 2, ["project": "Home.Garden"]),
 				storedTask(2, "Essay", workingSetID: 3, ["project": "Homework", "tag_phone": "x"]),
@@ -769,7 +790,7 @@ struct ReplicaFeatureTests {
 					["project": "Work", "tag_phone": "x", "wait": later],
 				),
 				storedTask(5, "Paint", status: "completed", workingSetID: nil, ["project": "Home"]),
-			]),
+			])),
 		)
 		let descriptions = { store.state.rows.map(\.task.description).sorted() }
 
@@ -835,15 +856,15 @@ struct ReplicaFeatureTests {
 		await store.send(\.binding.sidebarSelection, [.view(.completed)])
 
 		// Tied on Urgency and without IDs, so in UUID order whichever order the Replica reads them in.
-		await store.send(.tasksLoaded([sweep, paint]))
+		await store.send(.tasksLoaded(snapshot([sweep, paint])))
 		#expect(store.state.rows.map(\.id) == [UUID(0), UUID(1)])
-		await store.send(.tasksLoaded([paint, sweep]))
+		await store.send(.tasksLoaded(snapshot([paint, sweep])))
 		#expect(store.state.rows.map(\.id) == [UUID(0), UUID(1)])
 	}
 
 	@Test
 	func waitingTaskMovesToPendingAsItsWaitPasses() async {
-		let (tasks, continuation) = AsyncThrowingStream<[StoredTask], any Error>.makeStream()
+		let (tasks, continuation) = AsyncThrowingStream<TaskSnapshot, any Error>.makeStream()
 		let clock = TestClock()
 		let time = LockIsolated(now)
 		let store = TestStore(initialState: ReplicaFeature.State(bookmark: Data())) {
@@ -867,7 +888,7 @@ struct ReplicaFeatureTests {
 		)
 
 		let task = await store.send(.fetchRequested)
-		continuation.yield([call])
+		continuation.yield(snapshot([call]))
 		await store.receive(\.tasksLoaded)
 		#expect(store.state.rows.isEmpty)
 		#expect(store.state.sidebar.views.map(\.count) == [0, 1, 0, 0])
@@ -938,6 +959,11 @@ private func loadedState(
 	state.storedTasks = tasks
 	state.taskrc = TaskrcClient.Loaded(taskrc: .defaults, url: nil)
 	return state
+}
+
+/// `tasks` as the Replica's read number `readIndex`.
+private func snapshot(_ tasks: [StoredTask], readIndex: Int = 0) -> TaskSnapshot {
+	TaskSnapshot(readIndex: readIndex, tasks: tasks)
 }
 
 /// The planner a window on TW's defaults writes with.
