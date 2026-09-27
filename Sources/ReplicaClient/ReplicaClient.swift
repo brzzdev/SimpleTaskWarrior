@@ -213,7 +213,8 @@ actor Replica {
 		var operations: [UndoOperation]
 
 		/// What each property the point changes held before it, which a redo must find there still:
-		/// only then has nothing written it since the undo.
+		/// only then has nothing written it since the undo. That's the first update's old value, since
+		/// a later update to the same property starts from a value the point itself wrote.
 		var redoExpectations: [Expectation] {
 			var seen: Set<[String]> = []
 			return operations.compactMap { operation in
@@ -299,7 +300,8 @@ actor Replica {
 	/// Re-applies the Undo point last undone, through the same writes a plan makes, where nothing
 	/// has written since, stamping `modified` afresh as any change does. The engine checks the
 	/// point's properties just before it commits, as it does a plan's, so a CLI write landing after
-	/// the `data_version` check refuses the redo rather than being overwritten. One attempt only: a
+	/// the `data_version` check refuses the redo, but one landing between that check and the commit
+	/// still gets through, since TaskChampion can't make a commit conditional. One attempt only: a
 	/// redo that fails isn't offered again.
 	func redo() throws -> UndoOutcome {
 		guard let redoPoint, try engine.dataVersion() == redoPoint.dataVersion else {
