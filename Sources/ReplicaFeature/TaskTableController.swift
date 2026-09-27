@@ -312,9 +312,7 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 		}
 		let opensNewTaskRow = isNewTaskRowPresented && !self.isNewTaskRowPresented
 		let keepsNewTaskRow = isNewTaskRowPresented && self.isNewTaskRowPresented
-		if
-			rows != self.rows || isNewTaskRowPresented != self.isNewTaskRowPresented
-		{
+		if rows != self.rows || isNewTaskRowPresented != self.isNewTaskRowPresented {
 			self.rows = rows
 			self.isNewTaskRowPresented = isNewTaskRowPresented
 			if keepsNewTaskRow {
