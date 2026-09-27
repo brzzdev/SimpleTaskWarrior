@@ -110,6 +110,13 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 			}
 			beginOpenPanel(for: fileImporter)
 		}
+		// The store clears a search that would hide the task New Task created.
+		observe { [weak self] in
+			guard let self, searchItem.searchField.stringValue != store.searchText else {
+				return
+			}
+			searchItem.searchField.stringValue = store.searchText
+		}
 		fetch = _Concurrency.Task { [store] in
 			await store.send(.fetchRequested).finish()
 		}
