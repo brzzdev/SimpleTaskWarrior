@@ -160,7 +160,6 @@ struct ReplicaFeatureTests {
 		// Untagged, it's no longer in the sidebar's tag, yet it stays, selected.
 		await store.receive(\.tasksLoaded) {
 			$0.allRows = try [row(dog, urgency: 0.8), row(milkUntagged)]
-			$0.highestUrgency = 0.8
 			$0.rows = try [row(dog, urgency: 0.8), row(milkUntagged)]
 			$0.storedTasks = [milkUntagged, dog]
 		}
@@ -908,7 +907,6 @@ struct ReplicaFeatureTests {
 		await clock.advance(by: .seconds(60))
 		await store.receive(\.timerTicked) {
 			$0.allRows = try [row(call, urgency: 5), row(post)]
-			$0.highestUrgency = 5
 			$0.rows = try [row(call, urgency: 5), row(post)]
 		}
 
@@ -936,7 +934,6 @@ struct ReplicaFeatureTests {
 				row(estimated),
 				row(blocked, isBlocked: true, urgency: -5),
 			]
-			$0.highestUrgency = 8
 			$0.isReplicaOpen = true
 			$0.storedTasks = storedTasks
 			$0.rows = try [

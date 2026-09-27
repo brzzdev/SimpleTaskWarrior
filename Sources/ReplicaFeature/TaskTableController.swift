@@ -12,7 +12,6 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 	NSTableViewDelegate, NSTextFieldDelegate
 {
 	private let autosaveName: String
-	private var highestUrgency = 0.0
 	/// The sort a Replica starts with, which a saved one replaces. Kept from the start, since
 	/// reading the store's in `updateColumns` would run it again on every sort.
 	private let initialSortOrder: [TaskSort]
@@ -160,7 +159,7 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 			return cell
 		}
 		switch column {
-		case .age, .due, .id, .project, .scheduled, .tags, .uda, .until, .wait:
+		case .age, .due, .id, .project, .scheduled, .tags, .uda, .until, .urgency, .wait:
 			let cell = table.reusedCell(TextCell.init)
 			cell.configure(column, of: row)
 			return cell
@@ -168,11 +167,6 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 		case .description:
 			let cell = table.reusedCell(DescriptionCell.init)
 			cell.configure(row)
-			return cell
-
-		case .urgency:
-			let cell = table.reusedCell(UrgencyCell.init)
-			cell.configure(urgency: row.urgency, highest: highestUrgency)
 			return cell
 		}
 	}
@@ -311,7 +305,6 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 	/// the store selects, such as one New Task created, and to the new-task row as it opens.
 	private func updateRows() {
 		let rows = store.rows
-		let highestUrgency = store.highestUrgency
 		let isNewTaskRowPresented = store.isNewTaskRowPresented
 		isFollowingStore = true
 		defer {
@@ -320,11 +313,9 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 		let opensNewTaskRow = isNewTaskRowPresented && !self.isNewTaskRowPresented
 		let keepsNewTaskRow = isNewTaskRowPresented && self.isNewTaskRowPresented
 		if
-			rows != self.rows || highestUrgency != self.highestUrgency
-			|| isNewTaskRowPresented != self.isNewTaskRowPresented
+			rows != self.rows || isNewTaskRowPresented != self.isNewTaskRowPresented
 		{
 			self.rows = rows
-			self.highestUrgency = highestUrgency
 			self.isNewTaskRowPresented = isNewTaskRowPresented
 			if keepsNewTaskRow {
 				// Reloading the new-task row would end its editing and submit the draft early.
@@ -401,7 +392,7 @@ private func makeColumn(
 @MainActor
 private func sampleCell(_ column: TaskColumn) -> NSView? {
 	switch column {
-	case .age, .due, .id, .scheduled, .until, .wait:
+	case .age, .due, .id, .scheduled, .until, .urgency, .wait:
 		let cell = TextCell()
 		cell.configure(column, of: sampleRow)
 		return cell
@@ -413,11 +404,6 @@ private func sampleCell(_ column: TaskColumn) -> NSView? {
 
 	case .project, .tags, .uda:
 		return nil
-
-	case .urgency:
-		let cell = UrgencyCell()
-		cell.configure(urgency: sampleRow.urgency, highest: 0)
-		return cell
 	}
 }
 
@@ -529,8 +515,9 @@ private final class TextCell: NSTableCellView {
 	}
 
 	func configure(_ column: TaskColumn, of row: TaskRow) {
+		textField?.alignment = column == .urgency ? .right : .natural
 		textField?.font =
-			column == .id
+			column == .id || column == .urgency
 				? .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
 				: .systemFont(ofSize: NSFont.systemFontSize)
 		textField?.stringValue = text(column, of: row)
@@ -626,64 +613,3 @@ private final class NewTaskCell: NSTableCellView {
 		fatalError("init(coder:) has not been implemented")
 	}
 }
-
-/// Urgency to one decimal, over a thin bar scaled to the list's highest. Urgency of 0 or less
-/// draws no bar.
-private final class UrgencyCell: NSTableCellView {
-	private let bar = CALayer()
-	/// The bar's share of the cell's width.
-	private var fraction = 0.0
-
-	init() {
-		super.init(frame: .zero)
-		wantsLayer = true
-		bar.cornerRadius = urgencyBarHeight / 2
-		layer?.addSublayer(bar)
-		let label = NSTextField(labelWithString: "")
-		label.alignment = .right
-		label.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
-		label.translatesAutoresizingMaskIntoConstraints = false
-		addSubview(label)
-		NSLayoutConstraint.activate([
-			label.centerYAnchor.constraint(equalTo: centerYAnchor),
-			label.leadingAnchor.constraint(equalTo: leadingAnchor),
-			label.trailingAnchor.constraint(equalTo: trailingAnchor),
-		])
-		textField = label
-	}
-
-	@available(*, unavailable)
-	required init?(coder: NSCoder) {
-		fatalError("init(coder:) has not been implemented")
-	}
-
-	override func layout() {
-		super.layout()
-		guard let label = textField else {
-			return
-		}
-		// Under the text, as a background aligned to its bottom.
-		bar.frame = CGRect(
-			x: label.frame.minX,
-			y: label.frame.minY,
-			width: label.frame.width * fraction,
-			height: urgencyBarHeight,
-		)
-		effectiveAppearance.performAsCurrentDrawingAppearance {
-			bar.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.4).cgColor
-		}
-	}
-
-	override func viewDidChangeEffectiveAppearance() {
-		super.viewDidChangeEffectiveAppearance()
-		needsLayout = true
-	}
-
-	func configure(urgency: Double, highest: Double) {
-		fraction = urgency > 0 && highest > 0 ? urgency / highest : 0
-		textField?.stringValue = urgency.formatted(.number.precision(.fractionLength(1)))
-		needsLayout = true
-	}
-}
-
-private let urgencyBarHeight: CGFloat = 2
