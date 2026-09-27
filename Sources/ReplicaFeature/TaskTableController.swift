@@ -360,6 +360,7 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 private let descriptionIdentifier = TaskColumn.description.identifier
 
 /// The columns every Taskrc has, in their default order. The dates past Due start hidden.
+@MainActor
 private func builtInColumns() -> [NSTableColumn] {
 	let hidden = [
 		makeColumn(.age, title: String(localized: "Age")),
@@ -381,6 +382,7 @@ private func builtInColumns() -> [NSTableColumn] {
 }
 
 /// A column for `column`, whose header sorts in `firstOrder` when first clicked.
+@MainActor
 private func makeColumn(
 	_ column: TaskColumn,
 	firstOrder: SortOrder = .forward,
@@ -396,6 +398,7 @@ private func makeColumn(
 }
 
 /// A cell showing `column` for `sampleRow`, or nil where no content sets a floor.
+@MainActor
 private func sampleCell(_ column: TaskColumn) -> NSView? {
 	switch column {
 	case .age, .due, .id, .scheduled, .until, .wait:
@@ -506,6 +509,7 @@ private func udaText(_ value: UDAValue?) -> String {
 }
 
 /// A caption-sized label, as the description's markers are.
+@MainActor
 private func captionLabel(_ string: String, color: NSColor) -> NSTextField {
 	let label = NSTextField(labelWithString: string)
 	label.font = .preferredFont(forTextStyle: .caption1)
