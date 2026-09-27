@@ -81,6 +81,14 @@ struct ReplicaFeature {
 			isReplicaOpen && failure == nil && taskrc != nil && writeProgress == nil
 		}
 
+		/// Whether Grant Access… can fix the Taskrc's problem.
+		var canGrantAccess: Bool {
+			if case .grant = taskrcRemedy {
+				return true
+			}
+			return false
+		}
+
 		/// Whether Redo applies: while nothing has written since the undo, and no write is in progress.
 		var canRedo: Bool {
 			redoName != nil && writeProgress == nil
@@ -90,14 +98,6 @@ struct ReplicaFeature {
 		/// write is in progress.
 		var canUndo: Bool {
 			undoName != nil && writeProgress == nil
-		}
-
-		/// Whether Grant Access… can fix the Taskrc's problem.
-		var canGrantAccess: Bool {
-			if case .grant = taskrcRemedy {
-				return true
-			}
-			return false
 		}
 
 		/// The commands that apply to every selected task. None applies while a write is in progress,
@@ -878,6 +878,48 @@ struct ReplicaFeature {
 	}
 }
 
+/// How far apart TW stores annotations: one to a second, keyed by it.
+private let annotationSpacing: TimeInterval = 1
+
+/// How far ahead of now an annotation's entry still moves a new one past it: far beyond any burst
+/// of notes a person can add, and short enough that a clock set back soon stops mattering.
+private let annotationWindow: TimeInterval = 60
+
+/// How many times a write is planned before a plan the engine keeps refusing as stale fails it.
+private let planAttempts = 3
+
+/// How long a write runs before the subtitle says it's saving.
+private let savingDelay = Duration.milliseconds(500)
+
+/// How often an open window computes its tasks' Urgency again.
+private let urgencyInterval = Duration.seconds(60)
+
+/// How an Undo point's name refers to `attribute`: a UDA by its label.
+private func attributeName(_ attribute: String, udaColumns: [UDAColumn]) -> String {
+	switch attribute {
+	case "description": String(localized: "Description")
+	case "due": String(localized: "Due Date")
+	case "project": String(localized: "Project")
+	case "scheduled": String(localized: "Scheduled Date")
+	case "until": String(localized: "Until Date")
+	case "wait": String(localized: "Wait Date")
+	default: udaColumns.first { $0.name == attribute }?.label ?? attribute
+	}
+}
+
+/// `single` where `ids` is one task, else `multiple`, which counts them.
+private func counted(_ ids: [Models.Task.ID], _ single: String, _ multiple: String) -> String {
+	ids.count == 1 ? single : multiple
+}
+
+/// Every task's properties, as the planner reads them.
+private func properties(of tasks: [StoredTask]) -> [Models.Task.ID: [String: String]] {
+	Dictionary(
+		tasks.compactMap { task in UUID(uuidString: task.uuid).map { ($0, task.properties) } },
+		uniquingKeysWith: { first, _ in first },
+	)
+}
+
 /// The name the Edit menu gives `action`'s Undo point, as in "Undo Change Due Date".
 private func undoName(for action: WriteAction, udaColumns: [UDAColumn]) -> String {
 	switch action {
@@ -924,46 +966,4 @@ private func undoName(for action: WriteAction, udaColumns: [UDAColumn]) -> Strin
 	case let .stop(ids):
 		counted(ids, String(localized: "Stop Task"), String(localized: "Stop \(ids.count) Tasks"))
 	}
-}
-
-/// `single` where `ids` is one task, else `multiple`, which counts them.
-private func counted(_ ids: [Models.Task.ID], _ single: String, _ multiple: String) -> String {
-	ids.count == 1 ? single : multiple
-}
-
-/// How an Undo point's name refers to `attribute`: a UDA by its label.
-private func attributeName(_ attribute: String, udaColumns: [UDAColumn]) -> String {
-	switch attribute {
-	case "description": String(localized: "Description")
-	case "due": String(localized: "Due Date")
-	case "project": String(localized: "Project")
-	case "scheduled": String(localized: "Scheduled Date")
-	case "until": String(localized: "Until Date")
-	case "wait": String(localized: "Wait Date")
-	default: udaColumns.first { $0.name == attribute }?.label ?? attribute
-	}
-}
-
-/// How far apart TW stores annotations: one to a second, keyed by it.
-private let annotationSpacing: TimeInterval = 1
-
-/// How far ahead of now an annotation's entry still moves a new one past it: far beyond any burst
-/// of notes a person can add, and short enough that a clock set back soon stops mattering.
-private let annotationWindow: TimeInterval = 60
-
-/// How many times a write is planned before a plan the engine keeps refusing as stale fails it.
-private let planAttempts = 3
-
-/// How long a write runs before the subtitle says it's saving.
-private let savingDelay = Duration.milliseconds(500)
-
-/// How often an open window computes its tasks' Urgency again.
-private let urgencyInterval = Duration.seconds(60)
-
-/// Every task's properties, as the planner reads them.
-private func properties(of tasks: [StoredTask]) -> [Models.Task.ID: [String: String]] {
-	Dictionary(
-		tasks.compactMap { task in UUID(uuidString: task.uuid).map { ($0, task.properties) } },
-		uniquingKeysWith: { first, _ in first },
-	)
 }

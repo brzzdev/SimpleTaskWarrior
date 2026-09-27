@@ -282,14 +282,18 @@ actor Replica {
 	}
 
 	/// Re-applies the Undo point last undone, through the same writes a plan makes, where nothing
-	/// has written since. A CLI write landing between the check and the commit still gets through.
+	/// has written since, stamping `modified` afresh as any change does. A CLI write landing between
+	/// the check and the commit still gets through. One attempt only: a redo that fails isn't
+	/// offered again.
 	func redo() throws -> UndoOutcome {
 		guard let redoPoint, try engine.dataVersion() == redoPoint.dataVersion else {
 			return try notApplied()
 		}
+		self.redoPoint = nil
 		let point = redoPoint.point
+		let modified = String(Date.now.epoch)
 		let outcome = try engine.apply(
-			operations: point.operations.compactMap(PlannedOperation.init),
+			operations: point.operations.compactMap { PlannedOperation($0, modified: modified) },
 			expectations: [],
 		)
 		guard case let .committed(operations) = outcome, !operations.isEmpty else {
@@ -396,16 +400,6 @@ extension Engine.Status {
 	}
 }
 
-extension UndoOperation {
-	/// The task the operation changes, nil for an Undo point.
-	fileprivate var uuid: String? {
-		switch self {
-		case let .create(uuid), let .delete(uuid, _), let .update(uuid, _, _, _, _): uuid
-		case .undoPoint: nil
-		}
-	}
-}
-
 extension Expectation {
 	fileprivate init(_ expectation: WritePlan.Expectation) {
 		self.init(
@@ -417,9 +411,9 @@ extension Expectation {
 }
 
 extension PlannedOperation {
-	/// The write that makes `operation` again, nil for an Undo point. The app never deletes a task
-	/// outright, so it never commits a delete to redo.
-	fileprivate init?(_ operation: UndoOperation) {
+	/// The write that makes `operation` again, with `modified` set to `modified`, nil for an Undo
+	/// point. The app never deletes a task outright, so it never commits a delete to redo.
+	fileprivate init?(_ operation: UndoOperation, modified: String) {
 		switch operation {
 		case let .create(uuid):
 			self = .create(uuid: uuid)
@@ -428,7 +422,11 @@ extension PlannedOperation {
 			return nil
 
 		case let .update(uuid, property, _, value, _):
-			self = .setValue(uuid: uuid, property: property, value: value)
+			self = .setValue(
+				uuid: uuid,
+				property: property,
+				value: property == "modified" ? modified : value,
+			)
 		}
 	}
 
@@ -442,6 +440,16 @@ extension PlannedOperation {
 
 		case let .setValue(uuid, property, value):
 			self = .setValue(uuid: uuid.uuidString.lowercased(), property: property, value: value)
+		}
+	}
+}
+
+extension UndoOperation {
+	/// The task the operation changes, nil for an Undo point.
+	fileprivate var uuid: String? {
+		switch self {
+		case let .create(uuid), let .delete(uuid, _), let .update(uuid, _, _, _, _): uuid
+		case .undoPoint: nil
 		}
 	}
 }

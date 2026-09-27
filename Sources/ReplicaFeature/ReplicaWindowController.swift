@@ -400,19 +400,25 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 	}
 }
 
-/// Leaves ⌘Z and ⌘⇧Z to the window's own undo manager only while a field is being edited, where
-/// they undo typing. Otherwise the window disowns them, so they reach the controller, which undoes
-/// the Replica's changes: `NSWindow` handles `undo:` and `redo:` itself, ahead of its controller.
+/// Leaves ⌘Z and ⌘⇧Z to the window's own undo manager while a field being edited has typing to
+/// undo or redo. Otherwise the window disowns them, so they reach the controller, which undoes the
+/// Replica's changes: `NSWindow` handles `undo:` and `redo:` itself, ahead of its controller. A
+/// field can keep the cursor once its edit is written, as a date field does after Return, so it's
+/// the typing that decides, not the cursor.
 private final class ReplicaWindow: NSWindow {
 	override func responds(to selector: Selector!) -> Bool {
-		guard
-			selector == #selector(ReplicaWindowController.undo(_:))
-			|| selector == #selector(ReplicaWindowController.redo(_:))
-		else {
+		let isUndo = selector == #selector(ReplicaWindowController.undo(_:))
+		guard isUndo || selector == #selector(ReplicaWindowController.redo(_:)) else {
 			return super.responds(to: selector)
 		}
 		// Only AppKit's search for an action's target asks about these, on the main thread.
-		return MainActor.assumeIsolated { firstResponder is NSText }
+		return MainActor.assumeIsolated {
+			// The field editor's own undo manager, which its field may supply, not the window's.
+			guard let undoManager = (firstResponder as? NSText)?.undoManager else {
+				return false
+			}
+			return isUndo ? undoManager.canUndo : undoManager.canRedo
+		}
 	}
 }
 
