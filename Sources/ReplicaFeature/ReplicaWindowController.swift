@@ -322,7 +322,8 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 		if command == .delete, window?.firstResponder is NSText {
 			return false
 		}
-		return store.enabledCommands.contains(command)
+		// The menu keeps the commands Mark Pending replaces, disabled, where the toolbar hides them.
+		return store.enabledCommands.contains(command) && store.state.isOffered(command)
 	}
 }
 
