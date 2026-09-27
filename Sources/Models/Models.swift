@@ -207,7 +207,7 @@ public enum Status: String, Sendable {
 
 extension Status {
 	/// Neither completed nor deleted, which is what TW's blocked rule and date tags ask.
-	var isOpen: Bool {
+	public var isOpen: Bool {
 		self != .completed && self != .deleted
 	}
 }
@@ -220,7 +220,8 @@ public enum UDAValue: Equatable, Sendable {
 	case string(String)
 	case uuid(UUID)
 
-	init(_ value: String, as type: UDAType) {
+	/// Reads `value` as `type`, keeping it as a string where it doesn't read as one.
+	public init(_ value: String, as type: UDAType) {
 		switch type {
 		case .date:
 			self = Date(epoch: value).map(Self.date) ?? .string(value)

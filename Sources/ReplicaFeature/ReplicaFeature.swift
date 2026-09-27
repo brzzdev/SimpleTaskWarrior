@@ -21,17 +21,29 @@ struct ReplicaFeature {
 		var directory: URL?
 		var failure: String?
 		var fileImporter: FileImporter?
+		/// Set as New Task selects the task it created, for the inspector to put the cursor in its
+		/// description, until the selection changes.
+		var focusesDescription = false
 		/// Set once the hint that offers Choose Taskrc… has been shown, in any window.
 		@Shared(.appStorage("hasShownTaskrcHint")) var hasShownTaskrcHint = false
 		/// The highest Urgency in the table, which scales every row's bar.
 		var highestUrgency = 0.0
+		/// The task the inspector shows: the one selected task, kept by UUID until the selection changes,
+		/// even once it leaves the table.
+		var inspectedTask: Models.Task.ID?
 		var isNewTaskRowPresented = false
 		/// Set once the Replica's tasks first arrive, by which point `apply` can reach it.
 		var isReplicaOpen = false
 		var isTaskrcHintPresented = false
+		/// The task an inspector edit may move out of the table, which the table keeps until the
+		/// selection changes.
+		var keptTask: Models.Task.ID?
 		/// The tasks a Done or Delete in progress is writing, which the table drops as the write
 		/// starts rather than once it commits, since that can wait seconds on the Replica's lock.
 		var leavingTasks: Set<Models.Task.ID> = []
+		/// Writes asked for while another was in progress, written in order once it ends. Only inspector
+		/// edits get here: every other write is disabled while one runs.
+		var queuedWrites: [WriteAction] = []
 		/// The read `storedTasks` came from. A snapshot read before it is dropped, since a write's read
 		/// and the stream's are delivered separately and can arrive out of order.
 		var readIndex = 0
@@ -106,6 +118,11 @@ struct ReplicaFeature {
 			taskrc?.url != nil
 		}
 
+		/// The row the inspector shows, whether or not the table does.
+		var inspectedRow: TaskRow? {
+			inspectedTask.flatMap { id in allRows.first { $0.id == id } }
+		}
+
 		/// Whether Start/Stop stops, which it does when every selected task is active.
 		var isStopping: Bool {
 			isStopping(selectedTasks())
@@ -161,6 +178,15 @@ struct ReplicaFeature {
 			self.bookmark = bookmark
 		}
 
+		/// The task `offset` rows from the inspected one, where the table shows both.
+		func adjacentTask(_ offset: Int) -> Models.Task.ID? {
+			guard let inspectedTask, let index = rows.index(id: inspectedTask) else {
+				return nil
+			}
+			let adjacent = index + offset
+			return rows.indices.contains(adjacent) ? rows[adjacent].id : nil
+		}
+
 		/// Whether the toolbar and a row's context menu list `command`. Mark Pending takes the place of
 		/// the others where every selected fixed view is Completed or Deleted.
 		func isOffered(_ command: TaskCommand) -> Bool {
@@ -208,26 +234,36 @@ struct ReplicaFeature {
 	}
 
 	enum Action: BindableAction {
+		case annotationDeleteButtonTapped(Models.Task.ID, entry: Date)
+		/// Return in the inspector's new-annotation field, or clicking away from it.
+		case annotationSubmitted(Models.Task.ID, String)
 		case binding(BindingAction<State>)
 		case chooseTaskrcButtonTapped
 		case deleteButtonTapped
+		case dependencyChosen(Models.Task.ID, dependency: Models.Task.ID)
+		case dependencyRemoveButtonTapped(Models.Task.ID, dependency: Models.Task.ID)
 		case directoryResolved(URL)
 		case doneButtonTapped
 		case fetchRequested
 		case fileChosen(URL, for: FileImporter)
 		case grantAccessButtonTapped
+		/// Return, Tab or clicking away from an inspector field, or choosing from its menu.
+		case inspectorFieldSubmitted(Models.Task.ID, TaskEdit)
 		case markPendingButtonTapped
 		case newTaskButtonTapped
 		/// Return in the new-task row, or clicking away from it.
 		case newTaskDescriptionSubmitted(String)
 		/// Escape in the new-task row.
 		case newTaskEditingCancelled
+		case nextTaskButtonTapped
 		case openFailed(String)
 		case pairingChanged
+		case previousTaskButtonTapped
 		case savingDelayElapsed
 		/// A column header was clicked, or the table restored the Replica's sort.
 		case sortOrderChanged([TaskSort])
 		case startStopButtonTapped
+		case tagRemoveButtonTapped(Models.Task.ID, tag: String)
 		case taskrcHintCloseButtonTapped
 		case taskrcLoaded(TaskrcClient.Loaded)
 		case taskrcSaveFailed(TaskrcSaveFailure)
@@ -256,8 +292,20 @@ struct ReplicaFeature {
 		BindingReducer()
 		Reduce { state, action in
 			switch action {
+			case let .annotationDeleteButtonTapped(id, entry):
+				return edit(id, .removeAnnotation(entry: entry), &state)
+
+			case let .annotationSubmitted(id, text):
+				// Should it queue, `finishWrite` gives it its entry again as it starts.
+				return edit(id, .addAnnotation(text, entry: annotationEntry(for: id, state)), &state)
+
 			case .binding(\.searchText), .binding(\.sidebarSelection):
+				state.keptTask = nil
 				filterRows(&state)
+				return .none
+
+			case .binding(\.selection):
+				inspectSelection(&state)
 				return .none
 
 			case .binding:
@@ -269,6 +317,12 @@ struct ReplicaFeature {
 
 			case .deleteButtonTapped:
 				return perform(.delete, &state)
+
+			case let .dependencyChosen(id, dependency):
+				return edit(id, .addDependency(dependency), &state)
+
+			case let .dependencyRemoveButtonTapped(id, dependency):
+				return edit(id, .removeDependency(dependency), &state)
 
 			case let .directoryResolved(directory):
 				state.directory = directory
@@ -334,6 +388,9 @@ struct ReplicaFeature {
 				state.fileImporter = state.taskrcRemedy
 				return .none
 
+			case let .inspectorFieldSubmitted(id, taskEdit):
+				return edit(id, taskEdit, &state)
+
 			case .markPendingButtonTapped:
 				return perform(.markPending, &state)
 
@@ -361,12 +418,20 @@ struct ReplicaFeature {
 				state.isNewTaskRowPresented = false
 				return .none
 
+			case .nextTaskButtonTapped:
+				selectAdjacentTask(1, &state)
+				return .none
+
 			case let .openFailed(failure):
 				state.failure = failure
 				return .none
 
 			case .pairingChanged:
 				return loadTaskrc(for: state)
+
+			case .previousTaskButtonTapped:
+				selectAdjacentTask(-1, &state)
+				return .none
 
 			case .savingDelayElapsed:
 				// The delay can elapse just as the write ends.
@@ -382,6 +447,9 @@ struct ReplicaFeature {
 
 			case .startStopButtonTapped:
 				return perform(.startStop, &state)
+
+			case let .tagRemoveButtonTapped(id, tag):
+				return edit(id, .removeTag(tag), &state)
 
 			case .taskrcHintCloseButtonTapped:
 				state.isTaskrcHintPresented = false
@@ -434,12 +502,10 @@ struct ReplicaFeature {
 
 			case .writeCommitted:
 				selectCreatedTask(&state)
-				finishWrite(&state)
-				return .none
+				return finishWrite(&state)
 
 			case .writeFailed:
-				finishWrite(&state)
-				return .none
+				return finishWrite(&state)
 			}
 		}
 	}
@@ -474,9 +540,13 @@ struct ReplicaFeature {
 
 	/// The one path every write takes. Plans `action` against the tasks as last read, and while the
 	/// engine refuses the plan as stale, plans it again against the tasks it read instead, up to
-	/// `planAttempts` times. Every other write waits until it finishes.
+	/// `planAttempts` times. Every other write queues until it finishes.
 	private func write(_ action: WriteAction, _ state: inout State) -> Effect<Action> {
-		guard state.writeProgress == nil, let directory = state.directory else {
+		guard let directory = state.directory else {
+			return .none
+		}
+		guard state.writeProgress == nil else {
+			state.queuedWrites.append(action)
 			return .none
 		}
 		state.writeProgress = .running
@@ -505,12 +575,62 @@ struct ReplicaFeature {
 		}
 	}
 
-	/// Ends the write in progress, whatever became of it.
-	private func finishWrite(_ state: inout State) {
+	/// The entry an annotation added to the task `id` now asks for: the second after the latest of
+	/// the task's annotations, where that's this second or later, else now. Read from the tasks as
+	/// last read, so it's only sound as the write starts, with every earlier write read back.
+	///
+	/// A taken second would make the planner read a note with the same text there as a retry of it,
+	/// and drop it. Only entries less than `annotationWindow` ahead count, so a clock set back
+	/// doesn't carry every later note ahead with it.
+	private func annotationEntry(for id: Models.Task.ID, _ state: State) -> Date {
+		let second = Date(timeIntervalSince1970: now.timeIntervalSince1970.rounded(.down))
+		let annotations = state.allRows.first { $0.id == id }?.task.annotations.map(\.entry) ?? []
+		let taken = annotations.filter {
+			$0 >= second && $0.timeIntervalSince(now) < annotationWindow
+		}
+		return taken.max().map { $0.addingTimeInterval(annotationSpacing) } ?? now
+	}
+
+	/// Writes an inspector edit to the task `id`, keeping it in the table should the edit move it out.
+	private func edit(
+		_ id: Models.Task.ID,
+		_ edit: TaskEdit,
+		_ state: inout State,
+	) -> Effect<Action> {
+		if state.rows[id: id] != nil {
+			state.keptTask = id
+		}
+		return write(.edit([id], edit), &state)
+	}
+
+	/// Ends the write in progress, whatever became of it, and starts the next queued one.
+	private func finishWrite(_ state: inout State) -> Effect<Action> {
 		state.creatingTask = nil
 		state.leavingTasks = []
 		state.writeProgress = nil
 		// A failed Done or Delete puts its tasks back.
+		filterRows(&state)
+		guard !state.queuedWrites.isEmpty else {
+			return .none
+		}
+		var next = state.queuedWrites.removeFirst()
+		// An annotation queued behind the write just ended takes its entry now, past every note that
+		// write, or the CLI meanwhile, left in the second it asked for. The inspector adds one to a
+		// single task.
+		if case let .edit(ids, .addAnnotation(text, _)) = next, let id = ids.first {
+			next = .edit(ids, .addAnnotation(text, entry: annotationEntry(for: id, state)))
+		}
+		return write(next, &state)
+	}
+
+	/// Inspects the one selected task, and lets go of a task the table kept for the inspector.
+	private func inspectSelection(_ state: inout State) {
+		state.focusesDescription = false
+		state.inspectedTask = state.selection.count == 1 ? state.selection.first : nil
+		guard state.keptTask != nil else {
+			return
+		}
+		state.keptTask = nil
 		filterRows(&state)
 	}
 
@@ -536,8 +656,17 @@ struct ReplicaFeature {
 		return effect
 	}
 
-	/// Selects the task New Task created, clearing a search that hides it. New Task already showed
-	/// the sidebar it lands in.
+	/// Selects the task `offset` rows from the inspected one, as ⌘⌥↑ and ⌘⌥↓ do.
+	private func selectAdjacentTask(_ offset: Int, _ state: inout State) {
+		guard let adjacent = state.adjacentTask(offset) else {
+			return
+		}
+		state.selection = [adjacent]
+		inspectSelection(&state)
+	}
+
+	/// Selects the task New Task created, clearing a search that hides it, and puts the cursor in its
+	/// description. New Task already showed the sidebar it lands in.
 	private func selectCreatedTask(_ state: inout State) {
 		guard let created = state.creatingTask else {
 			return
@@ -550,6 +679,8 @@ struct ReplicaFeature {
 			return
 		}
 		state.selection = [created]
+		inspectSelection(&state)
+		state.focusesDescription = true
 	}
 
 	/// Resets the sidebar to Pending where it wouldn't show a task New Task would create now.
@@ -611,20 +742,31 @@ struct ReplicaFeature {
 		sortRows(&state)
 	}
 
-	/// Narrows the ranked rows by the sidebar, then the search, and drops selected tasks that left
-	/// the table.
+	/// Narrows the ranked rows by the sidebar, then the search, keeping the task an inspector edit
+	/// may have moved out. Drops selected tasks that left the table, and inspects the one task a
+	/// selection is narrowed to.
 	private func filterRows(_ state: inout State) {
 		// Filtering keeps `allRows`' order, so the table needs no sort of its own.
 		state.rows = IdentifiedArray(
 			uniqueElements: state.allRows.filter { [
 				filter = SidebarFilter(state.sidebarSelection),
+				kept = state.keptTask,
 				search = state.searchText,
 			] in
-				!state.leavingTasks.contains($0.id) && filter.includes($0) && $0.matches(search: search)
+				guard !state.leavingTasks.contains($0.id) else {
+					return false
+				}
+				return $0.id == kept || filter.includes($0) && $0.matches(search: search)
 			},
 		)
 		state.highestUrgency = state.rows.map(\.urgency).max() ?? 0
+		let selectedCount = state.selection.count
 		state.selection.formIntersection(state.rows.ids)
+		// A selection narrowed to one task inspects it, as selecting it would. A task already
+		// inspected is kept by UUID, even once it leaves.
+		if state.inspectedTask == nil, selectedCount > 1, state.selection.count == 1 {
+			state.inspectedTask = state.selection.first
+		}
 	}
 
 	/// Sorts the ranked rows by `sortOrder`, then narrows them to the table. Ties break by ID, then
@@ -668,6 +810,13 @@ struct ReplicaFeature {
 		)
 	}
 }
+
+/// How far apart TW stores annotations: one to a second, keyed by it.
+private let annotationSpacing: TimeInterval = 1
+
+/// How far ahead of now an annotation's entry still moves a new one past it: far beyond any burst
+/// of notes a person can add, and short enough that a clock set back soon stops mattering.
+private let annotationWindow: TimeInterval = 60
 
 /// How many times a write is planned before a plan the engine keeps refusing as stale fails it.
 private let planAttempts = 3

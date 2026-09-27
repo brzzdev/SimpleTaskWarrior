@@ -508,15 +508,6 @@ private func udaText(_ value: UDAValue?) -> String {
 	}
 }
 
-/// A caption-sized label, as the description's markers are.
-@MainActor
-private func captionLabel(_ string: String, color: NSColor) -> NSTextField {
-	let label = NSTextField(labelWithString: string)
-	label.font = .preferredFont(forTextStyle: .caption1)
-	label.textColor = color
-	return label
-}
-
 /// One line of text, centred in its row.
 private final class TextCell: NSTableCellView {
 	init() {

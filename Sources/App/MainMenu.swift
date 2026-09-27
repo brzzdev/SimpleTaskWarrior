@@ -102,7 +102,21 @@ func mainMenu(openRecent openRecentDelegate: any NSMenuDelegate) -> NSMenu {
 	]
 
 	let task = NSMenu(title: "Task")
-	task.items = ReplicaWindowController.taskCommandMenuItems()
+	task.items = ReplicaWindowController.taskCommandMenuItems() + [
+		.separator(),
+		menuItem(
+			"Previous Task",
+			#selector(ReplicaWindowController.selectPreviousTask(_:)),
+			key: functionKey(NSUpArrowFunctionKey),
+			modifiers: [.command, .option],
+		),
+		menuItem(
+			"Next Task",
+			#selector(ReplicaWindowController.selectNextTask(_:)),
+			key: functionKey(NSDownArrowFunctionKey),
+			modifiers: [.command, .option],
+		),
+	]
 
 	let window = NSMenu(title: "Window")
 	NSApp.windowsMenu = window
@@ -120,6 +134,11 @@ func mainMenu(openRecent openRecentDelegate: any NSMenuDelegate) -> NSMenu {
 	let menu = NSMenu()
 	menu.items = [app, file, edit, view, task, window, help].map(submenu)
 	return menu
+}
+
+/// The key equivalent for a function key such as an arrow.
+private func functionKey(_ key: Int) -> String {
+	String(Character(UnicodeScalar(UInt16(key))!))
 }
 
 private func submenu(_ menu: NSMenu) -> NSMenuItem {
