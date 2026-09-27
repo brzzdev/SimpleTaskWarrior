@@ -21,17 +21,28 @@ struct ReplicaFeature {
 		var directory: URL?
 		var failure: String?
 		var fileImporter: FileImporter?
+		/// Set as New Task selects the task it created, for the inspector to put the cursor in its
+		/// description, until the selection changes.
+		var focusesDescription = false
 		/// Set once the hint that offers Choose Taskrc… has been shown, in any window.
 		@Shared(.appStorage("hasShownTaskrcHint")) var hasShownTaskrcHint = false
 		/// The highest Urgency in the table, which scales every row's bar.
 		var highestUrgency = 0.0
+		/// The task the inspector shows: the one selected task, kept by UUID until the selection changes,
+		/// even once it leaves the table.
+		var inspectedTask: Models.Task.ID?
 		var isNewTaskRowPresented = false
 		/// Set once the Replica's tasks first arrive, by which point `apply` can reach it.
 		var isReplicaOpen = false
 		var isTaskrcHintPresented = false
+		/// The task an inspector edit may move out of the table, which the table keeps until the
+		/// selection changes.
+		var keptTask: Models.Task.ID?
 		/// The tasks a Done or Delete in progress is writing, which the table drops as the write
 		/// starts rather than once it commits, since that can wait seconds on the Replica's lock.
 		var leavingTasks: Set<Models.Task.ID> = []
+		/// Inspector edits made while another write was in progress, written in order once it ends.
+		var queuedEdits: [WriteAction] = []
 		/// The read `storedTasks` came from. A snapshot read before it is dropped, since a write's read
 		/// and the stream's are delivered separately and can arrive out of order.
 		var readIndex = 0
@@ -101,6 +112,11 @@ struct ReplicaFeature {
 			return commands
 		}
 
+		/// The row the inspector shows, whether or not the table does.
+		var inspectedRow: TaskRow? {
+			inspectedTask.flatMap { id in allRows.first { $0.id == id } }
+		}
+
 		/// Whether the window has a Taskrc, rather than running on TW's defaults.
 		var hasTaskrc: Bool {
 			taskrc?.url != nil
@@ -161,6 +177,15 @@ struct ReplicaFeature {
 			self.bookmark = bookmark
 		}
 
+		/// The task `offset` rows from the inspected one, where the table shows both.
+		func adjacentTask(_ offset: Int) -> Models.Task.ID? {
+			guard let inspectedTask, let index = rows.index(id: inspectedTask) else {
+				return nil
+			}
+			let adjacent = index + offset
+			return rows.indices.contains(adjacent) ? rows[adjacent].id : nil
+		}
+
 		/// Whether the toolbar and a row's context menu list `command`. Mark Pending takes the place of
 		/// the others where every selected fixed view is Completed or Deleted.
 		func isOffered(_ command: TaskCommand) -> Bool {
@@ -208,26 +233,36 @@ struct ReplicaFeature {
 	}
 
 	enum Action: BindableAction {
+		case annotationDeleteButtonTapped(Models.Task.ID, entry: Date)
+		/// Return in the inspector's new-annotation field, or clicking away from it.
+		case annotationSubmitted(Models.Task.ID, String)
 		case binding(BindingAction<State>)
 		case chooseTaskrcButtonTapped
 		case deleteButtonTapped
+		case dependencyChosen(Models.Task.ID, dependency: Models.Task.ID)
+		case dependencyRemoveButtonTapped(Models.Task.ID, dependency: Models.Task.ID)
 		case directoryResolved(URL)
 		case doneButtonTapped
 		case fetchRequested
 		case fileChosen(URL, for: FileImporter)
 		case grantAccessButtonTapped
+		/// Return, Tab or clicking away from an inspector field, or choosing from its menu.
+		case inspectorFieldSubmitted(Models.Task.ID, TaskEdit)
 		case markPendingButtonTapped
 		case newTaskButtonTapped
 		/// Return in the new-task row, or clicking away from it.
 		case newTaskDescriptionSubmitted(String)
 		/// Escape in the new-task row.
 		case newTaskEditingCancelled
+		case nextTaskButtonTapped
 		case openFailed(String)
 		case pairingChanged
+		case previousTaskButtonTapped
 		case savingDelayElapsed
 		/// A column header was clicked, or the table restored the Replica's sort.
 		case sortOrderChanged([TaskSort])
 		case startStopButtonTapped
+		case tagRemoveButtonTapped(Models.Task.ID, tag: String)
 		case taskrcHintCloseButtonTapped
 		case taskrcLoaded(TaskrcClient.Loaded)
 		case taskrcSaveFailed(TaskrcSaveFailure)
@@ -256,8 +291,19 @@ struct ReplicaFeature {
 		BindingReducer()
 		Reduce { state, action in
 			switch action {
+			case let .annotationDeleteButtonTapped(id, entry):
+				return edit(id, .removeAnnotation(entry: entry), &state)
+
+			case let .annotationSubmitted(id, text):
+				return edit(id, .addAnnotation(text, entry: now), &state)
+
 			case .binding(\.searchText), .binding(\.sidebarSelection):
+				state.keptTask = nil
 				filterRows(&state)
+				return .none
+
+			case .binding(\.selection):
+				inspectSelection(&state)
 				return .none
 
 			case .binding:
@@ -269,6 +315,12 @@ struct ReplicaFeature {
 
 			case .deleteButtonTapped:
 				return perform(.delete, &state)
+
+			case let .dependencyChosen(id, dependency):
+				return edit(id, .addDependency(dependency), &state)
+
+			case let .dependencyRemoveButtonTapped(id, dependency):
+				return edit(id, .removeDependency(dependency), &state)
 
 			case let .directoryResolved(directory):
 				state.directory = directory
@@ -334,6 +386,9 @@ struct ReplicaFeature {
 				state.fileImporter = state.taskrcRemedy
 				return .none
 
+			case let .inspectorFieldSubmitted(id, edit):
+				return self.edit(id, edit, &state)
+
 			case .markPendingButtonTapped:
 				return perform(.markPending, &state)
 
@@ -341,6 +396,7 @@ struct ReplicaFeature {
 				guard state.canCreateTask else {
 					return .none
 				}
+				state.focusesDescription = false
 				state.isNewTaskRowPresented = true
 				showNewTaskSidebar(&state)
 				return .none
@@ -361,12 +417,20 @@ struct ReplicaFeature {
 				state.isNewTaskRowPresented = false
 				return .none
 
+			case .nextTaskButtonTapped:
+				selectAdjacentTask(1, &state)
+				return .none
+
 			case let .openFailed(failure):
 				state.failure = failure
 				return .none
 
 			case .pairingChanged:
 				return loadTaskrc(for: state)
+
+			case .previousTaskButtonTapped:
+				selectAdjacentTask(-1, &state)
+				return .none
 
 			case .savingDelayElapsed:
 				// The delay can elapse just as the write ends.
@@ -382,6 +446,9 @@ struct ReplicaFeature {
 
 			case .startStopButtonTapped:
 				return perform(.startStop, &state)
+
+			case let .tagRemoveButtonTapped(id, tag):
+				return edit(id, .removeTag(tag), &state)
 
 			case .taskrcHintCloseButtonTapped:
 				state.isTaskrcHintPresented = false
@@ -434,12 +501,10 @@ struct ReplicaFeature {
 
 			case .writeCommitted:
 				selectCreatedTask(&state)
-				finishWrite(&state)
-				return .none
+				return finishWrite(&state)
 
 			case .writeFailed:
-				finishWrite(&state)
-				return .none
+				return finishWrite(&state)
 			}
 		}
 	}
@@ -505,12 +570,45 @@ struct ReplicaFeature {
 		}
 	}
 
-	/// Ends the write in progress, whatever became of it.
-	private func finishWrite(_ state: inout State) {
+	/// Writes an inspector edit to the task `id`, keeping it in the table should the edit move it out,
+	/// or queues the edit behind the write in progress.
+	private func edit(
+		_ id: Models.Task.ID,
+		_ edit: TaskEdit,
+		_ state: inout State,
+	) -> Effect<Action> {
+		if state.rows[id: id] != nil {
+			state.keptTask = id
+		}
+		let action = WriteAction.edit([id], edit)
+		guard state.writeProgress == nil else {
+			state.queuedEdits.append(action)
+			return .none
+		}
+		return write(action, &state)
+	}
+
+	/// Ends the write in progress, whatever became of it, and starts the next queued edit.
+	private func finishWrite(_ state: inout State) -> Effect<Action> {
 		state.creatingTask = nil
 		state.leavingTasks = []
 		state.writeProgress = nil
 		// A failed Done or Delete puts its tasks back.
+		filterRows(&state)
+		guard !state.queuedEdits.isEmpty else {
+			return .none
+		}
+		return write(state.queuedEdits.removeFirst(), &state)
+	}
+
+	/// Inspects the one selected task, and lets go of a task the table kept for the inspector.
+	private func inspectSelection(_ state: inout State) {
+		state.focusesDescription = false
+		state.inspectedTask = state.selection.count == 1 ? state.selection.first : nil
+		guard state.keptTask != nil else {
+			return
+		}
+		state.keptTask = nil
 		filterRows(&state)
 	}
 
@@ -536,8 +634,17 @@ struct ReplicaFeature {
 		return effect
 	}
 
-	/// Selects the task New Task created, clearing a search that hides it. New Task already showed
-	/// the sidebar it lands in.
+	/// Selects the task `offset` rows from the inspected one, as ⌘⌥↑ and ⌘⌥↓ do.
+	private func selectAdjacentTask(_ offset: Int, _ state: inout State) {
+		guard let adjacent = state.adjacentTask(offset) else {
+			return
+		}
+		state.selection = [adjacent]
+		inspectSelection(&state)
+	}
+
+	/// Selects the task New Task created, clearing a search that hides it, and puts the cursor in its
+	/// description. New Task already showed the sidebar it lands in.
 	private func selectCreatedTask(_ state: inout State) {
 		guard let created = state.creatingTask else {
 			return
@@ -550,6 +657,8 @@ struct ReplicaFeature {
 			return
 		}
 		state.selection = [created]
+		inspectSelection(&state)
+		state.focusesDescription = true
 	}
 
 	/// Resets the sidebar to Pending where it wouldn't show a task New Task would create now.
@@ -611,16 +720,20 @@ struct ReplicaFeature {
 		sortRows(&state)
 	}
 
-	/// Narrows the ranked rows by the sidebar, then the search, and drops selected tasks that left
-	/// the table.
+	/// Narrows the ranked rows by the sidebar, then the search, keeping the task an inspector edit
+	/// may have moved out, and drops selected tasks that left the table.
 	private func filterRows(_ state: inout State) {
 		// Filtering keeps `allRows`' order, so the table needs no sort of its own.
 		state.rows = IdentifiedArray(
 			uniqueElements: state.allRows.filter { [
 				filter = SidebarFilter(state.sidebarSelection),
+				kept = state.keptTask,
 				search = state.searchText,
 			] in
-				!state.leavingTasks.contains($0.id) && filter.includes($0) && $0.matches(search: search)
+				guard !state.leavingTasks.contains($0.id) else {
+					return false
+				}
+				return $0.id == kept || filter.includes($0) && $0.matches(search: search)
 			},
 		)
 		state.highestUrgency = state.rows.map(\.urgency).max() ?? 0

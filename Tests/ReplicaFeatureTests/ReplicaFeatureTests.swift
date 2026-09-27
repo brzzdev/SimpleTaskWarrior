@@ -130,6 +130,181 @@ struct ReplicaFeatureTests {
 	}
 
 	@Test
+	func inspectorEditKeepsATaskItMovesOutUntilTheSelectionChanges() async throws {
+		let milk = storedTask(0, "Buy milk", workingSetID: 1, ["tag_home": "x"])
+		let dog = storedTask(1, "Walk the dog", workingSetID: 2, ["tag_home": "x"])
+		let milkUntagged = storedTask(0, "Buy milk", workingSetID: 1)
+		let plans = LockIsolated<[WritePlan]>([])
+		var initialState = try loadedState([milk, dog])
+		initialState.sidebarSelection = [.tag("home")]
+		let store = TestStore(initialState: initialState) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.continuousClock = TestClock()
+			$0.date.now = now
+			$0.replicaClient.apply = { plan, _ in
+				plans.withValue { $0.append(plan) }
+				return ApplyOutcome(isCommitted: true, snapshot: snapshot([milkUntagged, dog]))
+			}
+			$0.timeZone = .gmt
+		}
+
+		await store.send(\.binding.selection, [UUID(0)]) {
+			$0.inspectedTask = UUID(0)
+			$0.selection = [UUID(0)]
+		}
+		await store.send(.tagRemoveButtonTapped(UUID(0), tag: "home")) {
+			$0.keptTask = UUID(0)
+			$0.writeProgress = .running
+		}
+		// Untagged, it's no longer in the sidebar's tag, yet it stays, selected.
+		await store.receive(\.tasksLoaded) {
+			$0.allRows = try [row(dog, urgency: 0.8), row(milkUntagged)]
+			$0.highestUrgency = 0.8
+			$0.rows = try [row(dog, urgency: 0.8), row(milkUntagged)]
+			$0.storedTasks = [milkUntagged, dog]
+		}
+		await store.receive(\.writeCommitted) {
+			$0.writeProgress = nil
+		}
+		#expect(
+			try plans.value == [
+				planner.plan(
+					.edit([UUID(0)], .removeTag("home")),
+					tasks: [UUID(0): milk.properties, UUID(1): dog.properties],
+					at: now,
+				),
+			],
+		)
+
+		await store.send(\.binding.selection, [UUID(1)]) {
+			$0.inspectedTask = UUID(1)
+			$0.keptTask = nil
+			$0.rows = try [row(dog, urgency: 0.8)]
+			$0.selection = [UUID(1)]
+		}
+		await store.finish()
+	}
+
+	@Test
+	func inspectorEditsWhileAWriteRunsAreWrittenInTurnOnceItEnds() async throws {
+		let milk = storedTask(0, "Buy milk", workingSetID: 1)
+		let milkHome = storedTask(0, "Buy milk", workingSetID: 1, ["project": "Home"])
+		let (commits, commit) = AsyncStream<Void>.makeStream()
+		let plans = LockIsolated<[WritePlan]>([])
+		let initialState = try loadedState([milk], selection: [UUID(0)])
+		let store = TestStore(initialState: initialState) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.continuousClock = TestClock()
+			$0.date.now = now
+			$0.replicaClient.apply = { plan, _ in
+				plans.withValue { $0.append(plan) }
+				for await _ in commits {
+					break
+				}
+				return ApplyOutcome(isCommitted: true, snapshot: snapshot([milkHome]))
+			}
+			$0.timeZone = .gmt
+		}
+		store.exhaustivity = .off(showSkippedAssertions: false)
+
+		await store.send(.inspectorFieldSubmitted(UUID(0), .set("project", .string("Home")))) {
+			$0.writeProgress = .running
+		}
+		await store.send(.annotationSubmitted(UUID(0), "Oat, not dairy")) {
+			$0.queuedEdits = [.edit([UUID(0)], .addAnnotation("Oat, not dairy", entry: now))]
+		}
+		commit.yield()
+		await store.receive(\.tasksLoaded)
+		await store.receive(\.writeCommitted) {
+			$0.queuedEdits = []
+			$0.writeProgress = .running
+		}
+		commit.yield()
+		await store.receive(\.tasksLoaded)
+		await store.receive(\.writeCommitted) {
+			$0.writeProgress = nil
+		}
+		// The queued edit plans against the tasks the first write read back.
+		#expect(
+			try plans.value == [
+				planner.plan(
+					.edit([UUID(0)], .set("project", .string("Home"))),
+					tasks: [UUID(0): milk.properties],
+					at: now,
+				),
+				planner.plan(
+					.edit([UUID(0)], .addAnnotation("Oat, not dairy", entry: now)),
+					tasks: [UUID(0): milkHome.properties],
+					at: now,
+				),
+			],
+		)
+		commit.finish()
+		await store.finish()
+	}
+
+	@Test
+	func inspectorStaysOnATaskTheCLIMovesOutOfTheView() async throws {
+		let milk = storedTask(0, "Buy milk", workingSetID: 1)
+		let dog = storedTask(1, "Walk the dog", workingSetID: 2)
+		let milkDone = storedTask(0, "Buy milk", status: "completed", workingSetID: nil)
+		let initialState = try loadedState([milk, dog])
+		let store = TestStore(initialState: initialState) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.date.now = now
+			$0.timeZone = .gmt
+		}
+
+		await store.send(\.binding.selection, [UUID(0)]) {
+			$0.inspectedTask = UUID(0)
+			$0.selection = [UUID(0)]
+		}
+		await store.send(.tasksLoaded(snapshot([milkDone, dog], readIndex: 1))) {
+			$0.allRows = try [row(dog), row(milkDone, view: .completed)]
+			$0.readIndex = 1
+			$0.rows = try [row(dog)]
+			$0.selection = []
+			$0.storedTasks = [milkDone, dog]
+		}
+		#expect(store.state.inspectedRow?.task.status == .completed)
+
+		await store.send(\.binding.selection, [UUID(1)]) {
+			$0.inspectedTask = UUID(1)
+			$0.selection = [UUID(1)]
+		}
+	}
+
+	@Test
+	func nextAndPreviousTaskMoveFromTheInspectedTaskInTheTablesOrder() async throws {
+		let milk = storedTask(0, "Buy milk", workingSetID: 1)
+		let dog = storedTask(1, "Walk the dog", workingSetID: 2)
+		let initialState = try loadedState([milk, dog])
+		let store = TestStore(initialState: initialState) {
+			ReplicaFeature()
+		}
+
+		// With nothing inspected, there's nothing to move from.
+		await store.send(.nextTaskButtonTapped)
+		await store.send(\.binding.selection, [UUID(0)]) {
+			$0.inspectedTask = UUID(0)
+			$0.selection = [UUID(0)]
+		}
+		await store.send(.previousTaskButtonTapped)
+		await store.send(.nextTaskButtonTapped) {
+			$0.inspectedTask = UUID(1)
+			$0.selection = [UUID(1)]
+		}
+		await store.send(.nextTaskButtonTapped)
+		await store.send(.previousTaskButtonTapped) {
+			$0.inspectedTask = UUID(0)
+			$0.selection = [UUID(0)]
+		}
+	}
+
+	@Test
 	func newTaskShowsInPendingAndIsSelectedOnceItsCreated() async throws {
 		let taxes = storedTask(1, "File taxes", status: "completed", workingSetID: nil)
 		let milk = storedTask(0, "Buy milk", workingSetID: 1)
@@ -167,6 +342,8 @@ struct ReplicaFeatureTests {
 		// The search would hide it, so it's cleared.
 		await store.receive(\.writeCommitted) {
 			$0.creatingTask = nil
+			$0.focusesDescription = true
+			$0.inspectedTask = UUID(0)
 			$0.rows = try [row(milk)]
 			$0.searchText = ""
 			$0.selection = [UUID(0)]

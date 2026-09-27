@@ -176,6 +176,16 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 	}
 
 	@objc
+	public func selectNextTask(_: Any?) {
+		selectAdjacentTask(.nextTaskButtonTapped)
+	}
+
+	@objc
+	public func selectPreviousTask(_: Any?) {
+		selectAdjacentTask(.previousTaskButtonTapped)
+	}
+
+	@objc
 	public func showCompleted(_: Any?) {
 		show(.completed)
 	}
@@ -245,6 +255,12 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 		case #selector(newTask(_:)):
 			store.canCreateTask
 
+		case #selector(selectNextTask(_:)):
+			store.state.adjacentTask(1) != nil
+
+		case #selector(selectPreviousTask(_:)):
+			store.state.adjacentTask(-1) != nil
+
 		case #selector(useTaskwarriorDefaults(_:)):
 			store.hasTaskrc
 
@@ -265,6 +281,22 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 	@objc
 	func searchFieldChanged(_ searchField: NSSearchField) {
 		store.send(.binding(.set(\.searchText, searchField.stringValue)))
+	}
+
+	/// Sends `action`, which selects another task, first ending the edit in progress, which writes it
+	/// to the task it was typed for. Whatever had the cursor keeps it, so a field in the inspector
+	/// goes on to the next task's value.
+	private func selectAdjacentTask(_ action: ReplicaFeature.Action) {
+		guard let window else {
+			return
+		}
+		var responder = window.firstResponder
+		if let editor = responder as? NSText, let field = editor.delegate as? NSControl {
+			responder = field
+			window.makeFirstResponder(nil)
+		}
+		store.send(action)
+		window.makeFirstResponder(responder)
 	}
 
 	/// Selects `view` alone in the sidebar, as a click on it does.
