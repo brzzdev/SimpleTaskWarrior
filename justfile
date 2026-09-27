@@ -298,7 +298,8 @@ test: ensure-generated
 # `treatAllWarnings` can't catch every warning: Swift 6.4 downgrades a nonisolated
 # call into AppKit's imported main actor API to a warning that
 # `-warnings-as-errors` leaves alone. So this fails on any warning the raw log
-# locates in our own sources.
+# locates in our own sources, whose directories leave out the dependencies'
+# checkouts under `.build`.
 #
 # It sees only what this run compiled, so an incremental build passes over a
 # warning in an unchanged file. CI builds from scratch and sees them all.
@@ -313,9 +314,10 @@ xcodebuild-strict *args:
 	xcodebuild -workspace {{ workspace }} -scheme {{ scheme }} -destination '{{ destination }}' \
 		-derivedDataPath {{ derived_data }} "$@" 2>&1 | tee "$log" | xcbeautify
 
-	# `index` rather than a regex, since a worktree path can hold regex syntax
-	# such as a branch's `fix(ci)` scope.
-	warnings="$(awk -v root="$PWD/" '
+	# The physical path, as the compiler reports it, so a symlinked checkout still
+	# matches. `index` rather than a regex, since a worktree path can hold regex
+	# syntax such as a branch's `fix(ci)` scope.
+	warnings="$(awk -v root="$(pwd -P)/" '
 		index($0, root) != 1 { next }
 		{ path = substr($0, length(root) + 1) }
 		path ~ /^(AppHost|Sources|Tests)\/[^:]+:[0-9]+:[0-9]+: warning: / { print path }
