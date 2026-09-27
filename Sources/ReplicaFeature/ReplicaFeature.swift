@@ -113,14 +113,14 @@ struct ReplicaFeature {
 			return commands
 		}
 
-		/// The row the inspector shows, whether or not the table does.
-		var inspectedRow: TaskRow? {
-			inspectedTask.flatMap { id in allRows.first { $0.id == id } }
-		}
-
 		/// Whether the window has a Taskrc, rather than running on TW's defaults.
 		var hasTaskrc: Bool {
 			taskrc?.url != nil
+		}
+
+		/// The row the inspector shows, whether or not the table does.
+		var inspectedRow: TaskRow? {
+			inspectedTask.flatMap { id in allRows.first { $0.id == id } }
 		}
 
 		/// Whether Start/Stop stops, which it does when every selected task is active.
@@ -387,8 +387,8 @@ struct ReplicaFeature {
 				state.fileImporter = state.taskrcRemedy
 				return .none
 
-			case let .inspectorFieldSubmitted(id, edit):
-				return self.edit(id, edit, &state)
+			case let .inspectorFieldSubmitted(id, taskEdit):
+				return edit(id, taskEdit, &state)
 
 			case .markPendingButtonTapped:
 				return perform(.markPending, &state)

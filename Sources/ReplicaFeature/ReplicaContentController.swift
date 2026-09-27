@@ -235,6 +235,15 @@ extension NSTableView {
 	}
 }
 
+/// A caption-sized label, as the table's and the inspector's markers are.
+@MainActor
+func captionLabel(_ string: String, color: NSColor) -> NSTextField {
+	let label = NSTextField(labelWithString: string)
+	label.font = .preferredFont(forTextStyle: .caption1)
+	label.textColor = color
+	return label
+}
+
 /// A label that tail-truncates.
 @MainActor
 func truncatingLabel() -> NSTextField {
