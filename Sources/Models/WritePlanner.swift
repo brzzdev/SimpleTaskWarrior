@@ -413,7 +413,7 @@ public enum WritePlanError: Equatable, LocalizedError, Sendable {
 			String(localized: "The task would come to depend on itself through other tasks.")
 
 		case let .invalidInput(property, error):
-			"\(property): \(error.localizedDescription)"
+			String(localized: "\(property): \(error.localizedDescription)")
 
 		case .noSuchTask:
 			String(localized: "The task no longer exists.")

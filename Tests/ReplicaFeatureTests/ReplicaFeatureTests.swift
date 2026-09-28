@@ -744,6 +744,7 @@ struct ReplicaFeatureTests {
 			$0.selection = [UUID(0)]
 			$0.writeProgress = nil
 		}
+		await store.finish()
 	}
 
 	@Test

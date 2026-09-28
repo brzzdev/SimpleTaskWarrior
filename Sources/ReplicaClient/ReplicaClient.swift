@@ -431,11 +431,11 @@ extension ReplicaError {
 	/// `error` as the engine or the actor threw it.
 	fileprivate init(_ error: any Error) {
 		switch error {
-		case let error as ReplicaError: self = error
 		case EngineError.Busy: self = .busy
 		case let EngineError.Failed(message): self = .failed(message)
 		case EngineError.NotAReplica: self = .notAReplica
 		case EngineError.UnsupportedSchema: self = .unsupportedSchema
+		case let error as ReplicaError: self = error
 		default: self = .failed(error.localizedDescription)
 		}
 	}

@@ -706,7 +706,7 @@ struct ReplicaFeature {
 				String(localized: "The Replica kept changing while it was written to."),
 			)
 		} catch: { error, send in
-			await send(.writeFailed(WriteFailure(error, title: failureTitle, retry: .write(action))))
+			await send(.writeFailed(WriteFailure(error, retry: .write(action), title: failureTitle)))
 		}
 	}
 
@@ -734,7 +734,7 @@ struct ReplicaFeature {
 		} catch: { error, send in
 			// The engine lets go of a redo that fails, so there's nothing to try again.
 			let retry: WriteFailure.Retry? = direction == .undo ? .undo : nil
-			await send(.writeFailed(WriteFailure(error, title: failureTitle, retry: retry)))
+			await send(.writeFailed(WriteFailure(error, retry: retry, title: failureTitle)))
 		}
 	}
 
@@ -1070,7 +1070,7 @@ private func undoName(for action: WriteAction, udaColumns: [UDAColumn]) -> Strin
 extension ReplicaFeature.WriteFailure {
 	/// `error` failing the change `title` names, which `retry` tries again, unless the planner
 	/// refused the change, which it would again.
-	init(_ error: any Error, title: String, retry: Retry?) {
+	init(_ error: any Error, retry: Retry?, title: String) {
 		reason = error.localizedDescription
 		self.retry = error is WritePlanError ? nil : retry
 		self.title = title
