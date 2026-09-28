@@ -764,18 +764,23 @@ struct ReplicaFeatureTests {
 			$0.readFailure = "disk I/O error"
 		}
 		await clock.advance(by: .seconds(29))
-		// Neither a read failing again nor a write's read older than the last restarts the wait.
+		// Neither a read failing again nor a write's read, perhaps from before the failure, restarts
+		// the wait.
 		await store.send(.readFailed("disk I/O error"))
-		await store.send(.tasksLoaded(snapshot([], readIndex: 0)))
+		await store.send(.tasksLoaded(snapshot([], readIndex: 2))) {
+			$0.readIndex = 2
+		}
 		await clock.advance(by: .seconds(1))
 		await store.receive(\.readFailureDelayElapsed) {
 			$0.isReadFailureBannerPresented = true
 		}
-		await store.send(.tasksLoaded(snapshot([], readIndex: 2))) {
+		await store.send(.readSucceeded(snapshot([], readIndex: 3))) {
 			$0.isReadFailureBannerPresented = false
 			$0.readFailure = nil
-			$0.readIndex = 2
+			$0.readIndex = 3
 		}
+		// A wait that ended just before the read, handled after it.
+		await store.send(.readFailureDelayElapsed)
 	}
 
 	@Test
@@ -1062,7 +1067,7 @@ struct ReplicaFeatureTests {
 
 		// Tied on Urgency, so in ID order.
 		continuation.yield(.success(snapshot([dog, taxes, milk])))
-		await store.receive(\.tasksLoaded) {
+		await store.receive(\.readSucceeded) {
 			$0.allRows = try [row(milk), row(dog), row(taxes, view: .completed)]
 			$0.isReplicaOpen = true
 			$0.storedTasks = [dog, taxes, milk]
@@ -1080,7 +1085,7 @@ struct ReplicaFeatureTests {
 		let milkDone = storedTask(0, "Buy milk", status: "completed", workingSetID: 1)
 		continuation.yield(.success(snapshot([dog, taxes, milkDone])))
 		// Down to one selected task, which the inspector takes.
-		await store.receive(\.tasksLoaded) {
+		await store.receive(\.readSucceeded) {
 			$0.allRows = try [row(dog), row(taxes, view: .completed), row(milkDone, view: .completed)]
 			$0.inspectedTask = UUID(1)
 			$0.storedTasks = [dog, taxes, milkDone]
@@ -1124,7 +1129,7 @@ struct ReplicaFeatureTests {
 		}
 		// Tied on Urgency, so in ID order.
 		continuation.yield(.success(snapshot([call, post])))
-		await store.receive(\.tasksLoaded) {
+		await store.receive(\.readSucceeded) {
 			$0.allRows = try [row(post), row(call)]
 			$0.isReplicaOpen = true
 			$0.rows = try [row(post), row(call)]
@@ -1376,7 +1381,7 @@ struct ReplicaFeatureTests {
 
 		let task = await store.send(.fetchRequested)
 		continuation.yield(.success(snapshot([call])))
-		await store.receive(\.tasksLoaded)
+		await store.receive(\.readSucceeded)
 		#expect(store.state.rows.isEmpty)
 		#expect(store.state.sidebar.views.map(\.count) == [0, 1, 0, 0])
 

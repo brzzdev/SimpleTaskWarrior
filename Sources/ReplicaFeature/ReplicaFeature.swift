@@ -299,6 +299,7 @@ struct ReplicaFeature {
 		case previousTaskButtonTapped
 		case readFailed(String)
 		case readFailureDelayElapsed
+		case readSucceeded(TaskSnapshot)
 		case redoButtonTapped
 		case savingDelayElapsed
 		/// A column header was clicked, or the table restored the Replica's sort.
@@ -308,6 +309,7 @@ struct ReplicaFeature {
 		case taskrcHintCloseButtonTapped
 		case taskrcLoaded(TaskrcClient.Loaded)
 		case taskrcSaveFailed(TaskrcSaveFailure)
+		/// A write, undo or redo read the tasks.
 		case tasksLoaded(TaskSnapshot)
 		case timerTicked
 		case tryAgainButtonTapped
@@ -406,7 +408,7 @@ struct ReplicaFeature {
 								await send(.readFailed(error.localizedDescription))
 
 							case let .success(snapshot):
-								await send(.tasksLoaded(snapshot))
+								await send(.readSucceeded(snapshot))
 							}
 						}
 					} catch: { error, send in
@@ -504,8 +506,17 @@ struct ReplicaFeature {
 				.cancellable(id: CancelID.readFailure, cancelInFlight: true)
 
 			case .readFailureDelayElapsed:
-				state.isReadFailureBannerPresented = true
+				// The wait can end just as a read succeeds, queued behind it.
+				state.isReadFailureBannerPresented = state.readFailure != nil
 				return .none
+
+			case let .readSucceeded(snapshot):
+				// Only the stream's reads clear a failure: they run in turn, so this one came after it,
+				// where a write's read can have come before.
+				state.isReadFailureBannerPresented = false
+				state.readFailure = nil
+				loadTasks(snapshot, &state)
+				return .cancel(id: CancelID.readFailure)
 
 			case .redoButtonTapped:
 				guard state.canRedo, let name = state.redoName else {
@@ -552,19 +563,8 @@ struct ReplicaFeature {
 				return .none
 
 			case let .tasksLoaded(snapshot):
-				state.isReplicaOpen = true
-				// A snapshot read before the newest one proves nothing about a read failing since.
-				guard snapshot.readIndex >= state.readIndex else {
-					return .none
-				}
-				state.isReadFailureBannerPresented = false
-				state.readFailure = nil
-				state.readIndex = snapshot.readIndex
-				state.redoName = snapshot.redoName
-				state.storedTasks = snapshot.tasks
-				state.undoName = snapshot.undoName
-				updateRows(&state)
-				return .cancel(id: CancelID.readFailure)
+				loadTasks(snapshot, &state)
+				return .none
 
 			case .timerTicked:
 				updateRows(&state)
@@ -888,6 +888,19 @@ struct ReplicaFeature {
 
 	/// Ranks the Replica's tasks with the Taskrc the window runs on, decoding their UDAs, computing
 	/// their Urgency and sorting them into fixed views again, then sorts and narrows them.
+	/// Shows `snapshot`, unless it was read before the tasks shown.
+	private func loadTasks(_ snapshot: TaskSnapshot, _ state: inout State) {
+		state.isReplicaOpen = true
+		guard snapshot.readIndex >= state.readIndex else {
+			return
+		}
+		state.readIndex = snapshot.readIndex
+		state.redoName = snapshot.redoName
+		state.storedTasks = snapshot.tasks
+		state.undoName = snapshot.undoName
+		updateRows(&state)
+	}
+
 	private func updateRows(_ state: inout State) {
 		let taskrc = state.runningTaskrc
 		let tasks = state.storedTasks.compactMap { Models.Task($0, udaTypes: taskrc.udaTypes) }
