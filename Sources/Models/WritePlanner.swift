@@ -189,8 +189,9 @@ public struct WritePlanner: Sendable {
 	}
 
 	/// Plans `change` on each task in `ids`, once each, in order, repairing each chain it breaks
-	/// where `chains` says to, as `dependencyChainOnComplete` does after each task in turn. `task`
-	/// goes in ID order.
+	/// where `chains` says to, as `dependencyChainOnComplete` does after each task in turn. Closing
+	/// one task can rewire the next, so the order matters: `task` goes in ID order, and so must the
+	/// caller.
 	private func plan(
 		_ ids: [Task.ID],
 		tasks: [Task.ID: [String: String]],
@@ -234,6 +235,7 @@ public struct WritePlanner: Sendable {
 		// Only the tasks it still blocks on, as `getDependencyTasks` reads them.
 		var blocking: [Task.ID] = []
 		for dependency in dependencies(drafts[closing].properties).sorted() {
+			// Read only to expect it: a dependency removed before the plan commits changes the repair.
 			_ = drafts[closing].read("dep_\(dependency.uuidString.lowercased())")
 			guard let index = drafts.index(dependency), isOpen(drafts[index].read("status")) else {
 				continue
@@ -541,6 +543,14 @@ extension WritePlan {
 		}
 	}
 
+	/// The engine's primitives, which write exactly what they name.
+	public enum Operation: Hashable, Sendable {
+		case create(Task.ID)
+		case setStatus(Task.ID, Status)
+		/// Removes the property when `value` is nil.
+		case setValue(Task.ID, property: String, value: String?)
+	}
+
 	/// A closed task's open dependents, moved onto the open tasks it depended on.
 	public struct RepairedChain: Equatable, Sendable {
 		/// The dependents, which depend on `blocking` instead.
@@ -554,14 +564,6 @@ extension WritePlan {
 			self.blocking = blocking
 			self.task = task
 		}
-	}
-
-	/// The engine's primitives, which write exactly what they name.
-	public enum Operation: Hashable, Sendable {
-		case create(Task.ID)
-		case setStatus(Task.ID, Status)
-		/// Removes the property when `value` is nil.
-		case setValue(Task.ID, property: String, value: String?)
 	}
 
 	/// `tasks` with the plan applied, as the engine would commit it.

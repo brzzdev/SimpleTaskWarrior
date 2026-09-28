@@ -244,6 +244,39 @@ struct ReplicaFeature {
 		/// What repairing would do, as planned when the command was chosen: a line for each dependent.
 		var message: String
 		var title: String
+
+		init(command: TaskCommand, ids: [Models.Task.ID], message: String, title: String) {
+			self.command = command
+			self.ids = ids
+			self.message = message
+			self.title = title
+		}
+
+		/// Asks about `chains`, naming each task by its description in `tasks`.
+		init(
+			chains: [WritePlan.RepairedChain],
+			command: TaskCommand,
+			ids: [Models.Task.ID],
+			tasks: [Models.Task.ID: [String: String]],
+		) {
+			let quoted = { (id: Models.Task.ID) in "“\(tasks[id]?["description"] ?? "")”" }
+			let lines = chains.flatMap { chain in
+				let blocking = ListFormatter.localizedString(byJoining: chain.blocking.map(quoted))
+				return chain.blocked.map { blocked in
+					String(
+						localized: "\(quoted(blocked)) would depend on \(blocking) instead of \(quoted(chain.task)).",
+					)
+				}
+			}
+			self.init(
+				command: command,
+				ids: ids,
+				message: lines.joined(separator: "\n"),
+				title: chains.count == 1
+					? String(localized: "Repair the Dependency Chain?")
+					: String(localized: "Repair \(chains.count) Dependency Chains?"),
+			)
+		}
 	}
 
 	struct TaskrcSaveFailure: Equatable {
@@ -879,6 +912,12 @@ struct ReplicaFeature {
 		let ids = state.selectedIDs
 		switch command {
 		case .delete, .done:
+			// In ID order, as `task` closes them, since closing one can rewire the next.
+			let rows = state.rows
+			let ids = ids.sorted { lhs, rhs in
+				let rank = { (id: Models.Task.ID) in rows[id: id]?.task.workingSetID ?? .max }
+				return (rank(lhs), lhs) < (rank(rhs), rhs)
+			}
 			guard state.runningTaskrc.boolean("dependency.confirmation") else {
 				return close(ids, command, chains: .repair, &state)
 			}
@@ -890,22 +929,11 @@ struct ReplicaFeature {
 			guard let chains, !chains.isEmpty else {
 				return close(ids, command, chains: .leave, &state)
 			}
-			let quoted = { (id: Models.Task.ID) in "“\(tasks[id]?["description"] ?? "")”" }
-			let lines = chains.flatMap { chain in
-				let blocking = ListFormatter.localizedString(byJoining: chain.blocking.map(quoted))
-				return chain.blocked.map { blocked in
-					String(
-						localized: "\(quoted(blocked)) would depend on \(blocking) instead of \(quoted(chain.task)).",
-					)
-				}
-			}
 			state.chainRepairPrompt = ChainRepairPrompt(
+				chains: chains,
 				command: command,
 				ids: ids,
-				message: lines.joined(separator: "\n"),
-				title: chains.count == 1
-					? String(localized: "Repair the Dependency Chain?")
-					: String(localized: "Repair \(chains.count) Dependency Chains?"),
+				tasks: tasks,
 			)
 			return .none
 

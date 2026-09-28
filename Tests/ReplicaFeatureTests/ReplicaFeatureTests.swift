@@ -144,6 +144,30 @@ struct ReplicaFeatureTests {
 	}
 
 	@Test
+	func doneClosesTasksInIDOrderWhateverTheTableOrder() async throws {
+		let tasks = chain()
+		// Gamma above Beta, as a sort by description descending would show them.
+		let initialState = try loadedState(tasks.reversed(), selection: [UUID(1), UUID(2)])
+		let store = TestStore(initialState: initialState) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.date.now = now
+			$0.timeZone = .gmt
+		}
+
+		// Beta first, while Gamma is open to take its dependent. Gamma first would leave Beta nothing
+		// open to repair onto, so nothing to ask.
+		await store.send(.doneButtonTapped) {
+			$0.chainRepairPrompt = ReplicaFeature.ChainRepairPrompt(
+				command: .done,
+				ids: [UUID(1), UUID(2)],
+				message: "“Alpha” would depend on “Gamma” instead of “Beta”.",
+				title: "Repair the Dependency Chain?",
+			)
+		}
+	}
+
+	@Test
 	func doneRepairsAChainWithoutAskingWhereTheTaskrcSaysNotTo() async throws {
 		let tasks = chain()
 		let taskrc = Taskrc(path: taskrcFile.path(), environment: .fixture) { path, _ in

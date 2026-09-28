@@ -39,3 +39,7 @@ _Avoid_: Recurring task, recurrence
 **Undo point**:
 The changes from one user action, undone together, whether by the app or by `task undo`. The app undoes only its own.
 _Avoid_: Undo group, transaction, history entry
+
+**Dependency chain**:
+Tasks linked by dependencies, where one both blocks a task and is blocked by another. Completing or deleting that middle task breaks the chain, which a repair mends by moving its dependents onto what it depended on.
+_Avoid_: Dependency tree, link, sequence
