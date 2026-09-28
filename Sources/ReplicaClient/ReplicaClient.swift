@@ -347,9 +347,15 @@ actor Replica {
 			return try notApplied()
 		}
 		undoPoints.removeLast()
+		// Recorded before the read, which drops it should anything write in between, so Redo outlives
+		// a read that fails.
+		redoPoint = nil
+		if error == nil, let dataVersion = try? engine.dataVersion() {
+			redoPoint = (point, dataVersion)
+		}
 		// The reversal has landed, so a read failing now mustn't fail the undo: trying it again would
 		// revert the point before it too. The stream reads in full next time instead.
-		let snapshot = try? readTasks(redoing: error == nil ? point : nil)
+		let snapshot = try? readTasks()
 		if snapshot == nil {
 			readVersion = nil
 		}
@@ -378,14 +384,11 @@ actor Replica {
 	}
 
 	/// Every task, recording the `data_version` they were read at, and which Undo points still
-	/// apply. `redoing` is the point an undo just reverted, which can be re-applied until anything
-	/// writes after this read.
-	private func readTasks(redoing: UndoPoint? = nil) throws -> TaskSnapshot {
+	/// apply.
+	private func readTasks() throws -> TaskSnapshot {
 		let snapshot = try engine.snapshot()
 		readVersion = snapshot.dataVersion
-		if let redoing {
-			redoPoint = (redoing, snapshot.dataVersion)
-		} else if redoPoint?.dataVersion != snapshot.dataVersion {
+		if redoPoint?.dataVersion != snapshot.dataVersion {
 			redoPoint = nil
 		}
 		let undoName = try reconcileUndoPoints()
