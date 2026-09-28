@@ -76,6 +76,15 @@ final class ReplicaContentController: NSViewController {
 	/// The banners `store` calls for, top to bottom, whose buttons send to `target`.
 	static func banners(for store: StoreOf<ReplicaFeature>, target: AnyObject?) -> [BannerView] {
 		var banners: [BannerView] = []
+		if store.isReadFailureBannerPresented, let reason = store.readFailure {
+			banners.append(
+				BannerView(
+					symbolName: "exclamationmark.triangle.fill",
+					message: String(localized: "Can't read the Replica: \(reason)"),
+					actions: [],
+				),
+			)
+		}
 		if store.isTaskrcHintPresented {
 			let close = NSButton(
 				image: NSImage(systemSymbolName: "xmark", accessibilityDescription: nil)!,

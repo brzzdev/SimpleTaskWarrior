@@ -1109,6 +1109,11 @@ enum EngineError: Swift.Error, Equatable, Hashable, Foundation.LocalizedError {
 
     
     
+    /**
+     * Another connection, such as the CLI's, held the Replica's lock past SQLite's 5 s busy
+     * timeout. Nothing was committed, so the call can be made again.
+     */
+    case Busy
     case Failed(message: String
     )
     /**
@@ -1149,11 +1154,12 @@ public struct FfiConverterTypeEngineError: FfiConverterRustBuffer {
         
 
         
-        case 1: return .Failed(
+        case 1: return .Busy
+        case 2: return .Failed(
             message: try FfiConverterString.read(from: &buf)
             )
-        case 2: return .NotAReplica
-        case 3: return .UnsupportedSchema(
+        case 3: return .NotAReplica
+        case 4: return .UnsupportedSchema(
             major: try FfiConverterUInt32.read(from: &buf), 
             minor: try FfiConverterUInt32.read(from: &buf)
             )
@@ -1169,17 +1175,21 @@ public struct FfiConverterTypeEngineError: FfiConverterRustBuffer {
 
         
         
-        case let .Failed(message):
+        case .Busy:
             writeInt(&buf, Int32(1))
+        
+        
+        case let .Failed(message):
+            writeInt(&buf, Int32(2))
             FfiConverterString.write(message, into: &buf)
             
         
         case .NotAReplica:
-            writeInt(&buf, Int32(2))
+            writeInt(&buf, Int32(3))
         
         
         case let .UnsupportedSchema(major,minor):
-            writeInt(&buf, Int32(3))
+            writeInt(&buf, Int32(4))
             FfiConverterUInt32.write(major, into: &buf)
             FfiConverterUInt32.write(minor, into: &buf)
             

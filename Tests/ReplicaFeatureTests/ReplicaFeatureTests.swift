@@ -624,13 +624,191 @@ struct ReplicaFeatureTests {
 		await store.receive(\.tasksLoaded)
 		await store.receive(\.tasksLoaded)
 		await store.receive(\.tasksLoaded)
-		// The task it dropped comes back.
 		await store.receive(\.writeFailed) {
-			$0.leavingTasks = []
-			$0.rows = try [row(milk)]
-			$0.writeProgress = nil
+			$0.writeFailure = ReplicaFeature.WriteFailure(
+				name: "Complete Task",
+				reason: "The Replica kept changing while it was written to.",
+				retry: .write(.complete([UUID(0)])),
+			)
 		}
 		#expect(attempts.value == 3)
+		// Cancel drops it, and the task it dropped comes back.
+		await store.send(.writeFailureDismissed) {
+			$0.leavingTasks = []
+			$0.rows = try [row(milk)]
+			$0.writeFailure = nil
+			$0.writeProgress = nil
+		}
+		await store.finish()
+	}
+
+	@Test
+	func failedWriteIsReportedAndTryAgainPlansItAgainWithTheSameUUID() async throws {
+		let milk = storedTask(0, "Buy milk", workingSetID: 1)
+		let plans = LockIsolated<[WritePlan]>([])
+		var initialState = try loadedState([])
+		initialState.sidebarSelection = [.view(.pending)]
+		let store = TestStore(initialState: initialState) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.continuousClock = TestClock()
+			$0.date.now = now
+			$0.replicaClient.apply = { plan, _, _ in
+				let attempt = plans.withValue {
+					$0.append(plan)
+					return $0.count
+				}
+				guard attempt > 1 else {
+					throw ReplicaError.busy
+				}
+				return ApplyOutcome(isCommitted: true, snapshot: snapshot([milk]))
+			}
+			$0.timeZone = .gmt
+			$0.uuid = .incrementing
+		}
+
+		await store.send(.newTaskDescriptionSubmitted("Buy milk")) {
+			$0.creatingTask = UUID(0)
+			$0.writeProgress = .running
+		}
+		await store.receive(\.writeFailed) {
+			$0.writeFailure = ReplicaFeature.WriteFailure(
+				name: "Create Task",
+				reason: "The Replica is busy. A `task` command may be holding it.",
+				retry: .write(.create(UUID(0), description: "Buy milk")),
+			)
+		}
+		#expect(store.state.writeFailure?.title == "Couldn't Create Task")
+		await store.send(.writeFailureTryAgainButtonTapped) {
+			$0.writeFailure = nil
+		}
+		await store.receive(\.tasksLoaded) {
+			$0.allRows = try [row(milk)]
+			$0.rows = try [row(milk)]
+			$0.storedTasks = [milk]
+		}
+		await store.receive(\.writeCommitted) {
+			$0.creatingTask = nil
+			$0.focusesDescription = true
+			$0.inspectedTask = UUID(0)
+			$0.selection = [UUID(0)]
+			$0.writeProgress = nil
+		}
+		#expect(plans.value.map(\.operations.first) == [.create(UUID(0)), .create(UUID(0))])
+		await store.finish()
+	}
+
+	@Test
+	func failedUndoIsReportedAndTryAgainUndoesAgain() async throws {
+		let milk = storedTask(0, "Buy milk", workingSetID: 1)
+		let attempts = LockIsolated(0)
+		var initialState = try loadedState([milk])
+		initialState.undoName = "Complete Task"
+		let store = TestStore(initialState: initialState) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.date.now = now
+			$0.replicaClient.undo = { _ in
+				attempts.withValue { $0 += 1 }
+				guard attempts.value > 1 else {
+					throw ReplicaError.busy
+				}
+				return UndoOutcome(isApplied: true, snapshot: snapshot([milk], readIndex: 1), tasks: [UUID(0)])
+			}
+			$0.timeZone = .gmt
+		}
+
+		await store.send(.undoButtonTapped) {
+			$0.writeProgress = .running
+		}
+		await store.receive(\.writeFailed) {
+			$0.writeFailure = ReplicaFeature.WriteFailure(
+				name: "Undo Complete Task",
+				reason: "The Replica is busy. A `task` command may be holding it.",
+				retry: .undo,
+			)
+		}
+		await store.send(.writeFailureTryAgainButtonTapped) {
+			$0.writeFailure = nil
+		}
+		await store.receive(\.tasksLoaded) {
+			$0.readIndex = 1
+			$0.undoName = nil
+		}
+		await store.receive(\.undoOrRedoFinished) {
+			$0.inspectedTask = UUID(0)
+			$0.selection = [UUID(0)]
+			$0.writeProgress = nil
+		}
+	}
+
+	@Test
+	func readFailureShowsABannerAfterThirtySecondsUntilAReadSucceeds() async throws {
+		let clock = TestClock()
+		let initialState = try loadedState([])
+		let store = TestStore(initialState: initialState) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.continuousClock = clock
+			$0.date.now = now
+			$0.timeZone = .gmt
+		}
+
+		await store.send(.readFailed("disk I/O error")) {
+			$0.readFailure = "disk I/O error"
+		}
+		await clock.advance(by: .seconds(29))
+		// A read failing again doesn't restart the wait.
+		await store.send(.readFailed("disk I/O error"))
+		await clock.advance(by: .seconds(1))
+		await store.receive(\.readFailureDelayElapsed) {
+			$0.isReadFailureBannerPresented = true
+		}
+		await store.send(.tasksLoaded(snapshot([], readIndex: 1))) {
+			$0.isReadFailureBannerPresented = false
+			$0.readFailure = nil
+			$0.readIndex = 1
+		}
+	}
+
+	@Test
+	func writeToATaskThatNoLongerExistsOffersOnlyOK() async throws {
+		let milk = storedTask(0, "Buy milk", workingSetID: 1)
+		let initialState = try loadedState([milk], selection: [UUID(0)])
+		let store = TestStore(initialState: initialState) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.continuousClock = TestClock()
+			$0.date.now = now
+			// `task undo` of its creation, just before the write.
+			$0.replicaClient.apply = { _, _, _ in
+				ApplyOutcome(isCommitted: false, snapshot: snapshot([]))
+			}
+			$0.timeZone = .gmt
+		}
+
+		await store.send(.doneButtonTapped) {
+			$0.leavingTasks = [UUID(0)]
+			$0.rows = []
+			$0.selection = []
+			$0.writeProgress = .running
+		}
+		await store.receive(\.tasksLoaded) {
+			$0.allRows = []
+			$0.storedTasks = []
+		}
+		await store.receive(\.writeFailed) {
+			$0.writeFailure = ReplicaFeature.WriteFailure(
+				name: "Complete Task",
+				reason: "The task no longer exists.",
+				retry: nil,
+			)
+		}
+		await store.send(.writeFailureDismissed) {
+			$0.leavingTasks = []
+			$0.writeFailure = nil
+			$0.writeProgress = nil
+		}
 		await store.finish()
 	}
 
@@ -851,7 +1029,8 @@ struct ReplicaFeatureTests {
 	@Test
 	func listsPendingTasksSortedAndDropsSelectedTasksThatLeave() async {
 		let directory = URL(filePath: "/Users/paul/.task")
-		let (tasks, continuation) = AsyncThrowingStream<TaskSnapshot, any Error>.makeStream()
+		let (tasks, continuation) = AsyncThrowingStream<Result<TaskSnapshot, ReplicaError>, any Error>
+			.makeStream()
 		let store = TestStore(initialState: ReplicaFeature.State(bookmark: Data())) {
 			ReplicaFeature()
 		} withDependencies: {
@@ -874,7 +1053,7 @@ struct ReplicaFeatureTests {
 		}
 
 		// Tied on Urgency, so in ID order.
-		continuation.yield(snapshot([dog, taxes, milk]))
+		continuation.yield(.success(snapshot([dog, taxes, milk])))
 		await store.receive(\.tasksLoaded) {
 			$0.allRows = try [row(milk), row(dog), row(taxes, view: .completed)]
 			$0.isReplicaOpen = true
@@ -891,7 +1070,7 @@ struct ReplicaFeatureTests {
 		}
 
 		let milkDone = storedTask(0, "Buy milk", status: "completed", workingSetID: 1)
-		continuation.yield(snapshot([dog, taxes, milkDone]))
+		continuation.yield(.success(snapshot([dog, taxes, milkDone])))
 		// Down to one selected task, which the inspector takes.
 		await store.receive(\.tasksLoaded) {
 			$0.allRows = try [row(dog), row(taxes, view: .completed), row(milkDone, view: .completed)]
@@ -907,7 +1086,8 @@ struct ReplicaFeatureTests {
 
 	@Test
 	func recomputesUrgencyEveryMinute() async {
-		let (tasks, continuation) = AsyncThrowingStream<TaskSnapshot, any Error>.makeStream()
+		let (tasks, continuation) = AsyncThrowingStream<Result<TaskSnapshot, ReplicaError>, any Error>
+			.makeStream()
 		let clock = TestClock()
 		let time = LockIsolated(now)
 		let store = TestStore(initialState: ReplicaFeature.State(bookmark: Data())) {
@@ -935,7 +1115,7 @@ struct ReplicaFeatureTests {
 			$0.directory = replicaDirectory
 		}
 		// Tied on Urgency, so in ID order.
-		continuation.yield(snapshot([call, post]))
+		continuation.yield(.success(snapshot([call, post])))
 		await store.receive(\.tasksLoaded) {
 			$0.allRows = try [row(post), row(call)]
 			$0.isReplicaOpen = true
@@ -1162,7 +1342,8 @@ struct ReplicaFeatureTests {
 
 	@Test
 	func waitingTaskMovesToPendingAsItsWaitPasses() async {
-		let (tasks, continuation) = AsyncThrowingStream<TaskSnapshot, any Error>.makeStream()
+		let (tasks, continuation) = AsyncThrowingStream<Result<TaskSnapshot, ReplicaError>, any Error>
+			.makeStream()
 		let clock = TestClock()
 		let time = LockIsolated(now)
 		let store = TestStore(initialState: ReplicaFeature.State(bookmark: Data())) {
@@ -1186,7 +1367,7 @@ struct ReplicaFeatureTests {
 		)
 
 		let task = await store.send(.fetchRequested)
-		continuation.yield(snapshot([call]))
+		continuation.yield(.success(snapshot([call])))
 		await store.receive(\.tasksLoaded)
 		#expect(store.state.rows.isEmpty)
 		#expect(store.state.sidebar.views.map(\.count) == [0, 1, 0, 0])
