@@ -71,10 +71,7 @@ struct ReplicaFeature {
 		/// The window's Undo point Undo would revert, as of the last read. Nil where the Replica's
 		/// newest isn't the window's own.
 		var undoName: String?
-		/// The write that failed, which an alert on the window reports until it's dismissed.
-		var writeFailure: WriteFailure?
-		/// The write in progress, which disables every other. A failed write is in progress until
-		/// its alert is dismissed.
+		/// The write in progress, which disables every other.
 		var writeProgress: WriteProgress?
 
 		/// The active Context's name, where there is one.
@@ -252,18 +249,16 @@ struct ReplicaFeature {
 			case write(WriteAction)
 		}
 
-		/// The change's Undo point name, as in "Complete 3 Tasks" or "Undo Change Due Date".
-		var name: String
 		var reason: String
 		/// What Try Again does, nil where trying again can't help, so the alert offers only OK.
 		var retry: Retry?
-
-		var title: String {
-			String(localized: "Couldn't \(name)")
-		}
+		/// As in "Couldn't Complete 3 Tasks".
+		var title: String
 	}
 
 	enum WriteProgress: Equatable {
+		/// Failed, and in progress still until its alert is dismissed.
+		case failed(WriteFailure)
 		case running
 		/// Running long enough for the subtitle to say so.
 		case saving
@@ -330,6 +325,11 @@ struct ReplicaFeature {
 		case bookmarkChanges
 		case readFailure
 		case taskrc
+	}
+
+	private enum UndoDirection {
+		case redo
+		case undo
 	}
 
 	@Dependency(\.bookmarkClient) var bookmarkClient
@@ -511,14 +511,11 @@ struct ReplicaFeature {
 				guard state.canRedo, let name = state.redoName else {
 					return .none
 				}
-				// The engine lets go of a redo that fails, so there's nothing to try again.
-				return undoOrRedo(String(localized: "Redo \(name)"), retry: nil, &state) {
-					[replicaClient] in try await replicaClient.redo($0)
-				}
+				return undoOrRedo(.redo, failureTitle: String(localized: "Couldn't Redo \(name)"), &state)
 
 			case .savingDelayElapsed:
 				// The delay can elapse just as the write ends, or fails.
-				if state.writeProgress != nil, state.writeFailure == nil {
+				if state.writeProgress == .running {
 					state.writeProgress = .saving
 				}
 				return .none
@@ -556,19 +553,17 @@ struct ReplicaFeature {
 
 			case let .tasksLoaded(snapshot):
 				state.isReplicaOpen = true
-				let clearsReadFailure: Effect<Action> =
-					state.readFailure == nil ? .none : .cancel(id: CancelID.readFailure)
 				state.isReadFailureBannerPresented = false
 				state.readFailure = nil
 				guard snapshot.readIndex >= state.readIndex else {
-					return clearsReadFailure
+					return .cancel(id: CancelID.readFailure)
 				}
 				state.readIndex = snapshot.readIndex
 				state.redoName = snapshot.redoName
 				state.storedTasks = snapshot.tasks
 				state.undoName = snapshot.undoName
 				updateRows(&state)
-				return clearsReadFailure
+				return .cancel(id: CancelID.readFailure)
 
 			case .timerTicked:
 				updateRows(&state)
@@ -582,7 +577,7 @@ struct ReplicaFeature {
 				guard state.canUndo, let name = state.undoName else {
 					return .none
 				}
-				return undo(String(localized: "Undo \(name)"), &state)
+				return undoOrRedo(.undo, failureTitle: String(localized: "Couldn't Undo \(name)"), &state)
 
 			case let .undoOrRedoFinished(outcome):
 				// The tasks it changed that the view shows, tracked by UUID, since an undo can give a
@@ -614,22 +609,19 @@ struct ReplicaFeature {
 				return finishWrite(&state)
 
 			case let .writeFailed(failure):
-				state.writeFailure = failure
-				state.writeProgress = .running
+				state.writeProgress = .failed(failure)
 				return .none
 
 			case .writeFailureDismissed:
-				state.writeFailure = nil
 				return finishWrite(&state)
 
 			case .writeFailureTryAgainButtonTapped:
-				guard let failure = state.writeFailure, let retry = failure.retry else {
+				guard case let .failed(failure) = state.writeProgress, let retry = failure.retry else {
 					return .none
 				}
-				state.writeFailure = nil
 				switch retry {
 				case .undo:
-					return undo(failure.name, &state)
+					return undoOrRedo(.undo, failureTitle: failure.title, &state)
 
 				case let .write(action):
 					return startWrite(action, &state)
@@ -668,9 +660,6 @@ struct ReplicaFeature {
 
 	/// The one path every write takes. Every other write queues until it finishes.
 	private func write(_ action: WriteAction, _ state: inout State) -> Effect<Action> {
-		guard state.directory != nil else {
-			return .none
-		}
 		guard state.writeProgress == nil else {
 			state.queuedWrites.append(action)
 			return .none
@@ -688,8 +677,12 @@ struct ReplicaFeature {
 		state.writeProgress = .running
 		let name = undoName(for: action, udaColumns: state.udaColumns)
 		// "Couldn't New Task" wouldn't read, so a failure names what New Task does.
-		let failureName =
-			if case .create = action { String(localized: "Create Task") } else { name }
+		let failureTitle =
+			if case .create = action {
+				String(localized: "Couldn't Create Task")
+			} else {
+				String(localized: "Couldn't \(name)")
+			}
 		let planner = WritePlanner(taskrc: state.runningTaskrc, timeZone: timeZone)
 		return .run { [clock, now, replicaClient, storedTasks = state.storedTasks] send in
 			// A child of the write, so it's cancelled as the write ends, however it ends.
@@ -709,45 +702,39 @@ struct ReplicaFeature {
 				}
 				tasks = outcome.snapshot.tasks
 			}
-			await send(
-				.writeFailed(
-					WriteFailure(
-						name: failureName,
-						reason: String(localized: "The Replica kept changing while it was written to."),
-						retry: .write(action),
-					),
-				),
+			throw ReplicaError.failed(
+				String(localized: "The Replica kept changing while it was written to."),
 			)
 		} catch: { error, send in
-			await send(.writeFailed(WriteFailure(error, name: failureName, retry: .write(action))))
+			await send(.writeFailed(WriteFailure(error, title: failureTitle, retry: .write(action))))
 		}
 	}
 
-	/// Undoes the window's newest Undo point, as the change `name`.
-	private func undo(_ name: String, _ state: inout State) -> Effect<Action> {
-		undoOrRedo(name, retry: .undo, &state) { [replicaClient] in try await replicaClient.undo($0) }
-	}
-
-	/// Undoes or redoes through `change`, holding every write back until it ends as a write would.
-	/// A change that didn't apply cleanly beeps, and its read has checked Undo and Redo afresh. One
-	/// that fails is reported as the change `name`, which `retry` tries again.
+	/// Undoes or redoes, holding every write back until it ends as a write would. A change that
+	/// didn't apply cleanly beeps, and its read has checked Undo and Redo afresh. One that fails is
+	/// reported as `failureTitle`.
 	private func undoOrRedo(
-		_ name: String,
-		retry: WriteFailure.Retry?,
+		_ direction: UndoDirection,
+		failureTitle: String,
 		_ state: inout State,
-		_ change: @escaping @Sendable (_ directory: URL) async throws -> UndoOutcome,
 	) -> Effect<Action> {
 		guard let directory = state.directory else {
 			return .none
 		}
 		state.writeProgress = .running
-		return .run { send in
-			let outcome = try await change(directory)
+		return .run { [replicaClient] send in
+			let outcome =
+				switch direction {
+				case .redo: try await replicaClient.redo(directory)
+				case .undo: try await replicaClient.undo(directory)
+				}
 			// The stream won't yield these, having been read already.
 			await send(.tasksLoaded(outcome.snapshot))
 			await send(.undoOrRedoFinished(outcome))
 		} catch: { error, send in
-			await send(.writeFailed(WriteFailure(error, name: name, retry: retry)))
+			// The engine lets go of a redo that fails, so there's nothing to try again.
+			let retry: WriteFailure.Retry? = direction == .undo ? .undo : nil
+			await send(.writeFailed(WriteFailure(error, title: failureTitle, retry: retry)))
 		}
 	}
 
@@ -1081,41 +1068,11 @@ private func undoName(for action: WriteAction, udaColumns: [UDAColumn]) -> Strin
 }
 
 extension ReplicaFeature.WriteFailure {
-	/// `error` failing the change `name`, which `retry` tries again, unless the planner refused the
-	/// change, which it would again.
-	init(_ error: any Error, name: String, retry: Retry?) {
-		self.name = name
-		guard let error = error as? WritePlanError else {
-			reason = error.localizedDescription
-			self.retry = retry
-			return
-		}
-		self.retry = nil
-		reason =
-			switch error {
-			case .blankAnnotation:
-				String(localized: "An annotation needs text.")
-
-			case .blankDescription:
-				String(localized: "A task needs a description.")
-
-			case .circularDependency:
-				String(localized: "The task would come to depend on itself through other tasks.")
-
-			case let .invalidInput(property, _):
-				String(localized: "The \(property) isn't a date Taskwarrior understands.")
-
-			case .noSuchTask:
-				String(localized: "The task no longer exists.")
-
-			case let .reservedTag(tag):
-				String(localized: "\(tag) is a virtual tag, which Taskwarrior sets itself.")
-
-			case .selfDependency:
-				String(localized: "A task can't depend on itself.")
-
-			case let .unresolvedDefault(key, _):
-				String(localized: "The Taskrc's \(key) isn't a date SimpleTaskWarrior can resolve.")
-			}
+	/// `error` failing the change `title` names, which `retry` tries again, unless the planner
+	/// refused the change, which it would again.
+	init(_ error: any Error, title: String, retry: Retry?) {
+		reason = error.localizedDescription
+		self.retry = error is WritePlanError ? nil : retry
+		self.title = title
 	}
 }

@@ -339,10 +339,8 @@ actor Replica {
 	/// checks the Undo points afresh. An error where the reversal didn't land, as when the lock is
 	/// held, is thrown, and the point stays for another try.
 	func undo() throws -> UndoOutcome {
-		guard let point = undoPoints.last else {
-			return try notApplied()
-		}
 		guard
+			let point = undoPoints.last,
 			case let .applied(error) = try engine.commitReversedOperations(operations: point.operations)
 		else {
 			return try notApplied()

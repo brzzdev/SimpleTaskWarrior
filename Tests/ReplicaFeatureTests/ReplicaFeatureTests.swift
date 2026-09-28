@@ -625,10 +625,12 @@ struct ReplicaFeatureTests {
 		await store.receive(\.tasksLoaded)
 		await store.receive(\.tasksLoaded)
 		await store.receive(\.writeFailed) {
-			$0.writeFailure = ReplicaFeature.WriteFailure(
-				name: "Complete Task",
-				reason: "The Replica kept changing while it was written to.",
-				retry: .write(.complete([UUID(0)])),
+			$0.writeProgress = .failed(
+				ReplicaFeature.WriteFailure(
+					reason: "The Replica kept changing while it was written to.",
+					retry: .write(.complete([UUID(0)])),
+					title: "Couldn't Complete Task",
+				),
 			)
 		}
 		#expect(attempts.value == 3)
@@ -636,7 +638,6 @@ struct ReplicaFeatureTests {
 		await store.send(.writeFailureDismissed) {
 			$0.leavingTasks = []
 			$0.rows = try [row(milk)]
-			$0.writeFailure = nil
 			$0.writeProgress = nil
 		}
 		await store.finish()
@@ -672,15 +673,16 @@ struct ReplicaFeatureTests {
 			$0.writeProgress = .running
 		}
 		await store.receive(\.writeFailed) {
-			$0.writeFailure = ReplicaFeature.WriteFailure(
-				name: "Create Task",
-				reason: "The Replica is busy. A `task` command may be holding it.",
-				retry: .write(.create(UUID(0), description: "Buy milk")),
+			$0.writeProgress = .failed(
+				ReplicaFeature.WriteFailure(
+					reason: "The Replica is busy. A `task` command may be holding it.",
+					retry: .write(.create(UUID(0), description: "Buy milk")),
+					title: "Couldn't Create Task",
+				),
 			)
 		}
-		#expect(store.state.writeFailure?.title == "Couldn't Create Task")
 		await store.send(.writeFailureTryAgainButtonTapped) {
-			$0.writeFailure = nil
+			$0.writeProgress = .running
 		}
 		await store.receive(\.tasksLoaded) {
 			$0.allRows = try [row(milk)]
@@ -722,14 +724,16 @@ struct ReplicaFeatureTests {
 			$0.writeProgress = .running
 		}
 		await store.receive(\.writeFailed) {
-			$0.writeFailure = ReplicaFeature.WriteFailure(
-				name: "Undo Complete Task",
-				reason: "The Replica is busy. A `task` command may be holding it.",
-				retry: .undo,
+			$0.writeProgress = .failed(
+				ReplicaFeature.WriteFailure(
+					reason: "The Replica is busy. A `task` command may be holding it.",
+					retry: .undo,
+					title: "Couldn't Undo Complete Task",
+				),
 			)
 		}
 		await store.send(.writeFailureTryAgainButtonTapped) {
-			$0.writeFailure = nil
+			$0.writeProgress = .running
 		}
 		await store.receive(\.tasksLoaded) {
 			$0.readIndex = 1
@@ -798,15 +802,16 @@ struct ReplicaFeatureTests {
 			$0.storedTasks = []
 		}
 		await store.receive(\.writeFailed) {
-			$0.writeFailure = ReplicaFeature.WriteFailure(
-				name: "Complete Task",
-				reason: "The task no longer exists.",
-				retry: nil,
+			$0.writeProgress = .failed(
+				ReplicaFeature.WriteFailure(
+					reason: "The task no longer exists.",
+					retry: nil,
+					title: "Couldn't Complete Task",
+				),
 			)
 		}
 		await store.send(.writeFailureDismissed) {
 			$0.leavingTasks = []
-			$0.writeFailure = nil
 			$0.writeProgress = nil
 		}
 		await store.finish()

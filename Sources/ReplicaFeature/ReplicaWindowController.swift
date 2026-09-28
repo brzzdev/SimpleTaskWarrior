@@ -113,10 +113,10 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 			beginOpenPanel(for: fileImporter)
 		}
 		observe { [weak self] in
-			guard let self, let writeFailure = store.writeFailure else {
+			guard let self, case let .failed(failure)? = store.writeProgress else {
 				return
 			}
-			beginAlert(for: writeFailure)
+			beginAlert(for: failure)
 		}
 		// The store clears a search that would hide the task New Task created.
 		observe { [weak self] in
