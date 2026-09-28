@@ -2,7 +2,6 @@
 public import AppKit
 import ComposableArchitecture
 public import Foundation
-import Models
 import SwiftNavigation
 import Taskrc
 import UniformTypeIdentifiers
@@ -376,34 +375,15 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 		}
 	}
 
-	/// Asks as a sheet on the window whether to repair the chains `prompt` breaks, saying what each
-	/// of their dependents would depend on instead, and reports the answer.
+	/// Asks as a sheet on the window whether to repair the chains `prompt` breaks, and reports the
+	/// answer.
 	private func beginAlert(for prompt: ReplicaFeature.ChainRepairPrompt) {
 		guard alert == nil, let window else {
 			return
 		}
-		let descriptions = Dictionary(
-			store.storedTasks.compactMap { task in
-				UUID(uuidString: task.uuid).map { ($0, task.properties["description"] ?? "") }
-			},
-			uniquingKeysWith: { first, _ in first },
-		)
-		let quoted = { (id: UUID) in "“\(descriptions[id] ?? "")”" }
 		let alert = NSAlert()
-		alert.messageText =
-			prompt.chains.count == 1
-				? String(localized: "Repair the Dependency Chain?")
-				: String(localized: "Repair \(prompt.chains.count) Dependency Chains?")
-		alert.informativeText = prompt.chains
-			.flatMap { chain in
-				let blocking = ListFormatter.localizedString(byJoining: chain.blocking.map(quoted))
-				return chain.blocked.map { blocked in
-					String(
-						localized: "\(quoted(blocked)) would depend on \(blocking) instead of \(quoted(chain.task)).",
-					)
-				}
-			}
-			.joined(separator: "\n")
+		alert.messageText = prompt.title
+		alert.informativeText = prompt.message
 		alert.addButton(withTitle: String(localized: "Repair"))
 		alert.addButton(withTitle: String(localized: "Don't Repair"))
 		alert.addButton(withTitle: String(localized: "Cancel"))

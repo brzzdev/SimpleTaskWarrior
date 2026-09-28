@@ -198,70 +198,69 @@ public struct WritePlanner: Sendable {
 		chains: ChainRepair = .leave,
 		change: (inout Draft) throws(WritePlanError) -> Void,
 	) throws(WritePlanError) -> WritePlan {
-		var drafts: [Draft] = []
-		var indices: [Task.ID: Int] = [:]
-		// A repair drafts the other tasks it reads, which a later task in `ids` may be.
-		func index(_ id: Task.ID) -> Int? {
-			if let index = indices[id] {
-				return index
-			}
-			guard let properties = tasks[id] else {
-				return nil
-			}
-			indices[id] = drafts.count
-			drafts.append(Draft(id: id, properties: properties, isNew: false))
-			return drafts.count - 1
-		}
+		var drafts = Drafts(tasks: tasks)
 		var repairedChains: [WritePlan.RepairedChain] = []
 		var seen: Set<Task.ID> = []
 		for id in ids where seen.insert(id).inserted {
-			guard let closing = index(id) else {
+			guard let index = drafts.index(id) else {
 				throw .noSuchTask(id)
 			}
-			let wasOpen = isOpen(drafts[closing].properties["status"])
-			try change(&drafts[closing])
-			guard chains == .repair, wasOpen, !isOpen(drafts[closing].properties["status"]) else {
+			let status = drafts[index].properties["status"]
+			try change(&drafts[index])
+			// Only closing a task breaks a chain: a closed one stopped blocking when it closed.
+			guard chains == .repair, isOpen(status), !isOpen(drafts[index].properties["status"]) else {
 				continue
 			}
-			// Only the tasks it still blocks, and only if it's blocked, as `getDependencyTasks` reads.
-			let blocking = dependencies(drafts[closing].properties).sorted().filter { dependency in
-				_ = drafts[closing].read("dep_\(dependency.uuidString.lowercased())")
-				guard let dependency = index(dependency) else {
-					return false
-				}
-				return isOpen(drafts[dependency].read("status"))
+			if let chain = repairChain(of: index, in: &drafts) {
+				repairedChains.append(chain)
 			}
-			guard !blocking.isEmpty else {
-				continue
-			}
-			// Found by scanning, so a dependent the CLI adds before the plan commits is left unrepaired,
-			// as one added just after `task done` would be.
-			let member = "dep_\(id.uuidString.lowercased())"
-			let blocked = tasks.keys.sorted().filter { candidate in
-				let properties = indices[candidate].map { drafts[$0].properties } ?? tasks[candidate]
-				return properties?[member] != nil && isOpen(properties?["status"])
-			}
-			guard !blocked.isEmpty else {
-				continue
-			}
-			for dependent in blocked {
-				guard let dependent = index(dependent) else {
-					continue
-				}
-				_ = drafts[dependent].read("status")
-				drafts[dependent].setDependency(id, isPresent: false)
-				for dependency in blocking where dependency != drafts[dependent].id {
-					drafts[dependent].setDependency(dependency, isPresent: true)
-				}
-			}
-			repairedChains.append(WritePlan.RepairedChain(blocked: blocked, blocking: blocking, task: id))
 		}
-		for index in drafts.indices {
-			drafts[index].rewriteLegacyWaiting()
+		var all = drafts.all
+		for index in all.indices {
+			all[index].rewriteLegacyWaiting()
 		}
-		var plan = WritePlan(drafts, epoch: epoch)
+		var plan = WritePlan(all, epoch: epoch)
 		plan.repairedChains = repairedChains
 		return plan
+	}
+
+	/// Moves the open tasks that depend on the task the draft at `closing` just closed onto the open
+	/// tasks it depends on, where there are both, and reports the chain.
+	private func repairChain(
+		of closing: Int,
+		in drafts: inout Drafts,
+	) -> WritePlan.RepairedChain? {
+		let id = drafts[closing].id
+		// Only the tasks it still blocks on, as `getDependencyTasks` reads them.
+		var blocking: [Task.ID] = []
+		for dependency in dependencies(drafts[closing].properties).sorted() {
+			_ = drafts[closing].read("dep_\(dependency.uuidString.lowercased())")
+			guard let index = drafts.index(dependency), isOpen(drafts[index].read("status")) else {
+				continue
+			}
+			blocking.append(dependency)
+		}
+		guard !blocking.isEmpty else {
+			return nil
+		}
+		// Found by scanning, so a dependent the CLI adds before the plan commits is left unrepaired,
+		// as one added just after `task done` would be.
+		let member = "dep_\(id.uuidString.lowercased())"
+		var blocked: [Task.ID] = []
+		for candidate in drafts.ids.filter({ drafts.properties($0)[member] != nil }).sorted() {
+			guard let index = drafts.index(candidate), isOpen(drafts[index].read("status")) else {
+				continue
+			}
+			drafts[index].setDependency(id, isPresent: false)
+			for dependency in blocking where dependency != candidate {
+				drafts[index].setDependency(dependency, isPresent: true)
+			}
+			blocked.append(candidate)
+		}
+		guard !blocked.isEmpty else {
+			return nil
+		}
+		return WritePlan.RepairedChain(blocked: blocked, blocking: blocking, task: id)
 	}
 
 	/// What an expression reads for `name`: a date attribute or UDA as its value, dates and durations
@@ -435,7 +434,7 @@ private let dateAttributes: Set = [
 /// Whether a task with `status` blocks or is blocked: any status but completed or deleted, as
 /// `Status.isOpen` reads it, a Recurrence template and a legacy `waiting` included.
 private func isOpen(_ status: String?) -> Bool {
-	status != Status.completed.rawValue && status != Status.deleted.rawValue
+	status.flatMap(Status.init(rawValue:))?.isOpen ?? true
 }
 
 /// The status TW 2 stored for a waiting task, which `Status` doesn't decode. TW 3 reads it as
@@ -769,5 +768,48 @@ private struct Draft {
 		if read("end") == nil {
 			set("end", epoch)
 		}
+	}
+}
+
+/// The drafts a plan makes, in the order it first reads each task. A repair drafts the other tasks
+/// it reads, which a later task the action names may be.
+private struct Drafts {
+	private(set) var all: [Draft] = []
+
+	private var indices: [Task.ID: Int] = [:]
+	private let tasks: [Task.ID: [String: String]]
+
+	/// Every task in the snapshot.
+	var ids: Dictionary<Task.ID, [String: String]>.Keys {
+		tasks.keys
+	}
+
+	init(tasks: [Task.ID: [String: String]]) {
+		self.tasks = tasks
+	}
+
+	subscript(index: Int) -> Draft {
+		get { all[index] }
+		set { all[index] = newValue }
+	}
+
+	/// The index of the draft of `id`, drafted from the snapshot first where it isn't yet, or nil
+	/// where the snapshot has no such task.
+	mutating func index(_ id: Task.ID) -> Int? {
+		if let index = indices[id] {
+			return index
+		}
+		guard let properties = tasks[id] else {
+			return nil
+		}
+		indices[id] = all.count
+		all.append(Draft(id: id, properties: properties, isNew: false))
+		return all.count - 1
+	}
+
+	/// The properties of `id` as the plan has them so far, without reading them: none where the
+	/// snapshot has no such task.
+	func properties(_ id: Task.ID) -> [String: String] {
+		indices[id].map { all[$0].properties } ?? tasks[id] ?? [:]
 	}
 }

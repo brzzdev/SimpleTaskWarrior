@@ -45,9 +45,7 @@ struct WritePlannerTests {
 		"edits/complete_several": {
 			try .complete([$0.id("Alpha"), $0.id("Beta")], chains: .repair)
 		},
-		"edits/complete_started": {
-			try .complete([$0.id("Alpha")], chains: .repair)
-		},
+		"edits/complete_started": { try .complete([$0.id("Alpha")], chains: .repair) },
 		"edits/delete_started": { try .delete([$0.id("Alpha")], chains: .repair) },
 		"edits/mark_completed_pending": { try .markPending([$0.id("Alpha")]) },
 		"edits/mark_deleted_pending": { try .markPending([$0.id("Alpha")]) },

@@ -238,11 +238,12 @@ struct ReplicaFeature {
 
 	/// A Done or Delete that would break dependency chains, as `dependency.confirmation` asks about.
 	struct ChainRepairPrompt: Equatable {
-		/// What repairing would do, as planned when the command was chosen.
-		var chains: [WritePlan.RepairedChain]
 		/// Done or Delete.
 		var command: TaskCommand
 		var ids: [Models.Task.ID]
+		/// What repairing would do, as planned when the command was chosen: a line for each dependent.
+		var message: String
+		var title: String
 	}
 
 	struct TaskrcSaveFailure: Equatable {
@@ -881,18 +882,31 @@ struct ReplicaFeature {
 			guard state.runningTaskrc.boolean("dependency.confirmation") else {
 				return close(ids, command, chains: .repair, &state)
 			}
+			let tasks = properties(of: state.storedTasks)
 			// A plan that can't be made asks nothing, and the write reports why.
 			let chains = try? WritePlanner(taskrc: state.runningTaskrc, timeZone: timeZone)
-				.plan(
-					closeAction(ids, command, chains: .repair),
-					tasks: properties(of: state.storedTasks),
-					at: now,
-				)
+				.plan(closeAction(ids, command, chains: .repair), tasks: tasks, at: now)
 				.repairedChains
 			guard let chains, !chains.isEmpty else {
 				return close(ids, command, chains: .leave, &state)
 			}
-			state.chainRepairPrompt = ChainRepairPrompt(chains: chains, command: command, ids: ids)
+			let quoted = { (id: Models.Task.ID) in "“\(tasks[id]?["description"] ?? "")”" }
+			let lines = chains.flatMap { chain in
+				let blocking = ListFormatter.localizedString(byJoining: chain.blocking.map(quoted))
+				return chain.blocked.map { blocked in
+					String(
+						localized: "\(quoted(blocked)) would depend on \(blocking) instead of \(quoted(chain.task)).",
+					)
+				}
+			}
+			state.chainRepairPrompt = ChainRepairPrompt(
+				command: command,
+				ids: ids,
+				message: lines.joined(separator: "\n"),
+				title: chains.count == 1
+					? String(localized: "Repair the Dependency Chain?")
+					: String(localized: "Repair \(chains.count) Dependency Chains?"),
+			)
 			return .none
 
 		case .markPending:

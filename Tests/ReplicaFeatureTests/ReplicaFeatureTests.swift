@@ -100,9 +100,10 @@ struct ReplicaFeatureTests {
 			$0.timeZone = .gmt
 		}
 		let prompt = ReplicaFeature.ChainRepairPrompt(
-			chains: [WritePlan.RepairedChain(blocked: [UUID(0)], blocking: [UUID(2)], task: UUID(1))],
 			command: .done,
 			ids: [UUID(1)],
+			message: "“Alpha” would depend on “Gamma” instead of “Beta”.",
+			title: "Repair the Dependency Chain?",
 		)
 
 		await store.send(.doneButtonTapped) {
@@ -130,9 +131,11 @@ struct ReplicaFeatureTests {
 			try plans.value == [
 				planner.plan(
 					.complete([UUID(1)], chains: .repair),
-					tasks: Dictionary(
-						uniqueKeysWithValues: tasks.enumerated().map { (UUID($0), $1.properties) },
-					),
+					tasks: [
+						UUID(0): tasks[0].properties,
+						UUID(1): tasks[1].properties,
+						UUID(2): tasks[2].properties,
+					],
 					at: now,
 				),
 			],
