@@ -387,7 +387,6 @@ actor Replica {
 	/// apply.
 	private func readTasks() throws -> TaskSnapshot {
 		let snapshot = try engine.snapshot()
-		readVersion = snapshot.dataVersion
 		if redoPoint?.dataVersion != snapshot.dataVersion {
 			redoPoint = nil
 		}
@@ -403,6 +402,9 @@ actor Replica {
 				workingSetID: workingSetIDs[task.uuid],
 			)
 		}
+		// Recorded only once the whole read succeeds, so a read that fails partway through is
+		// read again on the next poll.
+		readVersion = snapshot.dataVersion
 		defer {
 			readCount += 1
 		}
