@@ -1,0 +1,73 @@
+{
+	"after": {
+		"8c366654-ead1-4528-9395-f60d8f9f7401": {
+			"dep_bf60dd32-f3a1-4ba5-81d8-16e2da489844": "x",
+			"depends": "bf60dd32-f3a1-4ba5-81d8-16e2da489844",
+			"description": "Beta",
+			"end": "1790616481",
+			"entry": "1790616481",
+			"modified": "1790616481",
+			"status": "deleted"
+		},
+		"bf60dd32-f3a1-4ba5-81d8-16e2da489844": {
+			"description": "Gamma",
+			"entry": "1790616481",
+			"modified": "1790616481",
+			"status": "pending"
+		},
+		"c6eee351-2b1d-4821-905a-f559ebf88006": {
+			"dep_8c366654-ead1-4528-9395-f60d8f9f7401": "x",
+			"depends": "8c366654-ead1-4528-9395-f60d8f9f7401",
+			"description": "Alpha",
+			"entry": "1790616481",
+			"modified": "1790616481",
+			"status": "pending"
+		}
+	},
+	"before": {
+		"8c366654-ead1-4528-9395-f60d8f9f7401": {
+			"dep_bf60dd32-f3a1-4ba5-81d8-16e2da489844": "x",
+			"depends": "bf60dd32-f3a1-4ba5-81d8-16e2da489844",
+			"description": "Beta",
+			"end": "1790616481",
+			"entry": "1790616481",
+			"modified": "1790616481",
+			"status": "completed"
+		},
+		"bf60dd32-f3a1-4ba5-81d8-16e2da489844": {
+			"description": "Gamma",
+			"entry": "1790616481",
+			"modified": "1790616481",
+			"status": "pending"
+		},
+		"c6eee351-2b1d-4821-905a-f559ebf88006": {
+			"dep_8c366654-ead1-4528-9395-f60d8f9f7401": "x",
+			"depends": "8c366654-ead1-4528-9395-f60d8f9f7401",
+			"description": "Alpha",
+			"entry": "1790616481",
+			"modified": "1790616481",
+			"status": "pending"
+		}
+	},
+	"now": 1790616481,
+	"operations": [
+		{
+			"Update": {
+				"old_value": "1790616481",
+				"property": "modified",
+				"timestamp": "2026-09-28T17:28:01.537789Z",
+				"uuid": "8c366654-ead1-4528-9395-f60d8f9f7401",
+				"value": "1790616481"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "completed",
+				"property": "status",
+				"timestamp": "2026-09-28T17:28:01.537789Z",
+				"uuid": "8c366654-ead1-4528-9395-f60d8f9f7401",
+				"value": "deleted"
+			}
+		}
+	]
+}

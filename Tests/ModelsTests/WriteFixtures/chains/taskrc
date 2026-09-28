@@ -1,0 +1,2 @@
+# Off, so `task` repairs a broken chain without asking, as the app does once the user agrees.
+dependency.confirmation=off

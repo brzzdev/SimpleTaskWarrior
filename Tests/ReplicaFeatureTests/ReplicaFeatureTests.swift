@@ -84,6 +84,97 @@ struct ReplicaFeatureTests {
 	}
 
 	@Test
+	func doneThatBreaksAChainAsksBeforeRepairingIt() async throws {
+		let tasks = chain()
+		let plans = LockIsolated<[WritePlan]>([])
+		let initialState = try loadedState(tasks, selection: [UUID(1)])
+		let store = TestStore(initialState: initialState) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.continuousClock = TestClock()
+			$0.date.now = now
+			$0.replicaClient.apply = { plan, _, _ in
+				plans.withValue { $0.append(plan) }
+				return ApplyOutcome(isCommitted: true, snapshot: snapshot(tasks))
+			}
+			$0.timeZone = .gmt
+		}
+		let prompt = ReplicaFeature.ChainRepairPrompt(
+			chains: [WritePlan.RepairedChain(blocked: [UUID(0)], blocking: [UUID(2)], task: UUID(1))],
+			command: .done,
+			ids: [UUID(1)],
+		)
+
+		await store.send(.doneButtonTapped) {
+			$0.chainRepairPrompt = prompt
+		}
+		await store.send(.chainRepairDismissed) {
+			$0.chainRepairPrompt = nil
+		}
+		#expect(plans.value.isEmpty)
+
+		await store.send(.doneButtonTapped) {
+			$0.chainRepairPrompt = prompt
+		}
+		await store.send(.repairChainButtonTapped) {
+			$0.chainRepairPrompt = nil
+			$0.leavingTasks = [UUID(1)]
+			$0.rows = try [row(tasks[0]), row(tasks[2])]
+			$0.selection = []
+			$0.writeProgress = .running
+		}
+		// The table's reads are other tests' business: this one is about the plan.
+		store.exhaustivity = .off(showSkippedAssertions: false)
+		await store.receive(\.writeCommitted)
+		#expect(
+			try plans.value == [
+				planner.plan(
+					.complete([UUID(1)], chains: .repair),
+					tasks: Dictionary(
+						uniqueKeysWithValues: tasks.enumerated().map { (UUID($0), $1.properties) },
+					),
+					at: now,
+				),
+			],
+		)
+		await store.finish()
+	}
+
+	@Test
+	func doneRepairsAChainWithoutAskingWhereTheTaskrcSaysNotTo() async throws {
+		let tasks = chain()
+		let taskrc = Taskrc(path: taskrcFile.path(), environment: .fixture) { path, _ in
+			Taskrc.File(contents: "dependency.confirmation=off", realPath: path)
+		}
+		let plans = LockIsolated<[WritePlan]>([])
+		var initialState = try loadedState(tasks, selection: [UUID(1)])
+		initialState.taskrc = TaskrcClient.Loaded(taskrc: taskrc, url: taskrcFile)
+		let store = TestStore(initialState: initialState) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.continuousClock = TestClock()
+			$0.date.now = now
+			$0.replicaClient.apply = { plan, _, _ in
+				plans.withValue { $0.append(plan) }
+				return ApplyOutcome(isCommitted: true, snapshot: snapshot(tasks))
+			}
+			$0.timeZone = .gmt
+		}
+
+		await store.send(.doneButtonTapped) {
+			$0.leavingTasks = [UUID(1)]
+			$0.rows = try [row(tasks[0]), row(tasks[2])]
+			$0.selection = []
+			$0.writeProgress = .running
+		}
+		// The table's reads are other tests' business: this one is about the plan.
+		store.exhaustivity = .off(showSkippedAssertions: false)
+		await store.receive(\.writeCommitted)
+		#expect(plans.value.first?.repairedChains.map(\.blocked) == [[UUID(0)]])
+		await store.finish()
+	}
+
+	@Test
 	func doneCompletesTheSelectedTaskAndItLeavesTheList() async throws {
 		let milk = storedTask(0, "Buy milk", workingSetID: 1)
 		let dog = storedTask(1, "Walk the dog", workingSetID: 2)
@@ -123,7 +214,7 @@ struct ReplicaFeatureTests {
 		#expect(
 			try plans.value == [
 				planner.plan(
-					.complete([UUID(0)]),
+					.complete([UUID(0)], chains: .leave),
 					tasks: [UUID(0): milk.properties, UUID(1): dog.properties],
 					at: now,
 				),
@@ -593,7 +684,11 @@ struct ReplicaFeatureTests {
 		}
 		#expect(
 			try plans.value.last
-				== planner.plan(.complete([UUID(0)]), tasks: [UUID(0): milkStarted.properties], at: now),
+				== planner.plan(
+					.complete([UUID(0)], chains: .leave),
+					tasks: [UUID(0): milkStarted.properties],
+					at: now,
+				),
 		)
 		await store.finish()
 	}
@@ -628,7 +723,7 @@ struct ReplicaFeatureTests {
 			$0.writeProgress = .failed(
 				ReplicaFeature.WriteFailure(
 					reason: "The Replica kept changing while it was written to.",
-					retry: .write(.complete([UUID(0)]), at: now),
+					retry: .write(.complete([UUID(0)], chains: .leave), at: now),
 					title: "Couldn't Complete Task",
 				),
 			)
@@ -1463,6 +1558,19 @@ private func snapshot(
 	redoName: String? = nil,
 ) -> TaskSnapshot {
 	TaskSnapshot(readIndex: readIndex, redoName: redoName, tasks: tasks)
+}
+
+/// Three pending tasks in a chain, each depending on the next: 0 on 1, and 1 on 2.
+private func chain() -> [StoredTask] {
+	func dependingOn(_ seed: Int) -> [String: String] {
+		let uuid = UUID(seed).uuidString.lowercased()
+		return ["dep_\(uuid)": "x", "depends": uuid]
+	}
+	return [
+		storedTask(0, "Alpha", workingSetID: 1, dependingOn(1)),
+		storedTask(1, "Beta", workingSetID: 2, dependingOn(2)),
+		storedTask(2, "Gamma", workingSetID: 3),
+	]
 }
 
 /// The planner a window on TW's defaults writes with.

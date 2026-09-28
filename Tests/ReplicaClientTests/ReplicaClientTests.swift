@@ -68,7 +68,7 @@ final class ReplicaClientTests {
 		var tasks = replicaClient.tasks(directory).makeAsyncIterator()
 		let stored = try #require(try await tasks.next()?.get().tasks.first)
 		let plan = try WritePlanner(taskrc: .defaults, timeZone: .gmt)
-			.plan(.complete([uuid]), tasks: [uuid: stored.properties], at: .now)
+			.plan(.complete([uuid], chains: .repair), tasks: [uuid: stored.properties], at: .now)
 		commit([.setValue(uuid: uuid.uuidString, property: "start", value: "1790000000")], with: cli)
 		let before = try cli.getUndoOperations()
 
@@ -230,7 +230,7 @@ final class ReplicaClientTests {
 		as name: String,
 	) async throws -> TaskSnapshot {
 		let plan = try WritePlanner(taskrc: .defaults, timeZone: .gmt)
-			.plan(.complete([uuid]), tasks: [uuid: stored.properties], at: .now)
+			.plan(.complete([uuid], chains: .repair), tasks: [uuid: stored.properties], at: .now)
 		let outcome = try await replicaClient.apply(plan, name, directory)
 		try #require(outcome.isCommitted)
 		return outcome.snapshot

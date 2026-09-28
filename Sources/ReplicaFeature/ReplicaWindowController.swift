@@ -2,6 +2,7 @@
 public import AppKit
 import ComposableArchitecture
 public import Foundation
+import Models
 import SwiftNavigation
 import Taskrc
 import UniformTypeIdentifiers
@@ -11,7 +12,8 @@ import UniformTypeIdentifiers
 public final class ReplicaWindowController: NSWindowController, NSMenuItemValidation,
 	NSToolbarDelegate, NSWindowDelegate
 {
-	/// The failed write's alert on screen, so a store change while it's up doesn't show a second.
+	/// The alert on screen, for a failed write or a broken chain, so a store change while it's up
+	/// doesn't show a second.
 	private var alert: NSAlert?
 	private let commandItems = Dictionary(
 		uniqueKeysWithValues: ReplicaFeature.TaskCommand.all.map { command in
@@ -117,6 +119,12 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 				return
 			}
 			beginAlert(for: failure)
+		}
+		observe { [weak self] in
+			guard let self, let prompt = store.chainRepairPrompt else {
+				return
+			}
+			beginAlert(for: prompt)
 		}
 		// The store clears a search that would hide the task New Task created.
 		observe { [weak self] in
@@ -365,6 +373,56 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 				return
 			}
 			store.send(.writeFailureTryAgainButtonTapped)
+		}
+	}
+
+	/// Asks as a sheet on the window whether to repair the chains `prompt` breaks, saying what each
+	/// of their dependents would depend on instead, and reports the answer.
+	private func beginAlert(for prompt: ReplicaFeature.ChainRepairPrompt) {
+		guard alert == nil, let window else {
+			return
+		}
+		let descriptions = Dictionary(
+			store.storedTasks.compactMap { task in
+				UUID(uuidString: task.uuid).map { ($0, task.properties["description"] ?? "") }
+			},
+			uniquingKeysWith: { first, _ in first },
+		)
+		let quoted = { (id: UUID) in "“\(descriptions[id] ?? "")”" }
+		let alert = NSAlert()
+		alert.messageText =
+			prompt.chains.count == 1
+				? String(localized: "Repair the Dependency Chain?")
+				: String(localized: "Repair \(prompt.chains.count) Dependency Chains?")
+		alert.informativeText = prompt.chains
+			.flatMap { chain in
+				let blocking = ListFormatter.localizedString(byJoining: chain.blocking.map(quoted))
+				return chain.blocked.map { blocked in
+					String(
+						localized: "\(quoted(blocked)) would depend on \(blocking) instead of \(quoted(chain.task)).",
+					)
+				}
+			}
+			.joined(separator: "\n")
+		alert.addButton(withTitle: String(localized: "Repair"))
+		alert.addButton(withTitle: String(localized: "Don't Repair"))
+		alert.addButton(withTitle: String(localized: "Cancel"))
+		self.alert = alert
+		alert.beginSheetModal(for: window) { [weak self] response in
+			guard let self else {
+				return
+			}
+			self.alert = nil
+			switch response {
+			case .alertFirstButtonReturn:
+				store.send(.repairChainButtonTapped)
+
+			case .alertSecondButtonReturn:
+				store.send(.dontRepairChainButtonTapped)
+
+			default:
+				store.send(.chainRepairDismissed)
+			}
 		}
 	}
 

@@ -17,6 +17,8 @@ struct ReplicaFeature {
 		/// to `rows`.
 		var allRows: [TaskRow] = []
 		let bookmark: Data
+		/// The Done or Delete asking whether to repair the dependency chains it breaks.
+		var chainRepairPrompt: ChainRepairPrompt?
 		/// The task a New Task is creating, which is selected once it commits.
 		var creatingTask: Models.Task.ID?
 		var directory: URL?
@@ -104,11 +106,12 @@ struct ReplicaFeature {
 			undoName != nil && writeProgress == nil
 		}
 
-		/// The commands that apply to every selected task. None applies while a write is in progress,
-		/// or while the new-task row is open, whose Return would find the write in the way. Read once
-		/// for all of them, since the selection is looked up for each read.
+		/// The commands that apply to every selected task. None applies while a write is in progress
+		/// or a Done or Delete is asking about chains, or while the new-task row is open, whose Return
+		/// would find the write in the way. Read once for all of them, since the selection is looked up
+		/// for each read.
 		var enabledCommands: Set<TaskCommand> {
-			guard writeProgress == nil, !isNewTaskRowPresented else {
+			guard writeProgress == nil, chainRepairPrompt == nil, !isNewTaskRowPresented else {
 				return []
 			}
 			let tasks = selectedTasks()
@@ -233,6 +236,15 @@ struct ReplicaFeature {
 		case startStop
 	}
 
+	/// A Done or Delete that would break dependency chains, as `dependency.confirmation` asks about.
+	struct ChainRepairPrompt: Equatable {
+		/// What repairing would do, as planned when the command was chosen.
+		var chains: [WritePlan.RepairedChain]
+		/// Done or Delete.
+		var command: TaskCommand
+		var ids: [Models.Task.ID]
+	}
+
 	struct TaskrcSaveFailure: Equatable {
 		var message: String
 		/// The panel that chose the file, which Try Again… opens again.
@@ -278,12 +290,15 @@ struct ReplicaFeature {
 		/// Return in the inspector's new-annotation field, or clicking away from it.
 		case annotationSubmitted(Models.Task.ID, String)
 		case binding(BindingAction<State>)
+		/// Cancel in the sheet asking whether to repair dependency chains.
+		case chainRepairDismissed
 		case chooseTaskrcButtonTapped
 		case deleteButtonTapped
 		case dependencyChosen(Models.Task.ID, dependency: Models.Task.ID)
 		case dependencyRemoveButtonTapped(Models.Task.ID, dependency: Models.Task.ID)
 		case directoryResolved(URL)
 		case doneButtonTapped
+		case dontRepairChainButtonTapped
 		case fetchRequested
 		case fileChosen(URL, for: FileImporter)
 		case grantAccessButtonTapped
@@ -303,6 +318,7 @@ struct ReplicaFeature {
 		case readFailureDelayElapsed
 		case readSucceeded(TaskSnapshot)
 		case redoButtonTapped
+		case repairChainButtonTapped
 		case savingDelayElapsed
 		/// A column header was clicked, or the table restored the Replica's sort.
 		case sortOrderChanged([TaskSort])
@@ -367,6 +383,10 @@ struct ReplicaFeature {
 			case .binding:
 				return .none
 
+			case .chainRepairDismissed:
+				state.chainRepairPrompt = nil
+				return .none
+
 			case .chooseTaskrcButtonTapped:
 				state.fileImporter = .taskrc
 				return .none
@@ -398,6 +418,9 @@ struct ReplicaFeature {
 
 			case .doneButtonTapped:
 				return perform(.done, &state)
+
+			case .dontRepairChainButtonTapped:
+				return closePromptedTasks(chains: .leave, &state)
 
 			case .fetchRequested:
 				return .merge(
@@ -525,6 +548,9 @@ struct ReplicaFeature {
 					return .none
 				}
 				return undoOrRedo(.redo, failureTitle: String(localized: "Couldn't Redo \(name)"), &state)
+
+			case .repairChainButtonTapped:
+				return closePromptedTasks(chains: .repair, &state)
 
 			case .savingDelayElapsed:
 				// The delay can elapse just as the write ends, or fails.
@@ -767,6 +793,40 @@ struct ReplicaFeature {
 		return taken.max().map { $0.addingTimeInterval(annotationSpacing) } ?? now
 	}
 
+	/// Completes or deletes the tasks `ids`, as `command` says, which the table drops while it writes.
+	private func close(
+		_ ids: [Models.Task.ID],
+		_ command: TaskCommand,
+		chains: ChainRepair,
+		_ state: inout State,
+	) -> Effect<Action> {
+		let effect = write(closeAction(ids, command, chains: chains), &state)
+		// Only once the write has started, since only its end brings them back.
+		if state.writeProgress != nil {
+			state.leavingTasks = Set(ids)
+			filterRows(&state)
+		}
+		return effect
+	}
+
+	/// The Done or Delete `command` over `ids`.
+	private func closeAction(
+		_ ids: [Models.Task.ID],
+		_ command: TaskCommand,
+		chains: ChainRepair,
+	) -> WriteAction {
+		command == .delete ? .delete(ids, chains: chains) : .complete(ids, chains: chains)
+	}
+
+	/// Writes the Done or Delete that asked about chains, with the user's answer.
+	private func closePromptedTasks(chains: ChainRepair, _ state: inout State) -> Effect<Action> {
+		guard let prompt = state.chainRepairPrompt else {
+			return .none
+		}
+		state.chainRepairPrompt = nil
+		return close(prompt.ids, prompt.command, chains: chains, &state)
+	}
+
 	/// Writes an inspector edit to the task `id`, keeping it in the table should the edit move it out.
 	private func edit(
 		_ id: Models.Task.ID,
@@ -816,20 +876,31 @@ struct ReplicaFeature {
 			return .none
 		}
 		let ids = state.selectedIDs
-		let action: WriteAction =
-			switch command {
-			case .delete: .delete(ids)
-			case .done: .complete(ids)
-			case .markPending: .markPending(ids)
-			case .startStop: if state.isStopping { .stop(ids) } else { .start(ids) }
+		switch command {
+		case .delete, .done:
+			guard state.runningTaskrc.boolean("dependency.confirmation") else {
+				return close(ids, command, chains: .repair, &state)
 			}
-		let effect = write(action, &state)
-		// Only once the write has started, since only its end brings them back.
-		if state.writeProgress != nil, command == .delete || command == .done {
-			state.leavingTasks = Set(ids)
-			filterRows(&state)
+			// A plan that can't be made asks nothing, and the write reports why.
+			let chains = try? WritePlanner(taskrc: state.runningTaskrc, timeZone: timeZone)
+				.plan(
+					closeAction(ids, command, chains: .repair),
+					tasks: properties(of: state.storedTasks),
+					at: now,
+				)
+				.repairedChains
+			guard let chains, !chains.isEmpty else {
+				return close(ids, command, chains: .leave, &state)
+			}
+			state.chainRepairPrompt = ChainRepairPrompt(chains: chains, command: command, ids: ids)
+			return .none
+
+		case .markPending:
+			return write(.markPending(ids), &state)
+
+		case .startStop:
+			return write(state.isStopping ? .stop(ids) : .start(ids), &state)
 		}
-		return effect
 	}
 
 	/// Selects the task `offset` rows from the inspected one, as ⌘⌥↑ and ⌘⌥↓ do.
@@ -1048,13 +1119,13 @@ private func properties(of tasks: [StoredTask]) -> [Models.Task.ID: [String: Str
 /// The name the Edit menu gives `action`'s Undo point, as in "Undo Change Due Date".
 private func undoName(for action: WriteAction, udaColumns: [UDAColumn]) -> String {
 	switch action {
-	case let .complete(ids):
+	case let .complete(ids, _):
 		counted(ids, String(localized: "Complete Task"), String(localized: "Complete \(ids.count) Tasks"))
 
 	case .create:
 		newTaskTitle
 
-	case let .delete(ids):
+	case let .delete(ids, _):
 		counted(ids, String(localized: "Delete Task"), String(localized: "Delete \(ids.count) Tasks"))
 
 	case .edit(_, .addAnnotation):
