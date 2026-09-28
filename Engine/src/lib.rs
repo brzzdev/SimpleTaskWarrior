@@ -29,6 +29,9 @@ const UNVERSIONED_SCHEMA: (u32, u32) = (0, 0);
 
 #[derive(Debug, uniffi::Error)]
 pub enum EngineError {
+	/// Another connection, such as the CLI's, held the Replica's lock past SQLite's 5 s busy
+	/// timeout. Nothing was committed, so the call can be made again.
+	Busy,
 	Failed { message: String },
 	/// The folder has no TaskChampion database.
 	NotAReplica,
@@ -39,6 +42,7 @@ pub enum EngineError {
 impl std::fmt::Display for EngineError {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		match self {
+			EngineError::Busy => f.write_str("the Replica is locked by another connection"),
 			EngineError::Failed { message } => f.write_str(message),
 			EngineError::NotAReplica => f.write_str("the folder has no TaskChampion database"),
 			EngineError::UnsupportedSchema { major, minor } => {
@@ -48,10 +52,24 @@ impl std::fmt::Display for EngineError {
 	}
 }
 
-impl<E: std::error::Error> From<E> for EngineError {
+impl<E: std::error::Error + 'static> From<E> for EngineError {
 	fn from(error: E) -> Self {
+		if is_busy(&error) {
+			return EngineError::Busy;
+		}
 		failed(error)
 	}
+}
+
+/// Whether `error` is SQLite giving up on a held lock. TaskChampion wraps SQLite's errors in an
+/// `anyhow::Error`, which `source` skips past, so it's unwrapped by hand.
+fn is_busy(error: &(dyn std::error::Error + 'static)) -> bool {
+	let sqlite = match error.downcast_ref::<taskchampion::Error>() {
+		Some(taskchampion::Error::Other(error)) => error.downcast_ref::<rusqlite::Error>(),
+		Some(_) => None,
+		None => error.downcast_ref::<rusqlite::Error>(),
+	};
+	sqlite.and_then(rusqlite::Error::sqlite_error_code) == Some(rusqlite::ErrorCode::DatabaseBusy)
 }
 
 fn failed(message: impl ToString) -> EngineError {

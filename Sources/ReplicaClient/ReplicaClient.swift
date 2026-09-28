@@ -20,10 +20,12 @@ public struct ReplicaClient: Sendable {
 	public var redo: @Sendable (_ directory: URL) async throws -> UndoOutcome
 
 	/// Opens the Replica in `directory` for one window, yielding its tasks at once and again
-	/// whenever anything, the CLI included, commits to it. Holds the directory's security scope
-	/// while it reads. Ending iteration closes the Replica once any open or read in flight returns.
+	/// whenever anything, the CLI included, commits to it. Each read that fails yields its error,
+	/// and the first to succeed after one yields the tasks whether or not they changed. Holds the
+	/// directory's security scope while it reads. Ending iteration closes the Replica once any open
+	/// or read in flight returns.
 	public var tasks: @Sendable (_ directory: URL)
-		-> AsyncThrowingStream<TaskSnapshot, any Error> = { _ in .finished() }
+		-> AsyncThrowingStream<Result<TaskSnapshot, ReplicaError>, any Error> = { _ in .finished() }
 
 	/// Reverts the window's newest Undo point, provided it's still the Replica's newest, so a CLI
 	/// change is never undone on the CLI's behalf. Reads every task again, as `apply` does.
@@ -74,12 +76,13 @@ public struct TaskSnapshot: Equatable, Sendable {
 public struct UndoOutcome: Equatable, Sendable {
 	/// False where the Undo point wasn't reverted or re-applied, or an error followed it.
 	public var isApplied: Bool
-	/// Every task, read after the change, or in place of it.
-	public var snapshot: TaskSnapshot
+	/// Every task, read after the change, or in place of it. Nil where an undo landed but the read
+	/// after it failed, which the `tasks` stream's next read makes up.
+	public var snapshot: TaskSnapshot?
 	/// The tasks the Undo point changed.
 	public var tasks: Set<Models.Task.ID>
 
-	public init(isApplied: Bool, snapshot: TaskSnapshot, tasks: Set<Models.Task.ID>) {
+	public init(isApplied: Bool, snapshot: TaskSnapshot?, tasks: Set<Models.Task.ID>) {
 		self.isApplied = isApplied
 		self.snapshot = snapshot
 		self.tasks = tasks
@@ -87,6 +90,9 @@ public struct UndoOutcome: Equatable, Sendable {
 }
 
 public enum ReplicaError: Equatable, LocalizedError {
+	/// Another connection, such as a `task` command, held the Replica's lock past the 5 s it's
+	/// waited for. Nothing was written, so the call can be made again.
+	case busy
 	case failed(String)
 	case notAReplica
 	/// No window has the Replica open.
@@ -95,6 +101,9 @@ public enum ReplicaError: Equatable, LocalizedError {
 
 	public var errorDescription: String? {
 		switch self {
+		case .busy:
+			"The Replica is busy. A `task` command may be holding it."
+
 		case let .failed(message):
 			message
 
@@ -119,10 +128,10 @@ private let pollInterval = Duration.milliseconds(500)
 extension ReplicaClient: DependencyKey {
 	public static let liveValue = Self(
 		apply: { plan, name, directory in
-			try await openReplica(directory).apply(plan, name: name)
+			try await replicaErrors { try await openReplica(directory).apply(plan, name: name) }
 		},
 		redo: { directory in
-			try await openReplica(directory).redo()
+			try await replicaErrors { try await openReplica(directory).redo() }
 		},
 		tasks: { directory in
 			AsyncThrowingStream { continuation in
@@ -162,8 +171,8 @@ extension ReplicaClient: DependencyKey {
 							// Before every read too: cancelling doesn't interrupt a blocked `open`, and
 							// once it returns, a read would start a fresh wait on the lock.
 							try _Concurrency.Task.checkCancellation()
-							// A failed read keeps the last tasks on screen and retries next tick.
-							try? await replica.publishTasksIfChanged(to: continuation)
+							// A failed read retries next tick, leaving the window its last tasks.
+							await replica.publishTasksIfChanged(to: continuation)
 							try await _Concurrency.Task.sleep(for: pollInterval)
 						}
 					} catch is CancellationError {
@@ -176,7 +185,7 @@ extension ReplicaClient: DependencyKey {
 			}
 		},
 		undo: { directory in
-			try await openReplica(directory).undo()
+			try await replicaErrors { try await openReplica(directory).undo() }
 		},
 		validate: { directory in
 			_ = try await Replica.open(directory: directory)
@@ -184,6 +193,17 @@ extension ReplicaClient: DependencyKey {
 	)
 
 	public static let testValue = Self()
+}
+
+/// Runs `body`, reporting the engine's errors as the `ReplicaError`s they are.
+private func replicaErrors<Value>(
+	_ body: () async throws -> Value,
+) async throws(ReplicaError) -> Value {
+	do {
+		return try await body()
+	} catch {
+		throw ReplicaError(error)
+	}
 }
 
 /// The Replica a window's `tasks` stream has open in `directory`.
@@ -256,14 +276,8 @@ actor Replica {
 		self.queue = queue
 		do {
 			engine = try EngineHandle.open(directory: directory.path(percentEncoded: false))
-		} catch EngineError.NotAReplica {
-			throw .notAReplica
-		} catch EngineError.UnsupportedSchema {
-			throw .unsupportedSchema
-		} catch let EngineError.Failed(message) {
-			throw .failed(message)
 		} catch {
-			throw .failed(error.localizedDescription)
+			throw ReplicaError(error)
 		}
 	}
 
@@ -323,30 +337,45 @@ actor Replica {
 
 	/// Reverts the newest Undo point, which the engine does only while it's the Replica's newest.
 	/// An error can follow a reversal that landed, so every outcome reads the tasks again, which
-	/// checks the Undo points afresh.
+	/// checks the Undo points afresh. An error where the reversal didn't land, as when the lock is
+	/// held, is thrown, and the point stays for another try.
 	func undo() throws -> UndoOutcome {
 		guard
 			let point = undoPoints.last,
-			case let .applied(error)? = try? engine
-				.commitReversedOperations(operations: point.operations)
+			case let .applied(error) = try engine.commitReversedOperations(operations: point.operations)
 		else {
 			return try notApplied()
 		}
 		undoPoints.removeLast()
-		return try UndoOutcome(
-			isApplied: error == nil,
-			snapshot: readTasks(redoing: error == nil ? point : nil),
-			tasks: point.tasks,
-		)
+		// Recorded before the read, which drops it should anything write in between, so Redo outlives
+		// a read that fails.
+		redoPoint = nil
+		if error == nil, let dataVersion = try? engine.dataVersion() {
+			redoPoint = (point, dataVersion)
+		}
+		// The reversal has landed, so a read failing now mustn't fail the undo: trying it again would
+		// revert the point before it too. The stream reads in full next time instead.
+		let snapshot = try? readTasks()
+		if snapshot == nil {
+			readVersion = nil
+		}
+		return UndoOutcome(isApplied: error == nil, snapshot: snapshot, tasks: point.tasks)
 	}
 
-	/// Yields every task when anything has committed since the last read.
+	/// Yields every task when anything has committed since the last read, or the error that stopped
+	/// it reading. After an error the next read is in full, so the window learns reads work again.
 	func publishTasksIfChanged(
-		to continuation: AsyncThrowingStream<TaskSnapshot, any Error>.Continuation,
-	) throws {
-		guard try engine.dataVersion() != readVersion else { return }
-		// Decoded by the window, with its Taskrc's UDAs.
-		try continuation.yield(readTasks())
+		to continuation: AsyncThrowingStream<Result<TaskSnapshot, ReplicaError>, any Error>
+			.Continuation,
+	) {
+		do {
+			guard try engine.dataVersion() != readVersion else { return }
+			// Decoded by the window, with its Taskrc's UDAs.
+			try continuation.yield(.success(readTasks()))
+		} catch {
+			readVersion = nil
+			continuation.yield(.failure(ReplicaError(error)))
+		}
 	}
 
 	/// An undo or redo that changed nothing, with the tasks read again.
@@ -355,14 +384,10 @@ actor Replica {
 	}
 
 	/// Every task, recording the `data_version` they were read at, and which Undo points still
-	/// apply. `redoing` is the point an undo just reverted, which can be re-applied until anything
-	/// writes after this read.
-	private func readTasks(redoing: UndoPoint? = nil) throws -> TaskSnapshot {
+	/// apply.
+	private func readTasks() throws -> TaskSnapshot {
 		let snapshot = try engine.snapshot()
-		readVersion = snapshot.dataVersion
-		if let redoing {
-			redoPoint = (redoing, snapshot.dataVersion)
-		} else if redoPoint?.dataVersion != snapshot.dataVersion {
+		if redoPoint?.dataVersion != snapshot.dataVersion {
 			redoPoint = nil
 		}
 		let undoName = try reconcileUndoPoints()
@@ -377,6 +402,9 @@ actor Replica {
 				workingSetID: workingSetIDs[task.uuid],
 			)
 		}
+		// Recorded only once the whole read succeeds, so a read that fails partway through is
+		// read again on the next poll.
+		readVersion = snapshot.dataVersion
 		defer {
 			readCount += 1
 		}
@@ -404,6 +432,20 @@ actor Replica {
 		}
 		undoPoints.removeSubrange((index + 1)...)
 		return undoPoints[index].name
+	}
+}
+
+extension ReplicaError {
+	/// `error` as the engine or the actor threw it.
+	fileprivate init(_ error: any Error) {
+		switch error {
+		case EngineError.Busy: self = .busy
+		case let EngineError.Failed(message): self = .failed(message)
+		case EngineError.NotAReplica: self = .notAReplica
+		case EngineError.UnsupportedSchema: self = .unsupportedSchema
+		case let error as ReplicaError: self = error
+		default: self = .failed(error.localizedDescription)
+		}
 	}
 }
 

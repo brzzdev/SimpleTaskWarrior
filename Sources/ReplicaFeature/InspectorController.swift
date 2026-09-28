@@ -402,25 +402,10 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 		let task = row.task
 		notInViewNote.isHidden = store.rows[id: task.id] != nil
 
-		show(task.description, in: descriptionField, isAnotherTask: isAnotherTask)
-		show(task.project ?? "", in: projectField, isAnotherTask: isAnotherTask)
-		show("", in: tagField, isAnotherTask: isAnotherTask)
-		show("", in: annotationField, isAnotherTask: isAnotherTask)
-		let planner = WritePlanner(taskrc: store.runningTaskrc, timeZone: timeZone)
-		for (_, editor) in dateEditors {
-			editor.show(task, isAnotherTask: isAnotherTask, planner: planner)
-		}
-		for (name, uda) in udaControls {
-			switch uda.control {
-			case let editor as DateEditor:
-				editor.show(task, isAnotherTask: isAnotherTask, planner: planner)
-
-			case let field as NSTextField:
-				show(task.properties[name] ?? "", in: field, isAnotherTask: isAnotherTask)
-
-			default:
-				continue
-			}
+		// What you typed stays while its write runs, and while a failed one's alert is up, rather than
+		// showing the value it replaces.
+		if isAnotherTask || store.writeProgress == nil {
+			showFields(of: task, isAnotherTask: isAnotherTask)
 		}
 
 		let rows = store.allRows
@@ -445,6 +430,30 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 		if isAnotherTask, store.focusesDescription, let splitViewItem {
 			splitViewItem.isCollapsed = false
 			view.window?.makeFirstResponder(descriptionField)
+		}
+	}
+
+	/// Shows `task`'s values in its fields, date editors and UDA controls.
+	private func showFields(of task: Models.Task, isAnotherTask: Bool) {
+		show(task.description, in: descriptionField, isAnotherTask: isAnotherTask)
+		show(task.project ?? "", in: projectField, isAnotherTask: isAnotherTask)
+		show("", in: tagField, isAnotherTask: isAnotherTask)
+		show("", in: annotationField, isAnotherTask: isAnotherTask)
+		let planner = WritePlanner(taskrc: store.runningTaskrc, timeZone: timeZone)
+		for (_, editor) in dateEditors {
+			editor.show(task, isAnotherTask: isAnotherTask, planner: planner)
+		}
+		for (name, uda) in udaControls {
+			switch uda.control {
+			case let editor as DateEditor:
+				editor.show(task, isAnotherTask: isAnotherTask, planner: planner)
+
+			case let field as NSTextField:
+				show(task.properties[name] ?? "", in: field, isAnotherTask: isAnotherTask)
+
+			default:
+				continue
+			}
 		}
 	}
 

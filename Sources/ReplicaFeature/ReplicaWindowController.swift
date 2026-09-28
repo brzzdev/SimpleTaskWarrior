@@ -11,6 +11,8 @@ import UniformTypeIdentifiers
 public final class ReplicaWindowController: NSWindowController, NSMenuItemValidation,
 	NSToolbarDelegate, NSWindowDelegate
 {
+	/// The failed write's alert on screen, so a store change while it's up doesn't show a second.
+	private var alert: NSAlert?
 	private let commandItems = Dictionary(
 		uniqueKeysWithValues: ReplicaFeature.TaskCommand.all.map { command in
 			(
@@ -109,6 +111,12 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 				return
 			}
 			beginOpenPanel(for: fileImporter)
+		}
+		observe { [weak self] in
+			guard let self, case let .failed(failure)? = store.writeProgress else {
+				return
+			}
+			beginAlert(for: failure)
 		}
 		// The store clears a search that would hide the task New Task created.
 		observe { [weak self] in
@@ -330,6 +338,34 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 	/// Selects `view` alone in the sidebar, as a click on it does.
 	private func show(_ view: TaskView) {
 		store.send(.binding(.set(\.sidebarSelection, [.view(view)])))
+	}
+
+	/// Shows the alert for `failure` as a sheet on the window, and reports the button clicked.
+	private func beginAlert(for failure: ReplicaFeature.WriteFailure) {
+		guard alert == nil, let window else {
+			return
+		}
+		let alert = NSAlert()
+		alert.messageText = failure.title
+		alert.informativeText = failure.reason
+		if failure.retry == nil {
+			alert.addButton(withTitle: String(localized: "OK"))
+		} else {
+			alert.addButton(withTitle: String(localized: "Try Again"))
+			alert.addButton(withTitle: String(localized: "Cancel"))
+		}
+		self.alert = alert
+		alert.beginSheetModal(for: window) { [weak self] response in
+			guard let self else {
+				return
+			}
+			self.alert = nil
+			guard failure.retry != nil, response == .alertFirstButtonReturn else {
+				store.send(.writeFailureDismissed)
+				return
+			}
+			store.send(.writeFailureTryAgainButtonTapped)
+		}
 	}
 
 	/// Opens the file panel `fileImporter` asks for as a sheet on the window, and reports the file

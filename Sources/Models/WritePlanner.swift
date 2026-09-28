@@ -381,7 +381,7 @@ private let reservedTags: Set = [
 	"UNTIL", "WAITING", "WEEK", "YEAR", "YESTERDAY",
 ]
 
-public enum WritePlanError: Error, Equatable, Sendable {
+public enum WritePlanError: Equatable, LocalizedError, Sendable {
 	/// An annotation with no text, or only spaces, which `task annotate` refuses.
 	case blankAnnotation
 	/// A New Task with no description, or only spaces, which `task add` refuses. `task modify`
@@ -400,6 +400,34 @@ public enum WritePlanError: Error, Equatable, Sendable {
 	/// A `default.due` or `default.scheduled` the app can't resolve: `task add` refuses invalid input
 	/// and resolves a holiday, so a New Task without the date would differ either way.
 	case unresolvedDefault(key: String, DateInputError)
+
+	public var errorDescription: String? {
+		switch self {
+		case .blankAnnotation:
+			String(localized: "An annotation needs text.")
+
+		case .blankDescription:
+			String(localized: "A task needs a description.")
+
+		case .circularDependency:
+			String(localized: "The task would come to depend on itself through other tasks.")
+
+		case let .invalidInput(property, error):
+			String(localized: "\(property): \(error.localizedDescription)")
+
+		case .noSuchTask:
+			String(localized: "The task no longer exists.")
+
+		case let .reservedTag(tag):
+			String(localized: "\(tag) is a virtual tag, which Taskwarrior sets itself.")
+
+		case .selfDependency:
+			String(localized: "A task can't depend on itself.")
+
+		case let .unresolvedDefault(key, error):
+			String(localized: "The Taskrc's \(key) can't be resolved: \(error.localizedDescription)")
+		}
+	}
 }
 
 public struct WritePlan: Equatable, Sendable {

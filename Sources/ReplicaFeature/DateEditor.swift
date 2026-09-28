@@ -202,21 +202,12 @@ final class DateEditor: NSStackView, NSPopoverDelegate, NSTextFieldDelegate {
 		field.stringValue = editableText
 	}
 
+	/// The error's description, which speaks of dates, reworded for a duration.
 	private func message(for error: DateInputError) -> String {
-		switch error {
-		case let .holiday(name):
-			String(localized: "Holidays such as “\(name)” aren’t supported")
-
-		case .invalid:
-			if kind == .duration {
-				String(localized: "Not a duration")
-			} else {
-				String(localized: "Not a date")
-			}
-
-		case .outOfRange:
-			String(localized: "Dates run from 1980 to 9999")
+		guard kind == .duration, error == .invalid else {
+			return error.localizedDescription
 		}
+		return String(localized: "Not a duration")
 	}
 
 	/// What `text` stores for the attribute of the task shown, or nil where it removes it.

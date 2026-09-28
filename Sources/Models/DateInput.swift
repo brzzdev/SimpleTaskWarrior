@@ -84,13 +84,27 @@ extension Date {
 	}
 }
 
-public enum DateInputError: Error, Equatable, Sendable {
+public enum DateInputError: Equatable, LocalizedError, Sendable {
 	/// A holiday such as `easter` or `midsommar`, which the CLI resolves and the app doesn't.
 	case holiday(String)
 	/// Input that isn't a date or duration.
 	case invalid
 	/// A date before 1980 or after 9999, which the CLI refuses.
 	case outOfRange
+
+	/// Worded for a date: an editor of a duration says so itself.
+	public var errorDescription: String? {
+		switch self {
+		case let .holiday(name):
+			String(localized: "Holidays such as “\(name)” aren’t supported")
+
+		case .invalid:
+			String(localized: "Not a date")
+
+		case .outOfRange:
+			String(localized: "Dates run from 1980 to 9999")
+		}
+	}
 }
 
 /// A duration as Taskwarrior counts it: whole seconds, with months of 30 days and years of 365.
