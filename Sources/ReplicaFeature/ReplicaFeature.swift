@@ -553,11 +553,12 @@ struct ReplicaFeature {
 
 			case let .tasksLoaded(snapshot):
 				state.isReplicaOpen = true
+				// A snapshot read before the newest one proves nothing about a read failing since.
+				guard snapshot.readIndex >= state.readIndex else {
+					return .none
+				}
 				state.isReadFailureBannerPresented = false
 				state.readFailure = nil
-				guard snapshot.readIndex >= state.readIndex else {
-					return .cancel(id: CancelID.readFailure)
-				}
 				state.readIndex = snapshot.readIndex
 				state.redoName = snapshot.redoName
 				state.storedTasks = snapshot.tasks

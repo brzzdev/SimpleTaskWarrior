@@ -750,7 +750,8 @@ struct ReplicaFeatureTests {
 	@Test
 	func readFailureShowsABannerAfterThirtySecondsUntilAReadSucceeds() async throws {
 		let clock = TestClock()
-		let initialState = try loadedState([])
+		var initialState = try loadedState([])
+		initialState.readIndex = 1
 		let store = TestStore(initialState: initialState) {
 			ReplicaFeature()
 		} withDependencies: {
@@ -763,16 +764,17 @@ struct ReplicaFeatureTests {
 			$0.readFailure = "disk I/O error"
 		}
 		await clock.advance(by: .seconds(29))
-		// A read failing again doesn't restart the wait.
+		// Neither a read failing again nor a write's read older than the last restarts the wait.
 		await store.send(.readFailed("disk I/O error"))
+		await store.send(.tasksLoaded(snapshot([], readIndex: 0)))
 		await clock.advance(by: .seconds(1))
 		await store.receive(\.readFailureDelayElapsed) {
 			$0.isReadFailureBannerPresented = true
 		}
-		await store.send(.tasksLoaded(snapshot([], readIndex: 1))) {
+		await store.send(.tasksLoaded(snapshot([], readIndex: 2))) {
 			$0.isReadFailureBannerPresented = false
 			$0.readFailure = nil
-			$0.readIndex = 1
+			$0.readIndex = 2
 		}
 	}
 
