@@ -729,7 +729,9 @@ struct ReplicaFeature {
 				case .undo: try await replicaClient.undo(directory)
 				}
 			// The stream won't yield these, having been read already.
-			await send(.tasksLoaded(outcome.snapshot))
+			if let snapshot = outcome.snapshot {
+				await send(.tasksLoaded(snapshot))
+			}
 			await send(.undoOrRedoFinished(outcome))
 		} catch: { error, send in
 			// The engine lets go of a redo that fails, so there's nothing to try again.

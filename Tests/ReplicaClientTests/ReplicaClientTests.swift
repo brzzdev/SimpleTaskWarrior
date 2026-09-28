@@ -92,12 +92,12 @@ final class ReplicaClientTests {
 		let redone = try await replicaClient.redo(directory)
 
 		#expect(redone.isApplied)
-		#expect(redone.snapshot.tasks.first?.properties["status"] == "completed")
-		#expect(redone.snapshot.undoName == "Complete Task")
-		#expect(redone.snapshot.redoName == nil)
+		#expect(redone.snapshot?.tasks.first?.properties["status"] == "completed")
+		#expect(redone.snapshot?.undoName == "Complete Task")
+		#expect(redone.snapshot?.redoName == nil)
 
 		let undone = try await replicaClient.undo(directory)
-		#expect(undone.snapshot.redoName == "Complete Task")
+		#expect(undone.snapshot?.redoName == "Complete Task")
 		commit([.setValue(uuid: uuid.uuidString, property: "project", value: "Home")], with: cli)
 		#expect(try await tasks.next()?.get().redoName == nil)
 		#expect(try await replicaClient.redo(directory).isApplied == false)
@@ -146,8 +146,8 @@ final class ReplicaClientTests {
 		#expect(try await tasks.next()?.get().undoName == nil)
 		let outcome = try await replicaClient.undo(directory)
 		#expect(!outcome.isApplied)
-		#expect(outcome.snapshot.tasks.first?.properties["project"] == "Home")
-		#expect(outcome.snapshot.tasks.first?.properties["status"] == "completed")
+		#expect(outcome.snapshot?.tasks.first?.properties["project"] == "Home")
+		#expect(outcome.snapshot?.tasks.first?.properties["status"] == "completed")
 	}
 
 	@Test
@@ -162,8 +162,8 @@ final class ReplicaClientTests {
 
 		#expect(outcome.isApplied)
 		#expect(outcome.tasks == [uuid])
-		#expect(outcome.snapshot.tasks == [pendingTask("Buy milk", id: uuid)])
-		#expect(outcome.snapshot.undoName == nil)
+		#expect(outcome.snapshot?.tasks == [pendingTask("Buy milk", id: uuid)])
+		#expect(outcome.snapshot?.undoName == nil)
 		// The CLI's change is next in the log, and the window's to leave alone.
 		#expect(try cli.getUndoOperations().count { $0 == .undoPoint } == 1)
 	}

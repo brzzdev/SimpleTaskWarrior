@@ -76,12 +76,13 @@ public struct TaskSnapshot: Equatable, Sendable {
 public struct UndoOutcome: Equatable, Sendable {
 	/// False where the Undo point wasn't reverted or re-applied, or an error followed it.
 	public var isApplied: Bool
-	/// Every task, read after the change, or in place of it.
-	public var snapshot: TaskSnapshot
+	/// Every task, read after the change, or in place of it. Nil where an undo landed but the read
+	/// after it failed, which the `tasks` stream's next read makes up.
+	public var snapshot: TaskSnapshot?
 	/// The tasks the Undo point changed.
 	public var tasks: Set<Models.Task.ID>
 
-	public init(isApplied: Bool, snapshot: TaskSnapshot, tasks: Set<Models.Task.ID>) {
+	public init(isApplied: Bool, snapshot: TaskSnapshot?, tasks: Set<Models.Task.ID>) {
 		self.isApplied = isApplied
 		self.snapshot = snapshot
 		self.tasks = tasks
@@ -346,11 +347,13 @@ actor Replica {
 			return try notApplied()
 		}
 		undoPoints.removeLast()
-		return try UndoOutcome(
-			isApplied: error == nil,
-			snapshot: readTasks(redoing: error == nil ? point : nil),
-			tasks: point.tasks,
-		)
+		// The reversal has landed, so a read failing now mustn't fail the undo: trying it again would
+		// revert the point before it too. The stream reads in full next time instead.
+		let snapshot = try? readTasks(redoing: error == nil ? point : nil)
+		if snapshot == nil {
+			readVersion = nil
+		}
+		return UndoOutcome(isApplied: error == nil, snapshot: snapshot, tasks: point.tasks)
 	}
 
 	/// Yields every task when anything has committed since the last read, or the error that stopped
