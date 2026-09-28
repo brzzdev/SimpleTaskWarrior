@@ -245,8 +245,10 @@ struct ReplicaFeature {
 		enum Retry: Equatable {
 			/// Undoes the window's newest Undo point, which is checked afresh.
 			case undo
-			/// Plans the action again against the tasks as last read.
-			case write(WriteAction)
+			/// Plans the action again against the tasks as last read, at the time it was first planned,
+			/// so a relative date such as `tomorrow` resolves as it did, and a change that landed before
+			/// its read failed isn't made twice.
+			case write(WriteAction, at: Date)
 		}
 
 		var reason: String
@@ -624,8 +626,8 @@ struct ReplicaFeature {
 				case .undo:
 					return undoOrRedo(.undo, failureTitle: failure.title, &state)
 
-				case let .write(action):
-					return startWrite(action, &state)
+				case let .write(action, date):
+					return startWrite(action, at: date, &state)
 				}
 			}
 		}
@@ -665,13 +667,17 @@ struct ReplicaFeature {
 			state.queuedWrites.append(action)
 			return .none
 		}
-		return startWrite(action, &state)
+		return startWrite(action, at: now, &state)
 	}
 
 	/// Plans `action` against the tasks as last read, and while the engine refuses the plan as
 	/// stale, plans it again against the tasks it read instead, up to `planAttempts` times. A write
-	/// that fails is reported, keeping `action`, and so its UUIDs, for Try Again.
-	private func startWrite(_ action: WriteAction, _ state: inout State) -> Effect<Action> {
+	/// that fails is reported, keeping `action`, and so its UUIDs, and `date` for Try Again.
+	private func startWrite(
+		_ action: WriteAction,
+		at date: Date,
+		_ state: inout State,
+	) -> Effect<Action> {
 		guard let directory = state.directory else {
 			return .none
 		}
@@ -685,7 +691,7 @@ struct ReplicaFeature {
 				String(localized: "Couldn't \(name)")
 			}
 		let planner = WritePlanner(taskrc: state.runningTaskrc, timeZone: timeZone)
-		return .run { [clock, now, replicaClient, storedTasks = state.storedTasks] send in
+		return .run { [clock, replicaClient, storedTasks = state.storedTasks] send in
 			// A child of the write, so it's cancelled as the write ends, however it ends.
 			async let _: Void = {
 				try await clock.sleep(for: savingDelay)
@@ -693,7 +699,7 @@ struct ReplicaFeature {
 			}()
 			var tasks = storedTasks
 			for _ in 1 ... planAttempts {
-				let plan = try planner.plan(action, tasks: properties(of: tasks), at: now)
+				let plan = try planner.plan(action, tasks: properties(of: tasks), at: date)
 				let outcome = try await replicaClient.apply(plan, name, directory)
 				// The stream won't yield these, having been read already.
 				await send(.tasksLoaded(outcome.snapshot))
@@ -707,7 +713,11 @@ struct ReplicaFeature {
 				String(localized: "The Replica kept changing while it was written to."),
 			)
 		} catch: { error, send in
-			await send(.writeFailed(WriteFailure(error, retry: .write(action), title: failureTitle)))
+			await send(.writeFailed(WriteFailure(
+				error,
+				retry: .write(action, at: date),
+				title: failureTitle,
+			)))
 		}
 	}
 

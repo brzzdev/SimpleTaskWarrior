@@ -628,7 +628,7 @@ struct ReplicaFeatureTests {
 			$0.writeProgress = .failed(
 				ReplicaFeature.WriteFailure(
 					reason: "The Replica kept changing while it was written to.",
-					retry: .write(.complete([UUID(0)])),
+					retry: .write(.complete([UUID(0)]), at: now),
 					title: "Couldn't Complete Task",
 				),
 			)
@@ -644,7 +644,7 @@ struct ReplicaFeatureTests {
 	}
 
 	@Test
-	func failedWriteIsReportedAndTryAgainPlansItAgainWithTheSameUUID() async throws {
+	func failedWriteIsReportedAndTryAgainPlansItAgainWithTheSameUUIDAndTime() async throws {
 		let milk = storedTask(0, "Buy milk", workingSetID: 1)
 		let plans = LockIsolated<[WritePlan]>([])
 		var initialState = try loadedState([])
@@ -676,11 +676,12 @@ struct ReplicaFeatureTests {
 			$0.writeProgress = .failed(
 				ReplicaFeature.WriteFailure(
 					reason: "The Replica is busy. A `task` command may be holding it.",
-					retry: .write(.create(UUID(0), description: "Buy milk")),
+					retry: .write(.create(UUID(0), description: "Buy milk"), at: now),
 					title: "Couldn't Create Task",
 				),
 			)
 		}
+		store.dependencies.date.now = now.addingTimeInterval(3_600)
 		await store.send(.writeFailureTryAgainButtonTapped) {
 			$0.writeProgress = .running
 		}
@@ -696,7 +697,9 @@ struct ReplicaFeatureTests {
 			$0.selection = [UUID(0)]
 			$0.writeProgress = nil
 		}
-		#expect(plans.value.map(\.operations.first) == [.create(UUID(0)), .create(UUID(0))])
+		// Stamped with the same `entry` and `modified`, an hour on.
+		#expect(plans.value.count == 2)
+		#expect(plans.value.first == plans.value.last)
 		await store.finish()
 	}
 
