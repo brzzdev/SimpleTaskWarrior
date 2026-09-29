@@ -232,10 +232,12 @@ public struct WritePlanner: Sendable {
 		in drafts: inout Drafts,
 	) -> WritePlan.RepairedChain? {
 		let id = drafts[closing].id
+		// Read only to expect them. Every writer rewrites `depends` with the `dep_*` keys, so it
+		// catches a dependency added before the plan commits, and each key one removed.
+		_ = drafts[closing].read("depends")
 		// Only the tasks it still blocks on, as `getDependencyTasks` reads them.
 		var blocking: [Task.ID] = []
 		for dependency in dependencies(drafts[closing].properties).sorted() {
-			// Read only to expect it: a dependency removed before the plan commits changes the repair.
 			_ = drafts[closing].read("dep_\(dependency.uuidString.lowercased())")
 			guard let index = drafts.index(dependency), isOpen(drafts[index].read("status")) else {
 				continue

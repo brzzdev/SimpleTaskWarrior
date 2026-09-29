@@ -143,6 +143,28 @@ struct WritePlannerTests {
 		#expect(replanned == WritePlan())
 	}
 
+	/// A dependency the CLI adds to the closed task before the plan commits rewrites `depends`, so the
+	/// plan fails and is made again, repairing onto it too.
+	@Test
+	func repairExpectsTheClosedTasksDependencies() throws {
+		let recording = try Recording("chains/complete_middle")
+		let planner = WritePlanner(taskrc: recording.taskrc, timeZone: .gmt)
+		let beta = try recording.id("Beta")
+
+		let plan = try planner.plan(
+			.complete([beta], chains: .repair),
+			tasks: recording.before,
+			at: recording.now,
+		)
+
+		let depends = WritePlan.Expectation(
+			property: "depends",
+			uuid: beta,
+			value: recording.before[beta]?["depends"],
+		)
+		#expect(plan.expectations.contains(depends))
+	}
+
 	@Test
 	func repairReportsEachChainItRepairs() throws {
 		let recording = try Recording("chains/complete_fanned")
