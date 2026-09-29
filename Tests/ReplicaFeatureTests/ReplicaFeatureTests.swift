@@ -95,12 +95,12 @@ struct ReplicaFeatureTests {
 		// The table's reads are other tests' business: this one is about the plans.
 		store.exhaustivity = .off(showSkippedAssertions: false)
 
-		await store.send(.bulkFieldSubmitted([UUID(0), UUID(1)], .set("project", .string("Home"))))
+		await store.send(.inspectorFieldSubmitted([UUID(0), UUID(1)], .set("project", .string("Home"))))
 		await store.receive(\.writeCommitted)
-		await store.send(.bulkFieldSubmitted([UUID(0), UUID(1)], .addTag("errand")))
+		await store.send(.inspectorFieldSubmitted([UUID(0), UUID(1)], .addTag("errand")))
 		await store.receive(\.writeCommitted)
 		// Only Buy milk has it.
-		await store.send(.bulkTagRemoveButtonTapped("home"))
+		await store.send(.tagRemoveButtonTapped([UUID(0), UUID(1)], tag: "home"))
 		await store.receive(\.writeCommitted)
 
 		#expect(
@@ -139,7 +139,7 @@ struct ReplicaFeatureTests {
 			$0.timeZone = .gmt
 		}
 
-		await store.send(.bulkTagRemoveButtonTapped("home")) {
+		await store.send(.tagRemoveButtonTapped([UUID(0), UUID(1)], tag: "home")) {
 			$0.keptTasks = [UUID(0), UUID(1)]
 			$0.writeProgress = .running
 		}
@@ -419,7 +419,7 @@ struct ReplicaFeatureTests {
 			$0.inspectedTask = UUID(0)
 			$0.selection = [UUID(0)]
 		}
-		await store.send(.tagRemoveButtonTapped(UUID(0), tag: "home")) {
+		await store.send(.tagRemoveButtonTapped([UUID(0)], tag: "home")) {
 			$0.keptTasks = [UUID(0)]
 			$0.writeProgress = .running
 		}
@@ -474,7 +474,7 @@ struct ReplicaFeatureTests {
 		}
 		store.exhaustivity = .off(showSkippedAssertions: false)
 
-		await store.send(.inspectorFieldSubmitted(UUID(0), .set("project", .string("Home")))) {
+		await store.send(.inspectorFieldSubmitted([UUID(0)], .set("project", .string("Home")))) {
 			$0.writeProgress = .running
 		}
 		await store.send(.annotationSubmitted(UUID(0), "Oat, not dairy")) {
@@ -534,7 +534,7 @@ struct ReplicaFeatureTests {
 		}
 		let edit = TaskEdit.set("description", .string("Beta, renamed"))
 
-		await store.send(.inspectorFieldSubmitted(UUID(1), edit)) {
+		await store.send(.inspectorFieldSubmitted([UUID(1)], edit)) {
 			$0.keptTasks = [UUID(1)]
 			$0.queuedWrites = [.edit([UUID(1)], edit)]
 		}
@@ -574,7 +574,7 @@ struct ReplicaFeatureTests {
 		}
 		let edit = TaskEdit.set("description", .string("Beta, renamed"))
 
-		await store.send(.inspectorFieldSubmitted(UUID(1), edit)) {
+		await store.send(.inspectorFieldSubmitted([UUID(1)], edit)) {
 			$0.keptTasks = [UUID(1)]
 			$0.queuedWrites = [.edit([UUID(1)], edit)]
 		}
@@ -623,7 +623,7 @@ struct ReplicaFeatureTests {
 		// Moves the task out of the Home view, which only the keep holds it in.
 		let edit = TaskEdit.set("project", nil)
 
-		await store.send(.inspectorFieldSubmitted(UUID(1), edit)) {
+		await store.send(.inspectorFieldSubmitted([UUID(1)], edit)) {
 			$0.keptTasks = [UUID(1)]
 			$0.queuedWrites = [.edit([UUID(1)], edit)]
 		}

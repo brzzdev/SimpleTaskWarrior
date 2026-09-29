@@ -108,8 +108,6 @@ func mainMenu(openRecent openRecentDelegate: any NSMenuDelegate) -> NSMenu {
 
 	let task = NSMenu(title: "Task")
 	task.items = ReplicaWindowController.taskCommandMenuItems()
-		+ [.separator()]
-		+ ReplicaWindowController.selectionEditMenuItems()
 		+ [
 			.separator(),
 			menuItem(

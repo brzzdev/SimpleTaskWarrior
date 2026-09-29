@@ -148,14 +148,17 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 		state.decodeObject(of: NSData.self, forKey: bookmarkKey) as Data?
 	}
 
-	/// Set Project…, Add Tag… and Remove Tag, as the menu bar's Task menu and a row's context menu
-	/// list them after the task commands.
-	public static func selectionEditMenuItems() -> [NSMenuItem] {
+	/// The task commands, then Set Project…, Add Tag… and Remove Tag, as the menu bar's Task menu
+	/// and a row's context menu list them.
+	public static func taskCommandMenuItems() -> [NSMenuItem] {
 		let removeTag = NSMenu(title: String(localized: "Remove Tag"))
 		removeTag.delegate = removeTagMenuDelegate
 		let removeTagItem = NSMenuItem(title: removeTag.title, action: nil, keyEquivalent: "")
 		removeTagItem.submenu = removeTag
-		return [
+		return ReplicaFeature.TaskCommand.all.map { command in
+			NSMenuItem(title: command.title, action: command.action, keyEquivalent: command.keyEquivalent)
+		} + [
+			.separator(),
 			NSMenuItem(
 				title: String(localized: "Set Project…"),
 				action: #selector(setProject(_:)),
@@ -168,13 +171,6 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 			),
 			removeTagItem,
 		]
-	}
-
-	/// The task commands, as the menu bar's Task menu and a row's context menu list them.
-	public static func taskCommandMenuItems() -> [NSMenuItem] {
-		ReplicaFeature.TaskCommand.all.map { command in
-			NSMenuItem(title: command.title, action: command.action, keyEquivalent: command.keyEquivalent)
-		}
 	}
 
 	/// Puts the cursor in the tag field for the selected tasks.
@@ -231,7 +227,7 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 		guard let tag = (sender as? NSMenuItem)?.representedObject as? String else {
 			return
 		}
-		store.send(.bulkTagRemoveButtonTapped(tag))
+		store.send(.tagRemoveButtonTapped(store.selectedIDs, tag: tag))
 	}
 
 	@objc
@@ -603,6 +599,16 @@ extension ReplicaFeature.TaskCommand {
 		}
 	}
 
+	/// Start/Stop's title until validation says which it is.
+	var title: String {
+		switch self {
+		case .delete: String(localized: "Delete")
+		case .done: String(localized: "Done")
+		case .markPending: String(localized: "Mark Pending")
+		case .startStop: startStopTitle(isStopping: false)
+		}
+	}
+
 	fileprivate var identifier: NSToolbarItem.Identifier {
 		switch self {
 		case .delete: NSToolbarItem.Identifier("delete")
@@ -628,16 +634,6 @@ extension ReplicaFeature.TaskCommand {
 		case .done: "checkmark.circle"
 		case .markPending: "arrow.uturn.backward.circle"
 		case .startStop: startStopSymbolName(isStopping: false)
-		}
-	}
-
-	/// Start/Stop's title until validation says which it is.
-	fileprivate var title: String {
-		switch self {
-		case .delete: String(localized: "Delete")
-		case .done: String(localized: "Done")
-		case .markPending: String(localized: "Mark Pending")
-		case .startStop: startStopTitle(isStopping: false)
 		}
 	}
 

@@ -176,6 +176,11 @@ struct ReplicaFeature {
 			rows.ids.filter(selection.contains)
 		}
 
+		/// The projects the selected tasks have, nil for one without.
+		var selectedProjects: Set<String?> {
+			Set(selectedTasks().map(\.project))
+		}
+
 		/// Every tag any selected task has, sorted, as Remove Tag lists them.
 		var selectedTags: [String] {
 			Set(selectedTasks().flatMap(\.tags)).sorted()
@@ -341,11 +346,6 @@ struct ReplicaFeature {
 		/// Return in the inspector's new-annotation field, or clicking away from it.
 		case annotationSubmitted(Models.Task.ID, String)
 		case binding(BindingAction<State>)
-		/// Return, Tab or clicking away from a bulk panel field, for the tasks selected as you began
-		/// typing.
-		case bulkFieldSubmitted([Models.Task.ID], TaskEdit)
-		/// A tag's remove button in the bulk panel, or the tag chosen from Remove Tag.
-		case bulkTagRemoveButtonTapped(String)
 		/// Cancel in the sheet asking whether to repair dependency chains.
 		case chainRepairDismissed
 		case chooseTaskrcButtonTapped
@@ -358,8 +358,9 @@ struct ReplicaFeature {
 		case fetchRequested
 		case fileChosen(URL, for: FileImporter)
 		case grantAccessButtonTapped
-		/// Return, Tab or clicking away from an inspector field, or choosing from its menu.
-		case inspectorFieldSubmitted(Models.Task.ID, TaskEdit)
+		/// Return, Tab or clicking away from an inspector field, or choosing from its menu, for the tasks
+		/// it showed as you began typing.
+		case inspectorFieldSubmitted([Models.Task.ID], TaskEdit)
 		case markPendingButtonTapped
 		case newTaskButtonTapped
 		/// Return in the new-task row, or clicking away from it.
@@ -379,7 +380,8 @@ struct ReplicaFeature {
 		/// A column header was clicked, or the table restored the Replica's sort.
 		case sortOrderChanged([TaskSort])
 		case startStopButtonTapped
-		case tagRemoveButtonTapped(Models.Task.ID, tag: String)
+		/// A tag's remove button in the inspector, or the tag chosen from Remove Tag.
+		case tagRemoveButtonTapped([Models.Task.ID], tag: String)
 		case taskrcHintCloseButtonTapped
 		case taskrcLoaded(TaskrcClient.Loaded)
 		case taskrcSaveFailed(TaskrcSaveFailure)
@@ -438,20 +440,6 @@ struct ReplicaFeature {
 
 			case .binding:
 				return .none
-
-			case let .bulkFieldSubmitted(ids, taskEdit):
-				return edit(ids, taskEdit, &state)
-
-			case let .bulkTagRemoveButtonTapped(tag):
-				guard state.canEditSelection else {
-					return .none
-				}
-				// Only the tasks that have it, so the Undo point counts the tasks it changes.
-				let ids = state.selectedIDs.filter { state.rows[id: $0]?.task.tags.contains(tag) == true }
-				guard !ids.isEmpty else {
-					return .none
-				}
-				return edit(ids, .removeTag(tag), &state)
 
 			case .chainRepairDismissed:
 				state.chainRepairPrompt = nil
@@ -544,8 +532,8 @@ struct ReplicaFeature {
 				state.fileImporter = state.taskrcRemedy
 				return .none
 
-			case let .inspectorFieldSubmitted(id, taskEdit):
-				return edit([id], taskEdit, &state)
+			case let .inspectorFieldSubmitted(ids, taskEdit):
+				return edit(ids, taskEdit, &state)
 
 			case .markPendingButtonTapped:
 				return perform(.markPending, &state)
@@ -638,8 +626,14 @@ struct ReplicaFeature {
 			case .startStopButtonTapped:
 				return perform(.startStop, &state)
 
-			case let .tagRemoveButtonTapped(id, tag):
-				return edit([id], .removeTag(tag), &state)
+			case let .tagRemoveButtonTapped(ids, tag):
+				// Only the tasks that have it, so the Undo point counts the tasks it changes. An inspected
+				// task the table no longer shows is kept, for the planner to find.
+				let tagged = ids.filter { state.rows[id: $0]?.task.tags.contains(tag) ?? true }
+				guard !tagged.isEmpty else {
+					return .none
+				}
+				return edit(tagged, .removeTag(tag), &state)
 
 			case .taskrcHintCloseButtonTapped:
 				state.isTaskrcHintPresented = false

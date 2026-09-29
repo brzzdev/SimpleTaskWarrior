@@ -65,8 +65,6 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 		headerMenu.delegate = self
 		table.headerView?.menu = headerMenu
 		rowMenu.items = ReplicaWindowController.taskCommandMenuItems()
-			+ [.separator()]
-			+ ReplicaWindowController.selectionEditMenuItems()
 		rowMenu.delegate = self
 		table.menu = rowMenu
 		table.dataSource = self
