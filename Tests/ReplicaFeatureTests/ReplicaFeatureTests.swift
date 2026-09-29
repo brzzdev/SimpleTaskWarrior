@@ -466,6 +466,50 @@ struct ReplicaFeatureTests {
 	}
 
 	@Test
+	func closeThatFailsLeavesTheTaskAQueuedEditKept() async throws {
+		let tasks = chain()
+		let attempts = LockIsolated(0)
+		var initialState = try loadedState(tasks, selection: [UUID(1)])
+		initialState.chainRepairPrompt = ReplicaFeature.ChainRepairPrompt(
+			command: .done,
+			ids: [UUID(1)],
+			message: "",
+			title: "",
+		)
+		let store = TestStore(initialState: initialState) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.continuousClock = TestClock()
+			$0.date.now = now
+			$0.replicaClient.apply = { _, _, _ in
+				let attempt = attempts.withValue { $0 += 1
+					return $0
+				}
+				guard attempt > 1 else {
+					throw ReplicaError.failed("The disk is full.")
+				}
+				return ApplyOutcome(isCommitted: true, snapshot: snapshot(tasks))
+			}
+			$0.timeZone = .gmt
+		}
+		let edit = TaskEdit.set("description", .string("Beta, renamed"))
+
+		await store.send(.inspectorFieldSubmitted(UUID(1), edit)) {
+			$0.keptTask = UUID(1)
+			$0.queuedWrites = [.edit([UUID(1)], edit)]
+		}
+
+		store.exhaustivity = .off(showSkippedAssertions: false)
+		await store.send(.repairChainButtonTapped)
+		await store.receive(\.writeFailed)
+		await store.send(.writeFailureDismissed)
+		await store.receive(\.writeCommitted)
+
+		// Still open, so still kept until the selection changes, as any edited task is.
+		#expect(store.state.keptTask == UUID(1))
+	}
+
+	@Test
 	func annotationsAddedWithinASecondEachKeepTheirOwnSecond() async throws {
 		let second = Int(now.timeIntervalSince1970)
 		// The CLI already annotated it this second.
