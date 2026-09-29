@@ -10,8 +10,8 @@ public struct TaskrcClient: Sendable {
 	/// Parses the Taskrc that `taskrc` returns, or the one the CLI reads by default when it returns
 	/// nil, then parses it again whenever it or an include it read changes. Calls `taskrc` before
 	/// every parse, so a Taskrc that was moved or replaced is found again. With neither, yields TW's
-	/// defaults until a default Taskrc appears. Until a parse succeeds, a broken Taskrc runs on
-	/// `lastGood`.
+	/// defaults until a default Taskrc appears, and those defaults become the last good Taskrc. Until
+	/// a parse succeeds, a broken Taskrc runs on `lastGood`.
 	public var load: @Sendable (
 		_ taskrc: @escaping @Sendable () -> URL?,
 		_ lastGood: Taskrc,
@@ -71,8 +71,8 @@ extension TaskrcClient: DependencyKey {
 					while !_Concurrency.Task.isCancelled {
 						let paired = taskrc()
 						guard let url = paired ?? defaultTaskrc() else {
-							// The window runs on the defaults now, so a broken Taskrc that appears later keeps them
-							// rather than a deleted one's settings.
+							// The window runs on the defaults now, so a broken Taskrc that appears later keeps the
+							// defaults rather than a deleted one's settings.
 							lastGood = .defaults
 							publish(Loaded(taskrc: lastGood, url: nil))
 							watched = []
