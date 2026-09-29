@@ -840,6 +840,11 @@ struct ReplicaFeature {
 		chains: ChainRepair,
 		_ state: inout State,
 	) -> Effect<Action> {
+		// An edit queued behind the chain repair prompt kept the task, which would bring it back once
+		// it's closed.
+		if let kept = state.keptTask, ids.contains(kept) {
+			state.keptTask = nil
+		}
 		let effect = write(closeAction(ids, command, chains: chains), &state)
 		// Only once the write has started, since only its end brings them back.
 		if state.writeProgress != nil {
