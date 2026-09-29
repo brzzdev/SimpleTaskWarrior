@@ -139,6 +139,15 @@ struct ReplicaFeature {
 			taskrc?.url != nil
 		}
 
+		/// Whether the Taskrc's problem is a file that can't be read, the Taskrc itself or an include.
+		/// Choosing another Taskrc is the one remedy the app offers.
+		var hasUnreadableFile: Bool {
+			switch taskrc?.problem?.kind {
+			case .notFound, .unreadable: true
+			default: false
+			}
+		}
+
 		/// The row the inspector shows, whether or not the table does.
 		var inspectedRow: TaskRow? {
 			inspectedTask.flatMap { id in allRows.first { $0.id == id } }
@@ -153,12 +162,6 @@ struct ReplicaFeature {
 		/// detaches.
 		var isTaskrcPaired: Bool {
 			taskrc?.isPaired ?? false
-		}
-
-		/// Whether the Taskrc itself can't be read, which choosing another fixes. An include the app
-		/// can't read has no remedy in the app.
-		var isTaskrcUnreadable: Bool {
-			taskrc?.problem.map { $0.location == nil } ?? false
 		}
 
 		/// The Taskrc's `data.location`, where it names a folder other than the window's Replica.

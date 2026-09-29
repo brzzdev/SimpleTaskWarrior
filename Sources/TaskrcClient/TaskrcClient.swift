@@ -135,13 +135,15 @@ extension DependencyValues {
 	}
 }
 
-/// The Taskrc the CLI reads when nothing names another, where it exists. TW runs on its defaults
-/// without one.
+/// The Taskrc the CLI reads when nothing names another, unless there's no file at its path. TW
+/// runs on its defaults without one. One the app can't reach is still returned, so its parse
+/// reports it unreadable rather than dropping the window to the defaults.
 private func defaultTaskrc() -> URL? {
-	guard
-		let path = Taskrc.Environment.live.taskrcPath,
-		FileManager.default.fileExists(atPath: path)
-	else {
+	guard let path = Taskrc.Environment.live.taskrcPath else {
+		return nil
+	}
+	var info = stat()
+	guard stat(path, &info) == 0 || (errno != ENOENT && errno != ENOTDIR) else {
 		return nil
 	}
 	return URL(filePath: path)

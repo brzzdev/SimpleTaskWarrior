@@ -120,7 +120,7 @@ final class ReplicaContentController: NSViewController {
 				BannerView(
 					symbolName: "exclamationmark.triangle.fill",
 					message: message(for: problem),
-					actions: store.isTaskrcUnreadable ? [chooseTaskrc] : [],
+					actions: store.hasUnreadableFile ? [chooseTaskrc] : [],
 				),
 			)
 		}
