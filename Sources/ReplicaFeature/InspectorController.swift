@@ -256,9 +256,12 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 
 		case tagField:
 			field.stringValue = ""
-			for tag in tags(in: text) {
-				store.send(.inspectorFieldSubmitted(ids, .addTag(tag)))
+			// One write, so one Undo point, however many tags you typed.
+			let tags = tags(in: text)
+			guard !tags.isEmpty else {
+				return
 			}
+			store.send(.inspectorFieldSubmitted(ids, .addTags(tags)))
 
 		default:
 			guard let name = field.identifier?.rawValue, let column = udaControls[name]?.column else {
@@ -436,7 +439,8 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 		let row = isBulk ? nil : store.inspectedRow
 		// The table's order only matters, and is only worth scanning the rows for, with several.
 		let tasks = isBulk ? store.selectedIDs : row.map { [$0.id] } ?? []
-		let isAnotherTask = tasks != shownTasks
+		// By membership: the same tasks reordered, as an Urgency change can, keep what you're typing.
+		let isAnotherTask = Set(tasks) != Set(shownTasks)
 		shownTasks = tasks
 		noSelectionView.isHidden = !tasks.isEmpty
 		taskForm.isHidden = tasks.isEmpty

@@ -628,13 +628,8 @@ struct ReplicaFeature {
 				return perform(.startStop, &state)
 
 			case let .tagRemoveButtonTapped(ids, tag):
-				// Only the tasks that have it, so the Undo point counts the tasks it changes. An inspected
-				// task the table no longer shows is kept, for the planner to find.
-				let tagged = ids.filter { state.rows[id: $0]?.task.tags.contains(tag) ?? true }
-				guard !tagged.isEmpty else {
-					return .none
-				}
-				return edit(tagged, .removeTag(tag), &state)
+				// Every task asked for, even one without the tag now: a write queued ahead may add it.
+				return edit(ids, .removeTag(tag), &state)
 
 			case .taskrcHintCloseButtonTapped:
 				state.isTaskrcHintPresented = false
@@ -777,7 +772,11 @@ struct ReplicaFeature {
 			return .none
 		}
 		state.writeProgress = .running
-		let name = undoName(for: action, udaColumns: state.udaColumns)
+		let name = undoName(
+			for: action,
+			tasks: properties(of: state.storedTasks),
+			udaColumns: state.udaColumns,
+		)
 		// "Couldn't New Task" wouldn't read, so a failure names what New Task does.
 		let failureTitle =
 			if case .create = action {
@@ -1193,8 +1192,13 @@ private func properties(of tasks: [StoredTask]) -> [Models.Task.ID: [String: Str
 	)
 }
 
-/// The name the Edit menu gives `action`'s Undo point, as in "Undo Change Due Date".
-private func undoName(for action: WriteAction, udaColumns: [UDAColumn]) -> String {
+/// The name the Edit menu gives `action`'s Undo point, as in "Undo Change Due Date". A Remove Tag
+/// counts only the tasks in `tasks`, as the write starts, that have the tag.
+private func undoName(
+	for action: WriteAction,
+	tasks: [Models.Task.ID: [String: String]],
+	udaColumns: [UDAColumn],
+) -> String {
 	switch action {
 	case let .complete(ids, _):
 		counted(ids, String(localized: "Complete Task"), String(localized: "Complete \(ids.count) Tasks"))
@@ -1211,8 +1215,11 @@ private func undoName(for action: WriteAction, udaColumns: [UDAColumn]) -> Strin
 	case .edit(_, .addDependency):
 		String(localized: "Add Dependency")
 
-	case let .edit(ids, .addTag):
+	case let .edit(ids, .addTags(tags)) where tags.count == 1:
 		counted(ids, String(localized: "Add Tag"), String(localized: "Add Tag to \(ids.count) Tasks"))
+
+	case let .edit(ids, .addTags):
+		counted(ids, String(localized: "Add Tags"), String(localized: "Add Tags to \(ids.count) Tasks"))
 
 	case .edit(_, .removeAnnotation):
 		String(localized: "Remove Annotation")
@@ -1220,12 +1227,8 @@ private func undoName(for action: WriteAction, udaColumns: [UDAColumn]) -> Strin
 	case .edit(_, .removeDependency):
 		String(localized: "Remove Dependency")
 
-	case let .edit(ids, .removeTag):
-		counted(
-			ids,
-			String(localized: "Remove Tag"),
-			String(localized: "Remove Tag from \(ids.count) Tasks"),
-		)
+	case let .edit(ids, .removeTag(tag)):
+		removeTagName(tagged: ids.filter { tasks[$0]?["tag_\(tag)"] != nil })
 
 	case let .edit(ids, .set(attribute, _)), let .edit(ids, .setInput(attribute, _)):
 		counted(
@@ -1249,6 +1252,15 @@ private func undoName(for action: WriteAction, udaColumns: [UDAColumn]) -> Strin
 	case let .stop(ids):
 		counted(ids, String(localized: "Stop Task"), String(localized: "Stop \(ids.count) Tasks"))
 	}
+}
+
+/// Remove Tag's Undo point name, counting the tasks it takes the tag from.
+private func removeTagName(tagged ids: [Models.Task.ID]) -> String {
+	counted(
+		ids,
+		String(localized: "Remove Tag"),
+		String(localized: "Remove Tag from \(ids.count) Tasks"),
+	)
 }
 
 extension ReplicaFeature.WriteFailure {

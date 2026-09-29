@@ -97,18 +97,18 @@ struct ReplicaFeatureTests {
 
 		await store.send(.inspectorFieldSubmitted([UUID(0), UUID(1)], .set("project", .string("Home"))))
 		await store.receive(\.writeCommitted)
-		await store.send(.inspectorFieldSubmitted([UUID(0), UUID(1)], .addTag("errand")))
+		await store.send(.inspectorFieldSubmitted([UUID(0), UUID(1)], .addTags(["errand", "shop"])))
 		await store.receive(\.writeCommitted)
 		// Only Buy milk has it.
 		await store.send(.tagRemoveButtonTapped([UUID(0), UUID(1)], tag: "home"))
 		await store.receive(\.writeCommitted)
 
 		#expect(
-			undoNames.value == ["Change Project of 2 Tasks", "Add Tag to 2 Tasks", "Remove Tag"],
+			undoNames.value == ["Change Project of 2 Tasks", "Add Tags to 2 Tasks", "Remove Tag"],
 		)
 		#expect(
 			try plans.value.last == planner.plan(
-				.edit([UUID(0)], .removeTag("home")),
+				.edit([UUID(0), UUID(1)], .removeTag("home")),
 				tasks: [UUID(0): milk.properties, UUID(1): dog.properties],
 				at: now,
 			),
