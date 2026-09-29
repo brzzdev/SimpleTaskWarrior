@@ -466,8 +466,11 @@ struct ReplicaFeatureTests {
 	}
 
 	@Test
-	func closeThatFailsLeavesTheTaskAQueuedEditKept() async throws {
-		let tasks = chain()
+	func editQueuedBehindAChainRepairPromptKeepsTheTaskAFailedCloseLeavesOpen() async throws {
+		var tasks = chain()
+		tasks[1].properties["project"] = "Home"
+		var edited = tasks
+		edited[1].properties["project"] = nil
 		let attempts = LockIsolated(0)
 		var initialState = try loadedState(tasks, selection: [UUID(1)])
 		initialState.chainRepairPrompt = ReplicaFeature.ChainRepairPrompt(
@@ -476,23 +479,26 @@ struct ReplicaFeatureTests {
 			message: "",
 			title: "",
 		)
+		initialState.sidebarSelection = [.project("Home")]
 		let store = TestStore(initialState: initialState) {
 			ReplicaFeature()
 		} withDependencies: {
 			$0.continuousClock = TestClock()
 			$0.date.now = now
-			$0.replicaClient.apply = { _, _, _ in
-				let attempt = attempts.withValue { $0 += 1
+			$0.replicaClient.apply = { [edited] _, _, _ in
+				let attempt = attempts.withValue {
+					$0 += 1
 					return $0
 				}
 				guard attempt > 1 else {
 					throw ReplicaError.failed("The disk is full.")
 				}
-				return ApplyOutcome(isCommitted: true, snapshot: snapshot(tasks))
+				return ApplyOutcome(isCommitted: true, snapshot: snapshot(edited))
 			}
 			$0.timeZone = .gmt
 		}
-		let edit = TaskEdit.set("description", .string("Beta, renamed"))
+		// Moves the task out of the Home view, which only the keep holds it in.
+		let edit = TaskEdit.set("project", nil)
 
 		await store.send(.inspectorFieldSubmitted(UUID(1), edit)) {
 			$0.keptTask = UUID(1)
@@ -505,8 +511,9 @@ struct ReplicaFeatureTests {
 		await store.send(.writeFailureDismissed)
 		await store.receive(\.writeCommitted)
 
-		// Still open, so still kept until the selection changes, as any edited task is.
+		// Still open, so still shown until the selection changes, as any edited task is.
 		#expect(store.state.keptTask == UUID(1))
+		#expect(Array(store.state.rows.ids) == [UUID(1)])
 	}
 
 	@Test

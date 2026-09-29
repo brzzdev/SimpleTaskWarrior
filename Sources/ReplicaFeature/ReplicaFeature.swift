@@ -675,7 +675,7 @@ struct ReplicaFeature {
 
 			case .writeCommitted:
 				// A closed task can't stay kept, or the table brings it back. An edit queued behind the
-				// chain repair prompt keeps the task it edits, which a failed close leaves kept.
+				// chain repair prompt keeps the task it edits; a close that fails leaves it open, so kept.
 				if let kept = state.keptTask, state.leavingTasks.contains(kept) {
 					state.keptTask = nil
 				}
