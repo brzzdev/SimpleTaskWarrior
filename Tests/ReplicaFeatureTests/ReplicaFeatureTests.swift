@@ -117,6 +117,55 @@ struct ReplicaFeatureTests {
 	}
 
 	@Test
+	func bulkTagRemovalQueuedBehindAnAddTakesTheTagFromEveryTaskTheAddTagged() async throws {
+		let milk = storedTask(0, "Buy milk", workingSetID: 1, ["tag_home": "x"])
+		let dog = storedTask(1, "Walk the dog", workingSetID: 2)
+		let dogHome = storedTask(1, "Walk the dog", workingSetID: 2, ["tag_home": "x"])
+		let (commits, commit) = AsyncStream<Void>.makeStream()
+		let plans = LockIsolated<[WritePlan]>([])
+		let undoNames = LockIsolated<[String]>([])
+		let initialState = try loadedState([milk, dog], selection: [UUID(0), UUID(1)])
+		let store = TestStore(initialState: initialState) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.continuousClock = TestClock()
+			$0.date.now = now
+			$0.replicaClient.apply = { plan, name, _ in
+				plans.withValue { $0.append(plan) }
+				undoNames.withValue { $0.append(name) }
+				for await _ in commits {
+					break
+				}
+				return ApplyOutcome(isCommitted: true, snapshot: snapshot([milk, dogHome]))
+			}
+			$0.timeZone = .gmt
+		}
+		// The table's reads are other tests' business: this one is about the plans.
+		store.exhaustivity = .off(showSkippedAssertions: false)
+
+		await store.send(.inspectorFieldSubmitted([UUID(0), UUID(1)], .addTags(["home"])))
+		// Walk the dog doesn't have it yet, but will once the add ahead of it commits.
+		await store.send(.tagRemoveButtonTapped([UUID(0), UUID(1)], tag: "home")) {
+			$0.queuedWrites = [.edit([UUID(0), UUID(1)], .removeTag("home"))]
+		}
+		commit.yield()
+		await store.receive(\.writeCommitted)
+		commit.yield()
+		await store.receive(\.writeCommitted)
+
+		#expect(undoNames.value == ["Add Tag to 2 Tasks", "Remove Tag from 2 Tasks"])
+		#expect(
+			try plans.value.last == planner.plan(
+				.edit([UUID(0), UUID(1)], .removeTag("home")),
+				tasks: [UUID(0): milk.properties, UUID(1): dogHome.properties],
+				at: now,
+			),
+		)
+		commit.finish()
+		await store.finish()
+	}
+
+	@Test
 	func bulkTagRemovalWritesEverySelectedTaskAtOnceAndKeepsThemUntilTheSelectionChanges(
 	) async throws {
 		let milk = storedTask(0, "Buy milk", workingSetID: 1, ["tag_home": "x"])

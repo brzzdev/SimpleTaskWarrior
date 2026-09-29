@@ -257,11 +257,11 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 		case tagField:
 			field.stringValue = ""
 			// One write, so one Undo point, however many tags you typed.
-			let tags = tags(in: text)
-			guard !tags.isEmpty else {
+			let typed = tags(in: text)
+			guard !typed.isEmpty else {
 				return
 			}
-			store.send(.inspectorFieldSubmitted(ids, .addTags(tags)))
+			store.send(.inspectorFieldSubmitted(ids, .addTags(typed)))
 
 		default:
 			guard let name = field.identifier?.rawValue, let column = udaControls[name]?.column else {
