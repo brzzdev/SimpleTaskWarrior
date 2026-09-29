@@ -38,14 +38,15 @@ struct ReplicaFeature {
 		/// Set once the Replica's tasks first arrive, by which point `apply` can reach it.
 		var isReplicaOpen = false
 		var isTaskrcHintPresented = false
-		/// The task an inspector edit may move out of the table, which the table keeps until the
-		/// selection changes.
-		var keptTask: Models.Task.ID?
+		/// The tasks an inspector edit, of one task or several, may move out of the table, which the
+		/// table keeps
+		/// until the selection changes.
+		var keptTasks: Set<Models.Task.ID> = []
 		/// The tasks a Done or Delete in progress is writing, which the table drops as the write
 		/// starts rather than once it commits, since that can wait seconds on the Replica's lock.
 		var leavingTasks: Set<Models.Task.ID> = []
 		/// Writes asked for while another was in progress or a Done or Delete asked about chains, written
-		/// in order once that ends. Only inspector edits get here: every other write is disabled then.
+		/// in order once that ends. Only edits get here: every other write is disabled then.
 		var queuedWrites: [WriteAction] = []
 		/// Why reading the Replica fails, while it does. The window keeps the last tasks it read.
 		var readFailure: String?
@@ -98,6 +99,13 @@ struct ReplicaFeature {
 		/// Whether Redo applies: while nothing has written since the undo, and nothing holds writes back.
 		var canRedo: Bool {
 			redoName != nil && canWrite
+		}
+
+		/// Whether Set Project…, Add Tag… and Remove Tag apply: to any selection, but not while the
+		/// new-task row is open, whose editing moving the cursor would end. Their edits queue behind a
+		/// write in progress, as the inspector's do.
+		var canEditSelection: Bool {
+			!selection.isEmpty && !isNewTaskRowPresented
 		}
 
 		/// Whether Undo applies: while the window's newest Undo point is the Replica's newest, and
@@ -167,6 +175,16 @@ struct ReplicaFeature {
 		/// The selected tasks' IDs, in the table's order.
 		var selectedIDs: [Models.Task.ID] {
 			rows.ids.filter(selection.contains)
+		}
+
+		/// The projects the selected tasks have, nil for one without.
+		var selectedProjects: Set<String?> {
+			Set(selectedTasks().map(\.project))
+		}
+
+		/// Every tag any selected task has, sorted, as Remove Tag lists them.
+		var selectedTags: [String] {
+			Set(selectedTasks().flatMap(\.tags)).sorted()
 		}
 
 		var sidebar: Sidebar {
@@ -341,8 +359,9 @@ struct ReplicaFeature {
 		case fetchRequested
 		case fileChosen(URL, for: FileImporter)
 		case grantAccessButtonTapped
-		/// Return, Tab or clicking away from an inspector field, or choosing from its menu.
-		case inspectorFieldSubmitted(Models.Task.ID, TaskEdit)
+		/// Return, Tab or clicking away from an inspector field, or choosing from its menu, for the tasks
+		/// it showed as you began typing.
+		case inspectorFieldSubmitted([Models.Task.ID], TaskEdit)
 		case markPendingButtonTapped
 		case newTaskButtonTapped
 		/// Return in the new-task row, or clicking away from it.
@@ -362,7 +381,8 @@ struct ReplicaFeature {
 		/// A column header was clicked, or the table restored the Replica's sort.
 		case sortOrderChanged([TaskSort])
 		case startStopButtonTapped
-		case tagRemoveButtonTapped(Models.Task.ID, tag: String)
+		/// A tag's remove button in the inspector, or the tag chosen from Remove Tag.
+		case tagRemoveButtonTapped([Models.Task.ID], tag: String)
 		case taskrcHintCloseButtonTapped
 		case taskrcLoaded(TaskrcClient.Loaded)
 		case taskrcSaveFailed(TaskrcSaveFailure)
@@ -404,14 +424,14 @@ struct ReplicaFeature {
 		Reduce { state, action in
 			switch action {
 			case let .annotationDeleteButtonTapped(id, entry):
-				return edit(id, .removeAnnotation(entry: entry), &state)
+				return edit([id], .removeAnnotation(entry: entry), &state)
 
 			case let .annotationSubmitted(id, text):
 				// Should it queue, `finishWrite` gives it its entry again as it starts.
-				return edit(id, .addAnnotation(text, entry: annotationEntry(for: id, state)), &state)
+				return edit([id], .addAnnotation(text, entry: annotationEntry(for: id, state)), &state)
 
 			case .binding(\.searchText), .binding(\.sidebarSelection):
-				state.keptTask = nil
+				state.keptTasks = []
 				filterRows(&state)
 				return .none
 
@@ -435,10 +455,10 @@ struct ReplicaFeature {
 				return perform(.delete, &state)
 
 			case let .dependencyChosen(id, dependency):
-				return edit(id, .addDependency(dependency), &state)
+				return edit([id], .addDependency(dependency), &state)
 
 			case let .dependencyRemoveButtonTapped(id, dependency):
-				return edit(id, .removeDependency(dependency), &state)
+				return edit([id], .removeDependency(dependency), &state)
 
 			case let .directoryResolved(directory):
 				state.directory = directory
@@ -513,8 +533,8 @@ struct ReplicaFeature {
 				state.fileImporter = state.taskrcRemedy
 				return .none
 
-			case let .inspectorFieldSubmitted(id, taskEdit):
-				return edit(id, taskEdit, &state)
+			case let .inspectorFieldSubmitted(ids, taskEdit):
+				return edit(ids, taskEdit, &state)
 
 			case .markPendingButtonTapped:
 				return perform(.markPending, &state)
@@ -607,8 +627,9 @@ struct ReplicaFeature {
 			case .startStopButtonTapped:
 				return perform(.startStop, &state)
 
-			case let .tagRemoveButtonTapped(id, tag):
-				return edit(id, .removeTag(tag), &state)
+			case let .tagRemoveButtonTapped(ids, tag):
+				// Every task asked for, even one without the tag now: a write queued ahead may add it.
+				return edit(ids, .removeTag(tag), &state)
 
 			case .taskrcHintCloseButtonTapped:
 				state.isTaskrcHintPresented = false
@@ -675,10 +696,8 @@ struct ReplicaFeature {
 
 			case .writeCommitted:
 				// A closed task can't stay kept, or the table brings it back. An edit queued behind the
-				// chain repair prompt keeps the task it edits; a close that fails leaves it open, so kept.
-				if let kept = state.keptTask, state.leavingTasks.contains(kept) {
-					state.keptTask = nil
-				}
+				// chain repair prompt keeps the tasks it edits; a close that fails leaves them open, so kept.
+				state.keptTasks.subtract(state.leavingTasks)
 				selectCreatedTask(&state)
 				return finishWrite(&state)
 
@@ -753,7 +772,18 @@ struct ReplicaFeature {
 			return .none
 		}
 		state.writeProgress = .running
-		let name = undoName(for: action, udaColumns: state.udaColumns)
+		// A Remove Tag is named for the tasks that have the tag as it starts, after any write queued
+		// ahead of it, while it still writes every task it was asked to. Where none has it, the name
+		// counts them all rather than none.
+		var named = action
+		if case let .edit(ids, .removeTag(tag)) = action {
+			let tagged = Set(state.allRows.lazy.filter { $0.task.tags.contains(tag) }.map(\.id))
+			let changed = ids.filter(tagged.contains)
+			if !changed.isEmpty {
+				named = .edit(changed, .removeTag(tag))
+			}
+		}
+		let name = undoName(for: named, udaColumns: state.udaColumns)
 		// "Couldn't New Task" wouldn't read, so a failure names what New Task does.
 		let failureTitle =
 			if case .create = action {
@@ -872,16 +902,16 @@ struct ReplicaFeature {
 		return close(prompt.ids, prompt.command, chains: chains, &state)
 	}
 
-	/// Writes an inspector edit to the task `id`, keeping it in the table should the edit move it out.
+	/// Writes an inspector edit, of one task or several, to the tasks `ids`, keeping them in the table
+	/// should the
+	/// edit move them out.
 	private func edit(
-		_ id: Models.Task.ID,
+		_ ids: [Models.Task.ID],
 		_ edit: TaskEdit,
 		_ state: inout State,
 	) -> Effect<Action> {
-		if state.rows[id: id] != nil {
-			state.keptTask = id
-		}
-		return write(.edit([id], edit), &state)
+		state.keptTasks.formUnion(ids.filter { state.rows[id: $0] != nil })
+		return write(.edit(ids, edit), &state)
 	}
 
 	/// Ends the write in progress, whatever became of it, and starts the next queued one.
@@ -904,14 +934,14 @@ struct ReplicaFeature {
 		return write(next, &state)
 	}
 
-	/// Inspects the one selected task, and lets go of a task the table kept for the inspector.
+	/// Inspects the one selected task, and lets go of the tasks the table kept for an edit.
 	private func inspectSelection(_ state: inout State) {
 		state.focusesDescription = false
 		state.inspectedTask = state.selection.count == 1 ? state.selection.first : nil
-		guard state.keptTask != nil else {
+		guard !state.keptTasks.isEmpty else {
 			return
 		}
-		state.keptTask = nil
+		state.keptTasks = []
 		filterRows(&state)
 	}
 
@@ -1055,21 +1085,21 @@ struct ReplicaFeature {
 		sortRows(&state)
 	}
 
-	/// Narrows the ranked rows by the sidebar, then the search, keeping the task an inspector edit
-	/// may have moved out. Drops selected tasks that left the table, and inspects the one task a
+	/// Narrows the ranked rows by the sidebar, then the search, keeping the tasks an edit may have
+	/// moved out. Drops selected tasks that left the table, and inspects the one task a
 	/// selection is narrowed to.
 	private func filterRows(_ state: inout State) {
 		// Filtering keeps `allRows`' order, so the table needs no sort of its own.
 		state.rows = IdentifiedArray(
 			uniqueElements: state.allRows.filter { [
 				filter = SidebarFilter(state.sidebarSelection),
-				kept = state.keptTask,
+				kept = state.keptTasks,
 				search = state.searchText,
 			] in
 				guard !state.leavingTasks.contains($0.id) else {
 					return false
 				}
-				return $0.id == kept || filter.includes($0) && $0.matches(search: search)
+				return kept.contains($0.id) || filter.includes($0) && $0.matches(search: search)
 			},
 		)
 		let selectedCount = state.selection.count
@@ -1187,8 +1217,11 @@ private func undoName(for action: WriteAction, udaColumns: [UDAColumn]) -> Strin
 	case .edit(_, .addDependency):
 		String(localized: "Add Dependency")
 
-	case .edit(_, .addTag):
-		String(localized: "Add Tag")
+	case let .edit(ids, .addTags(tags)) where tags.count == 1:
+		counted(ids, String(localized: "Add Tag"), String(localized: "Add Tag to \(ids.count) Tasks"))
+
+	case let .edit(ids, .addTags):
+		counted(ids, String(localized: "Add Tags"), String(localized: "Add Tags to \(ids.count) Tasks"))
 
 	case .edit(_, .removeAnnotation):
 		String(localized: "Remove Annotation")
@@ -1196,11 +1229,21 @@ private func undoName(for action: WriteAction, udaColumns: [UDAColumn]) -> Strin
 	case .edit(_, .removeDependency):
 		String(localized: "Remove Dependency")
 
-	case .edit(_, .removeTag):
-		String(localized: "Remove Tag")
+	case let .edit(ids, .removeTag):
+		counted(
+			ids,
+			String(localized: "Remove Tag"),
+			String(localized: "Remove Tag from \(ids.count) Tasks"),
+		)
 
-	case let .edit(_, .set(attribute, _)), let .edit(_, .setInput(attribute, _)):
-		String(localized: "Change \(attributeName(attribute, udaColumns: udaColumns))")
+	case let .edit(ids, .set(attribute, _)), let .edit(ids, .setInput(attribute, _)):
+		counted(
+			ids,
+			String(localized: "Change \(attributeName(attribute, udaColumns: udaColumns))"),
+			String(
+				localized: "Change \(attributeName(attribute, udaColumns: udaColumns)) of \(ids.count) Tasks",
+			),
+		)
 
 	case let .markPending(ids):
 		counted(

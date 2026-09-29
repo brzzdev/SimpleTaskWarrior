@@ -300,7 +300,7 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 	}
 
 	/// Acts on the right-clicked row, selecting it first where it isn't already, as Finder does. Lists
-	/// the commands the toolbar does.
+	/// the commands the toolbar does, then the selection's project and tag edits.
 	private func updateRowMenu() {
 		let clicked = table.clickedRow
 		if row(at: clicked) != nil, !table.selectedRowIndexes.contains(clicked) {

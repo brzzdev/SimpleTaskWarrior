@@ -11,6 +11,8 @@ import UniformTypeIdentifiers
 public final class ReplicaWindowController: NSWindowController, NSMenuItemValidation,
 	NSToolbarDelegate, NSWindowDelegate
 {
+	private let store: StoreOf<ReplicaFeature>
+
 	/// The alert on screen, for a failed write or a broken chain, so a store change while it's up
 	/// doesn't show a second.
 	private var alert: NSAlert?
@@ -28,6 +30,7 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 		},
 	)
 	private var fetch: _Concurrency.Task<Void, Never>?
+	private let inspector: InspectorController
 	private let newTaskItem = commandItem(
 		newTaskIdentifier,
 		action: #selector(newTask(_:)),
@@ -38,7 +41,11 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 	/// The file panel on screen, so a store change while it's up doesn't open a second.
 	private var openPanel: NSOpenPanel?
 	private let searchItem = NSSearchToolbarItem(itemIdentifier: searchIdentifier)
-	private let store: StoreOf<ReplicaFeature>
+
+	/// Every tag any selected task has, which Remove Tag lists.
+	fileprivate var selectedTags: [String] {
+		store.selectedTags
+	}
 
 	/// A controller for the Replica `bookmark` locates, which autosaves the layout of its split
 	/// view and table under `autosaveName`. It calls `onClose` as its window closes.
@@ -51,6 +58,7 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 		store = Store(initialState: ReplicaFeature.State(bookmark: bookmark)) {
 			ReplicaFeature()
 		}
+		inspector = InspectorController(store: store)
 		let window = ReplicaWindow(
 			contentRect: NSRect(origin: .zero, size: windowSize),
 			styleMask: [.closable, .fullSizeContentView, .miniaturizable, .resizable, .titled],
@@ -65,19 +73,17 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 		let sidebar = NSSplitViewItem(sidebarWithViewController: SidebarController(store: store))
 		// Wide enough for every fixed view's title beside its count.
 		sidebar.minimumThickness = 170
-		let inspector = NSSplitViewItem(
-			inspectorWithViewController: InspectorController(store: store),
-		)
+		let inspectorItem = NSSplitViewItem(inspectorWithViewController: inspector)
 		// An inspector's maximum defaults to its minimum, which leaves its divider nothing to drag. The
 		// cap leaves the table room at the default window size.
-		inspector.maximumThickness = 400
+		inspectorItem.maximumThickness = 400
 		let split = NSSplitViewController()
 		split.splitViewItems = [
 			sidebar,
 			NSSplitViewItem(
 				viewController: ReplicaContentController(autosaveName: autosaveName, store: store),
 			),
-			inspector,
+			inspectorItem,
 		]
 		// Keeps the divider positions and whether the inspector is collapsed.
 		split.splitView.autosaveName = autosaveName
@@ -147,11 +153,35 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 		state.decodeObject(of: NSData.self, forKey: bookmarkKey) as Data?
 	}
 
-	/// The task commands, as the menu bar's Task menu and a row's context menu list them.
+	/// The task commands, then Set Project…, Add Tag… and Remove Tag, as the menu bar's Task menu
+	/// and a row's context menu list them.
 	public static func taskCommandMenuItems() -> [NSMenuItem] {
-		ReplicaFeature.TaskCommand.all.map { command in
+		let removeTag = NSMenu(title: String(localized: "Remove Tag"))
+		removeTag.delegate = removeTagMenuDelegate
+		let removeTagItem = NSMenuItem(title: removeTag.title, action: nil, keyEquivalent: "")
+		removeTagItem.submenu = removeTag
+		return ReplicaFeature.TaskCommand.all.map { command in
 			NSMenuItem(title: command.title, action: command.action, keyEquivalent: command.keyEquivalent)
-		}
+		} + [
+			.separator(),
+			NSMenuItem(
+				title: String(localized: "Set Project…"),
+				action: #selector(setProject(_:)),
+				keyEquivalent: "",
+			),
+			NSMenuItem(
+				title: String(localized: "Add Tag…"),
+				action: #selector(addTag(_:)),
+				keyEquivalent: "",
+			),
+			removeTagItem,
+		]
+	}
+
+	/// Puts the cursor in the tag field for the selected tasks.
+	@objc
+	public func addTag(_: Any?) {
+		inspector.beginEditing(.tag)
 	}
 
 	@objc
@@ -196,6 +226,15 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 		store.send(.redoButtonTapped)
 	}
 
+	/// Removes the tag a Remove Tag item names from every selected task.
+	@objc
+	public func removeTag(_ sender: Any?) {
+		guard let tag = (sender as? NSMenuItem)?.representedObject as? String else {
+			return
+		}
+		store.send(.tagRemoveButtonTapped(store.selectedIDs, tag: tag))
+	}
+
 	@objc
 	public func selectNextTask(_: Any?) {
 		selectAdjacentTask(.nextTaskButtonTapped)
@@ -204,6 +243,12 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 	@objc
 	public func selectPreviousTask(_: Any?) {
 		selectAdjacentTask(.previousTaskButtonTapped)
+	}
+
+	/// Puts the cursor in the project field for the selected tasks.
+	@objc
+	public func setProject(_: Any?) {
+		inspector.beginEditing(.project)
 	}
 
 	@objc
@@ -276,6 +321,9 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 			return validate(menuItem, for: command)
 		}
 		return switch menuItem.action {
+		case #selector(addTag(_:)), #selector(removeTag(_:)), #selector(setProject(_:)):
+			store.canEditSelection
+
 		case #selector(grantAccess(_:)):
 			store.canGrantAccess
 
@@ -474,6 +522,29 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 	}
 }
 
+/// Lists the tags of the tasks selected in the window Remove Tag's items go to, as it opens.
+@MainActor
+private final class RemoveTagMenuDelegate: NSObject, NSMenuDelegate {
+	func menuNeedsUpdate(_ menu: NSMenu) {
+		menu.removeAllItems()
+		let action = #selector(ReplicaWindowController.removeTag(_:))
+		let controller = NSApp.target(forAction: action) as? ReplicaWindowController
+		let tags = controller?.selectedTags ?? []
+		guard !tags.isEmpty else {
+			menu.addItem(withTitle: String(localized: "No Tags"), action: nil, keyEquivalent: "")
+			return
+		}
+		for tag in tags {
+			let item = NSMenuItem(title: tag, action: action, keyEquivalent: "")
+			item.representedObject = tag
+			menu.addItem(item)
+		}
+	}
+}
+
+/// Shared by every Remove Tag menu, since a menu holds its delegate weakly.
+@MainActor private let removeTagMenuDelegate = RemoveTagMenuDelegate()
+
 /// Leaves ⌘Z and ⌘⇧Z to the window's own undo manager while a field being edited has typing to
 /// undo or redo. Otherwise the window disowns them, so they reach the controller, which undoes the
 /// Replica's changes: `NSWindow` handles `undo:` and `redo:` itself, ahead of its controller. A
@@ -533,6 +604,16 @@ extension ReplicaFeature.TaskCommand {
 		}
 	}
 
+	/// Start/Stop's title until validation says which it is.
+	var title: String {
+		switch self {
+		case .delete: String(localized: "Delete")
+		case .done: String(localized: "Done")
+		case .markPending: String(localized: "Mark Pending")
+		case .startStop: startStopTitle(isStopping: false)
+		}
+	}
+
 	fileprivate var identifier: NSToolbarItem.Identifier {
 		switch self {
 		case .delete: NSToolbarItem.Identifier("delete")
@@ -558,16 +639,6 @@ extension ReplicaFeature.TaskCommand {
 		case .done: "checkmark.circle"
 		case .markPending: "arrow.uturn.backward.circle"
 		case .startStop: startStopSymbolName(isStopping: false)
-		}
-	}
-
-	/// Start/Stop's title until validation says which it is.
-	fileprivate var title: String {
-		switch self {
-		case .delete: String(localized: "Delete")
-		case .done: String(localized: "Done")
-		case .markPending: String(localized: "Mark Pending")
-		case .startStop: startStopTitle(isStopping: false)
 		}
 	}
 

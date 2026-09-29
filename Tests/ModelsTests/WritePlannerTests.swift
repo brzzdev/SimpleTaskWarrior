@@ -40,7 +40,7 @@ struct WritePlannerTests {
 		"edits/add_dependency": { try .edit([$0.id("Alpha")], .addDependency($0.id("Beta"))) },
 		"edits/add_padded": { try .create($0.created(), description: " Alpha ") },
 		"edits/add_tab_only": { try .create($0.created(), description: "\t") },
-		"edits/add_tag": { try .edit([$0.id("Alpha")], .addTag("Work")) },
+		"edits/add_tag": { try .edit([$0.id("Alpha")], .addTags(["Work"])) },
 		"edits/complete": { try .complete([$0.id("Alpha")], chains: .repair) },
 		"edits/complete_several": {
 			try .complete([$0.id("Alpha"), $0.id("Beta")], chains: .repair)
@@ -209,12 +209,12 @@ struct WritePlannerTests {
 
 		// `task modify` rewrites a stored `waiting` only when it writes anything.
 		let edited = try planner.plan(
-			.edit([id], .addTag("home")),
+			.edit([id], .addTags(["home"])),
 			tasks: [id: ["status": "waiting"]],
 			at: now,
 		)
 		let retried = try planner.plan(
-			.edit([id], .addTag("home")),
+			.edit([id], .addTags(["home"])),
 			tasks: [id: ["status": "waiting", "tag_home": "x", "tags": "home"]],
 			at: now,
 		)
@@ -349,7 +349,7 @@ struct WritePlannerTests {
 	}
 
 	/// `task` refuses adding or removing a virtual tag, whose names are uppercase, writing nothing.
-	@Test(arguments: [(TaskEdit.addTag("PENDING"), "PENDING"), (.removeTag("BLOCKED"), "BLOCKED")])
+	@Test(arguments: [(TaskEdit.addTags(["PENDING"]), "PENDING"), (.removeTag("BLOCKED"), "BLOCKED")])
 	func addingOrRemovingAReservedTagThrows(edit: TaskEdit, tag: String) {
 		let planner = WritePlanner(taskrc: .defaults, timeZone: .gmt)
 		let id = UUID()
@@ -366,7 +366,7 @@ struct WritePlannerTests {
 		let id = UUID()
 
 		let plan = try planner.plan(
-			.edit([id], .addTag("pending")),
+			.edit([id], .addTags(["pending"])),
 			tasks: [id: ["status": "pending"]],
 			at: .now,
 		)
@@ -546,7 +546,7 @@ struct WritePlannerTests {
 		let id = UUID()
 		let properties = ["status": "pending", "tag_home": "x", "tags": "home"]
 
-		let plan = try planner.plan(.edit([id], .addTag("work")), tasks: [id: properties], at: .now)
+		let plan = try planner.plan(.edit([id], .addTags(["work"])), tasks: [id: properties], at: .now)
 
 		// So a tag the CLI adds meanwhile fails the plan, rather than dropping out of the mirror.
 		#expect(plan.expectations.contains(WritePlan.Expectation(

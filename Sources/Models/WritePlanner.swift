@@ -54,7 +54,7 @@ public struct WritePlanner: Sendable {
 			if case let .addAnnotation(text, _) = edit, text.isEmpty {
 				throw .blankAnnotation
 			}
-			if let tag = edit.tag, reservedTags.contains(tag) {
+			if let tag = edit.tags.first(where: reservedTags.contains) {
 				throw .reservedTag(tag)
 			}
 			let apply = { (draft: inout Draft) throws(WritePlanError) in
@@ -373,7 +373,8 @@ public enum TaskEdit: Equatable, Sendable {
 	/// An annotation at `entry`, or the first free second after it, as `task annotate` does.
 	case addAnnotation(String, entry: Date)
 	case addDependency(Task.ID)
-	case addTag(String)
+	/// Adds each tag, as `task modify +a +b` does in one command.
+	case addTags([String])
 	case removeAnnotation(entry: Date)
 	case removeDependency(Task.ID)
 	case removeTag(String)
@@ -389,11 +390,12 @@ public enum TaskEdit: Equatable, Sendable {
 }
 
 extension TaskEdit {
-	/// The tag an edit adds or removes.
-	fileprivate var tag: String? {
+	/// The tags an edit adds or removes.
+	fileprivate var tags: [String] {
 		switch self {
-		case let .addTag(tag), let .removeTag(tag): tag
-		default: nil
+		case let .addTags(tags): tags
+		case let .removeTag(tag): [tag]
+		default: []
 		}
 	}
 
@@ -626,8 +628,10 @@ private struct Draft {
 		case let .addDependency(dependency):
 			setDependency(dependency, isPresent: true)
 
-		case let .addTag(tag):
-			setTag(tag, isPresent: true)
+		case let .addTags(tags):
+			for tag in tags {
+				setTag(tag, isPresent: true)
+			}
 
 		case let .removeAnnotation(entry):
 			set("annotation_\(entry.epoch)", nil)
