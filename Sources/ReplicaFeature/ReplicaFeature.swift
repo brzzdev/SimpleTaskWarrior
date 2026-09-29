@@ -139,13 +139,10 @@ struct ReplicaFeature {
 			taskrc?.url != nil
 		}
 
-		/// Whether the Taskrc's problem is a file that can't be read, the Taskrc itself or an include.
-		/// Choosing another Taskrc is the one remedy the app offers.
-		var hasUnreadableFile: Bool {
-			switch taskrc?.problem?.kind {
-			case .notFound, .unreadable: true
-			default: false
-			}
+		/// Whether the Taskrc's problem is a file it names that's missing or can't be read, the Taskrc
+		/// itself or an include. Choosing another Taskrc is the one remedy the app offers.
+		var hasUnreachableFile: Bool {
+			taskrc?.problem?.kind.isUnreachableFile ?? false
 		}
 
 		/// The row the inspector shows, whether or not the table does.

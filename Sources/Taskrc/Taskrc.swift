@@ -190,6 +190,18 @@ extension Taskrc.Problem.Kind {
 			false
 		}
 	}
+
+	/// Whether a file the Taskrc names, or the Taskrc itself, is missing or can't be read.
+	public var isUnreachableFile: Bool {
+		switch self {
+		case .notFound, .unreadable:
+			true
+
+		case .includeNestedTooDeeply, .invalidUDAType, .invalidWeekstart, .malformedLine,
+		     .unsetVariables:
+			false
+		}
+	}
 }
 
 extension Taskrc.ContextWrite {

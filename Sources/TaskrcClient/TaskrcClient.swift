@@ -109,12 +109,7 @@ extension TaskrcClient: DependencyKey {
 							watched = read
 							continue
 						}
-						let isMissingFiles = parsed.problems.contains { problem in
-							switch problem.kind {
-							case .notFound, .unreadable: true
-							default: false
-							}
-						}
+						let isMissingFiles = parsed.problems.contains(where: \.kind.isUnreachableFile)
 						await firstChange(in: watchedChanges, orAfter: isMissingFiles ? missingFilePoll : nil)
 						try? await _Concurrency.Task.sleep(for: debounce)
 					}
@@ -142,8 +137,9 @@ private func defaultTaskrc() -> URL? {
 	guard let path = Taskrc.Environment.live.taskrcPath else {
 		return nil
 	}
-	var info = stat()
-	guard stat(path, &info) == 0 || (errno != ENOENT && errno != ENOTDIR) else {
+	// `ENOTDIR` when a folder on the path is a file, which leaves no file there either.
+	let isAbsent = access(path, F_OK) != 0 && (errno == ENOENT || errno == ENOTDIR)
+	guard !isAbsent else {
 		return nil
 	}
 	return URL(filePath: path)
