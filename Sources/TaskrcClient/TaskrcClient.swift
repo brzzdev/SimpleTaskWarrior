@@ -20,6 +20,8 @@ public struct TaskrcClient: Sendable {
 
 extension TaskrcClient {
 	public struct Loaded: Equatable, Sendable {
+		/// Whether the Taskrc is the one paired with the window's Replica, not the CLI's default.
+		public var isPaired: Bool
 		/// The latest parse's problem, one TW refuses to run on where there is one. Then `taskrc` is
 		/// an earlier parse.
 		public var problem: Taskrc.Problem?
@@ -28,7 +30,13 @@ extension TaskrcClient {
 		/// The Taskrc's file, or nil on TW's defaults.
 		public var url: URL?
 
-		public init(problem: Taskrc.Problem? = nil, taskrc: Taskrc, url: URL?) {
+		public init(
+			isPaired: Bool = false,
+			problem: Taskrc.Problem? = nil,
+			taskrc: Taskrc,
+			url: URL?,
+		) {
+			self.isPaired = isPaired
 			self.problem = problem
 			self.taskrc = taskrc
 			self.url = url
@@ -53,15 +61,22 @@ extension TaskrcClient: DependencyKey {
 					var lastLoaded: Loaded?
 					// The files the last parse read, which the next is watched over.
 					var watched: [URL] = []
+					// Polling parses an unchanged Taskrc again, which the window needn't hear about.
+					func publish(_ loaded: Loaded) {
+						if loaded != lastLoaded {
+							continuation.yield(loaded)
+							lastLoaded = loaded
+						}
+					}
 					while !_Concurrency.Task.isCancelled {
-						guard let url = taskrc() ?? defaultTaskrc() else {
-							let loaded = Loaded(taskrc: .defaults, url: nil)
-							if loaded != lastLoaded {
-								continuation.yield(loaded)
-								lastLoaded = loaded
-							}
+						let paired = taskrc()
+						guard let url = paired ?? defaultTaskrc() else {
+							publish(Loaded(taskrc: .defaults, url: nil))
 							watched = []
-							try? await _Concurrency.Task.sleep(for: missingFilePoll)
+							// Waits on the default Taskrc alone, since pairing one starts another load.
+							while defaultTaskrc() == nil, !_Concurrency.Task.isCancelled {
+								try? await _Concurrency.Task.sleep(for: missingFilePoll)
+							}
 							continue
 						}
 
@@ -79,12 +94,14 @@ extension TaskrcClient: DependencyKey {
 						if fatal == nil {
 							lastGood = parsed
 						}
-						let loaded = Loaded(problem: fatal ?? parsed.problems.first, taskrc: lastGood, url: url)
-						// Polling parses an unchanged Taskrc again, which the window needn't hear about.
-						if loaded != lastLoaded {
-							continuation.yield(loaded)
-							lastLoaded = loaded
-						}
+						publish(
+							Loaded(
+								isPaired: paired != nil,
+								problem: fatal ?? parsed.problems.first,
+								taskrc: lastGood,
+								url: url,
+							),
+						)
 
 						// A file the watch didn't cover may have changed unseen, so parse again under a watch that
 						// does.

@@ -64,7 +64,7 @@ Single SPM package, one module per concern, wired with
 | `Models` | Task decoding, Urgency, the blocked rule and the write planner |
 | `ReplicaClient` | The engine behind an actor, one per open Replica |
 | `TaskrcClient` | Loads, watches and reloads a window's Taskrc |
-| `BookmarkClient` | Security-scoped bookmarks for Replicas, Taskrcs and their includes |
+| `BookmarkClient` | Bookmarks for Replicas and the Taskrcs paired with them |
 | `ReplicaFeature` | The window: sidebar, task table and inspector |
 | `App` | Scenes, Open Replica… and Choose Taskrc… |
 | `TestSupport` | Fixtures shared by the test targets |

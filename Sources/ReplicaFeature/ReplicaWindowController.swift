@@ -114,10 +114,10 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 			self?.updateCommandItems()
 		}
 		observe { [weak self] in
-			guard let self, let fileImporter = store.fileImporter else {
+			guard let self, store.isTaskrcPanelPresented else {
 				return
 			}
-			beginOpenPanel(for: fileImporter)
+			beginTaskrcPanel()
 		}
 		observe { [weak self] in
 			guard let self, case let .failed(failure)? = store.writeProgress else {
@@ -345,7 +345,7 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 			)
 
 		case #selector(useTaskwarriorDefaults(_:)):
-			store.hasTaskrc
+			store.isTaskrcPaired
 
 		default:
 			true
@@ -446,9 +446,9 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 		}
 	}
 
-	/// Opens the file panel `fileImporter` asks for as a sheet on the window, and reports the file
-	/// chosen, or that it was cancelled.
-	private func beginOpenPanel(for fileImporter: ReplicaFeature.FileImporter) {
+	/// Opens the panel choosing a Taskrc as a sheet on the window, and reports the file chosen, or
+	/// that it was cancelled.
+	private func beginTaskrcPanel() {
 		guard openPanel == nil, let window else {
 			return
 		}
@@ -456,8 +456,11 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 		// Files, and the symlinks dotfile managers make of them. Folders and packages are neither.
 		panel.allowedContentTypes = [.data, .symbolicLink]
 		panel.canChooseDirectories = false
-		panel.directoryURL = fileImporter.directory
-		panel.message = fileImporter.message
+		// The home folder, where the CLI looks for `.taskrc`.
+		panel.directoryURL = Taskrc.Environment.live.variables["HOME"].map {
+			URL(filePath: $0, directoryHint: .isDirectory)
+		}
+		panel.message = String(localized: "Choose the Taskrc to use with this Replica.")
 		panel.showsHiddenFiles = true
 		openPanel = panel
 		panel.beginSheetModal(for: window) { [weak self] response in
@@ -466,10 +469,10 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 			}
 			openPanel = nil
 			guard response == .OK, let file = panel.url else {
-				store.send(.binding(.set(\.fileImporter, nil)))
+				store.send(.binding(.set(\.isTaskrcPanelPresented, false)))
 				return
 			}
-			store.send(.fileChosen(file, for: fileImporter))
+			store.send(.taskrcChosen(file))
 		}
 	}
 
@@ -555,23 +558,6 @@ private final class ReplicaWindow: NSWindow {
 				return false
 			}
 			return isUndo ? undoManager.canUndo : undoManager.canRedo
-		}
-	}
-}
-
-extension ReplicaFeature.FileImporter {
-	/// Where the panel opens: in the home folder, where the CLI looks for `.taskrc`.
-	fileprivate var directory: URL? {
-		switch self {
-		case .taskrc:
-			Taskrc.Environment.live.variables["HOME"].map { URL(filePath: $0, directoryHint: .isDirectory) }
-		}
-	}
-
-	fileprivate var message: String {
-		switch self {
-		case .taskrc:
-			String(localized: "Choose the Taskrc to use with this Replica.")
 		}
 	}
 }

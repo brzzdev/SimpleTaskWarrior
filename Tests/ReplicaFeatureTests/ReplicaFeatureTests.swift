@@ -1347,35 +1347,17 @@ struct ReplicaFeatureTests {
 			$0.directory = replicaDirectory
 		}
 
-		await store.send(.fileChosen(taskrcFile, for: .taskrc))
+		await store.send(.taskrcChosen(taskrcFile))
 		await store.receive(\.taskrcSaveFailed) {
 			$0.taskrcSaveFailure = ReplicaFeature.TaskrcSaveFailure(
 				message: "The file is gone.",
-				retry: .taskrc,
+				canRetry: true,
 			)
 		}
 
 		await store.send(.tryAgainButtonTapped) {
-			$0.fileImporter = .taskrc
+			$0.isTaskrcPanelPresented = true
 		}
-	}
-
-	@Test
-	func chooseTaskrcIsOfferedOnlyWhereTheTaskrcItselfCantBeRead() {
-		var state = ReplicaFeature.State(bookmark: Data())
-		let remedy = { (kind: Taskrc.Problem.Kind, location: Taskrc.Location?) in
-			state.taskrc = TaskrcClient.Loaded(
-				problem: Taskrc.Problem(kind, at: location),
-				taskrc: .defaults,
-				url: taskrcFile,
-			)
-			return state.taskrcRemedy
-		}
-		let include = Taskrc.Location(file: taskrcFile.path(), line: 3)
-
-		#expect(remedy(.notFound(path: taskrcFile.path(), unsetVariables: []), nil) == .taskrc)
-		#expect(remedy(.unreadable(path: taskrcFile.path(), unsetVariables: []), nil) == .taskrc)
-		#expect(remedy(.unreadable(path: "/work.rc", unsetVariables: []), include) == nil)
 	}
 
 	@Test
@@ -1407,10 +1389,10 @@ struct ReplicaFeatureTests {
 		}
 
 		await store.send(.chooseTaskrcButtonTapped) {
-			$0.fileImporter = .taskrc
+			$0.isTaskrcPanelPresented = true
 		}
-		await store.send(.fileChosen(taskrcFile, for: .taskrc)) {
-			$0.fileImporter = nil
+		await store.send(.taskrcChosen(taskrcFile)) {
+			$0.isTaskrcPanelPresented = false
 			$0.isTaskrcHintPresented = false
 		}
 		await store.receive(\.taskrcLoaded) {

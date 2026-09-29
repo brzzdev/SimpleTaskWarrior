@@ -111,23 +111,16 @@ final class ReplicaContentController: NSViewController {
 			)
 		}
 		if let problem = store.taskrc?.problem {
-			let remedy: NSButton? =
-				switch store.taskrcRemedy {
-				case .taskrc:
-					NSButton(
-						title: String(localized: "Choose Taskrc…"),
-						target: target,
-						action: #selector(Self.chooseTaskrcButtonClicked(_:)),
-					)
-
-				case nil:
-					nil
-				}
+			let chooseTaskrc = NSButton(
+				title: String(localized: "Choose Taskrc…"),
+				target: target,
+				action: #selector(Self.chooseTaskrcButtonClicked(_:)),
+			)
 			banners.append(
 				BannerView(
 					symbolName: "exclamationmark.triangle.fill",
 					message: message(for: problem),
-					actions: remedy.map { [$0] } ?? [],
+					actions: store.isTaskrcUnreadable ? [chooseTaskrc] : [],
 				),
 			)
 		}
@@ -143,7 +136,7 @@ final class ReplicaContentController: NSViewController {
 					message: String(
 						localized: "SimpleTaskWarrior couldn't keep access to the file: \(failure.message)",
 					),
-					actions: failure.retry == nil ? [] : [tryAgain],
+					actions: failure.canRetry ? [tryAgain] : [],
 				),
 			)
 		}

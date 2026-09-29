@@ -82,7 +82,7 @@ struct ContentSnapshotTests {
 		var state = ReplicaFeature.State(bookmark: Data())
 		state.taskrcSaveFailure = ReplicaFeature.TaskrcSaveFailure(
 			message: "The file “.taskrc” couldn’t be opened.",
-			retry: .taskrc,
+			canRetry: true,
 		)
 		assertBannerSnapshots(of: state)
 	}
