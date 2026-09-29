@@ -49,6 +49,28 @@ struct ReplicaFeatureTests {
 	}
 
 	@Test
+	func chainRepairPromptHoldsBackEveryOtherWrite() throws {
+		var state = try loadedState(chain(), selection: [UUID(1)])
+		state.redoName = "Complete Task"
+		state.undoName = "Complete Task"
+		#expect(state.canCreateTask)
+		#expect(state.canRedo)
+		#expect(state.canUndo)
+
+		state.chainRepairPrompt = ReplicaFeature.ChainRepairPrompt(
+			command: .done,
+			ids: [UUID(1)],
+			message: "",
+			title: "",
+		)
+
+		#expect(!state.canCreateTask)
+		#expect(!state.canRedo)
+		#expect(!state.canUndo)
+		#expect(state.enabledCommands.isEmpty)
+	}
+
+	@Test
 	func commandsAreEnabledOnlyWhenTheyApplyToEverySelectedTask() throws {
 		let pending = storedTask(0, "Buy milk", workingSetID: 1)
 		let active = storedTask(

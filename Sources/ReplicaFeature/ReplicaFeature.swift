@@ -82,9 +82,9 @@ struct ReplicaFeature {
 		}
 
 		/// Whether New Task applies: once `apply` can reach the Replica and the Taskrc, whose defaults
-		/// and Context a new task takes, has loaded, and while no write is in progress.
+		/// and Context a new task takes, has loaded, and while nothing holds writes back.
 		var canCreateTask: Bool {
-			isReplicaOpen && failure == nil && taskrc != nil && writeProgress == nil
+			isReplicaOpen && failure == nil && taskrc != nil && canWrite
 		}
 
 		/// Whether Grant Access… can fix the Taskrc's problem.
@@ -95,23 +95,22 @@ struct ReplicaFeature {
 			return false
 		}
 
-		/// Whether Redo applies: while nothing has written since the undo, and no write is in progress.
+		/// Whether Redo applies: while nothing has written since the undo, and nothing holds writes back.
 		var canRedo: Bool {
-			redoName != nil && writeProgress == nil
+			redoName != nil && canWrite
 		}
 
-		/// Whether Undo applies: while the window's newest Undo point is the Replica's newest, and no
-		/// write is in progress.
+		/// Whether Undo applies: while the window's newest Undo point is the Replica's newest, and
+		/// nothing holds writes back.
 		var canUndo: Bool {
-			undoName != nil && writeProgress == nil
+			undoName != nil && canWrite
 		}
 
-		/// The commands that apply to every selected task. None applies while a write is in progress
-		/// or a Done or Delete is asking about chains, or while the new-task row is open, whose Return
-		/// would find the write in the way. Read once for all of them, since the selection is looked up
-		/// for each read.
+		/// The commands that apply to every selected task. None applies while nothing can write, or
+		/// while the new-task row is open, whose Return would find the write in the way. Read once for
+		/// all of them, since the selection is looked up for each read.
 		var enabledCommands: Set<TaskCommand> {
-			guard writeProgress == nil, chainRepairPrompt == nil, !isNewTaskRowPresented else {
+			guard canWrite, !isNewTaskRowPresented else {
 				return []
 			}
 			let tasks = selectedTasks()
@@ -194,6 +193,12 @@ struct ReplicaFeature {
 			default:
 				return nil
 			}
+		}
+
+		/// Whether a write can start: not while one is in progress, nor while a Done or Delete asks
+		/// about chains, whose answer writes against the tasks it asked about.
+		private var canWrite: Bool {
+			writeProgress == nil && chainRepairPrompt == nil
 		}
 
 		init(bookmark: Data) {
