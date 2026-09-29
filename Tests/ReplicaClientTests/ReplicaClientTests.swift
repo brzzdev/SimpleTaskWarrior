@@ -54,8 +54,8 @@ final class ReplicaClientTests {
 		var database: OpaquePointer?
 		defer { sqlite3_close(database) }
 		try #require(sqlite3_open(databasePath, &database) == SQLITE_OK)
-		// TaskChampion reads under `BEGIN IMMEDIATE` and only queues the rollback that ends one, so
-		// the Replica can still hold the lock just after yielding its first read.
+		// TaskChampion reads under `BEGIN IMMEDIATE` and rolls each read back asynchronously, so the
+		// Replica can still hold the lock just after yielding its first read.
 		try #require(sqlite3_busy_timeout(database, 1_000) == SQLITE_OK)
 		try #require(sqlite3_exec(database, "BEGIN IMMEDIATE", nil, nil, nil) == SQLITE_OK)
 
