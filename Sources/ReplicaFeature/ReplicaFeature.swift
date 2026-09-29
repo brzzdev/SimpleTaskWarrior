@@ -840,8 +840,8 @@ struct ReplicaFeature {
 		chains: ChainRepair,
 		_ state: inout State,
 	) -> Effect<Action> {
-		// An edit queued behind the chain repair prompt kept the task, which would bring it back once
-		// it's closed.
+		// A closed task can't stay kept, or the table brings it back once the close ends. An edit
+		// queued behind the chain repair prompt keeps the task it edits.
 		if let kept = state.keptTask, ids.contains(kept) {
 			state.keptTask = nil
 		}

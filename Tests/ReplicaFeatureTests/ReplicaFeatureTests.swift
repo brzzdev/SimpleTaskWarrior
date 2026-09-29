@@ -450,6 +450,7 @@ struct ReplicaFeatureTests {
 			$0.timeZone = .gmt
 		}
 		let edit = TaskEdit.set("description", .string("Beta, renamed"))
+
 		await store.send(.inspectorFieldSubmitted(UUID(1), edit)) {
 			$0.keptTask = UUID(1)
 			$0.queuedWrites = [.edit([UUID(1)], edit)]
