@@ -232,8 +232,9 @@ public struct WritePlanner: Sendable {
 		in drafts: inout Drafts,
 	) -> WritePlan.RepairedChain? {
 		let id = drafts[closing].id
-		// Read only to expect them. Every writer rewrites `depends` with the `dep_*` keys, so it
-		// catches a dependency added before the plan commits, and each key one removed.
+		// Read only to expect them, so a dependency added or removed before the plan commits changes
+		// the repair: `depends` catches an added one, which TW rewrites with the keys, and each
+		// `dep_*` key its own removal, as `refuseCycle` expects both.
 		_ = drafts[closing].read("depends")
 		// Only the tasks it still blocks on, as `getDependencyTasks` reads them.
 		var blocking: [Task.ID] = []
