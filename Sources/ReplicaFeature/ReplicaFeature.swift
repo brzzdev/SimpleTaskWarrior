@@ -38,14 +38,14 @@ struct ReplicaFeature {
 		/// Set once the Replica's tasks first arrive, by which point `apply` can reach it.
 		var isReplicaOpen = false
 		var isTaskrcHintPresented = false
-		/// The task an inspector edit may move out of the table, which the table keeps until the
-		/// selection changes.
-		var keptTask: Models.Task.ID?
+		/// The tasks an inspector or bulk panel edit may move out of the table, which the table keeps
+		/// until the selection changes.
+		var keptTasks: Set<Models.Task.ID> = []
 		/// The tasks a Done or Delete in progress is writing, which the table drops as the write
 		/// starts rather than once it commits, since that can wait seconds on the Replica's lock.
 		var leavingTasks: Set<Models.Task.ID> = []
 		/// Writes asked for while another was in progress or a Done or Delete asked about chains, written
-		/// in order once that ends. Only inspector edits get here: every other write is disabled then.
+		/// in order once that ends. Only edits get here: every other write is disabled then.
 		var queuedWrites: [WriteAction] = []
 		/// Why reading the Replica fails, while it does. The window keeps the last tasks it read.
 		var readFailure: String?
@@ -98,6 +98,13 @@ struct ReplicaFeature {
 		/// Whether Redo applies: while nothing has written since the undo, and nothing holds writes back.
 		var canRedo: Bool {
 			redoName != nil && canWrite
+		}
+
+		/// Whether Set Project…, Add Tag… and Remove Tag apply: to any selection, but not while the
+		/// new-task row is open, whose editing moving the cursor would end. Their edits queue behind a
+		/// write in progress, as the inspector's do.
+		var canEditSelection: Bool {
+			!selection.isEmpty && !isNewTaskRowPresented
 		}
 
 		/// Whether Undo applies: while the window's newest Undo point is the Replica's newest, and
@@ -167,6 +174,11 @@ struct ReplicaFeature {
 		/// The selected tasks' IDs, in the table's order.
 		var selectedIDs: [Models.Task.ID] {
 			rows.ids.filter(selection.contains)
+		}
+
+		/// Every tag any selected task has, sorted, as Remove Tag lists them.
+		var selectedTags: [String] {
+			Set(selectedTasks().flatMap(\.tags)).sorted()
 		}
 
 		var sidebar: Sidebar {
@@ -329,6 +341,11 @@ struct ReplicaFeature {
 		/// Return in the inspector's new-annotation field, or clicking away from it.
 		case annotationSubmitted(Models.Task.ID, String)
 		case binding(BindingAction<State>)
+		/// Return, Tab or clicking away from a bulk panel field, for the tasks selected as you began
+		/// typing.
+		case bulkFieldSubmitted([Models.Task.ID], TaskEdit)
+		/// A tag's remove button in the bulk panel, or the tag chosen from Remove Tag.
+		case bulkTagRemoveButtonTapped(String)
 		/// Cancel in the sheet asking whether to repair dependency chains.
 		case chainRepairDismissed
 		case chooseTaskrcButtonTapped
@@ -404,14 +421,14 @@ struct ReplicaFeature {
 		Reduce { state, action in
 			switch action {
 			case let .annotationDeleteButtonTapped(id, entry):
-				return edit(id, .removeAnnotation(entry: entry), &state)
+				return edit([id], .removeAnnotation(entry: entry), &state)
 
 			case let .annotationSubmitted(id, text):
 				// Should it queue, `finishWrite` gives it its entry again as it starts.
-				return edit(id, .addAnnotation(text, entry: annotationEntry(for: id, state)), &state)
+				return edit([id], .addAnnotation(text, entry: annotationEntry(for: id, state)), &state)
 
 			case .binding(\.searchText), .binding(\.sidebarSelection):
-				state.keptTask = nil
+				state.keptTasks = []
 				filterRows(&state)
 				return .none
 
@@ -421,6 +438,20 @@ struct ReplicaFeature {
 
 			case .binding:
 				return .none
+
+			case let .bulkFieldSubmitted(ids, taskEdit):
+				return edit(ids, taskEdit, &state)
+
+			case let .bulkTagRemoveButtonTapped(tag):
+				guard state.canEditSelection else {
+					return .none
+				}
+				// Only the tasks that have it, so the Undo point counts the tasks it changes.
+				let ids = state.selectedIDs.filter { state.rows[id: $0]?.task.tags.contains(tag) == true }
+				guard !ids.isEmpty else {
+					return .none
+				}
+				return edit(ids, .removeTag(tag), &state)
 
 			case .chainRepairDismissed:
 				state.chainRepairPrompt = nil
@@ -435,10 +466,10 @@ struct ReplicaFeature {
 				return perform(.delete, &state)
 
 			case let .dependencyChosen(id, dependency):
-				return edit(id, .addDependency(dependency), &state)
+				return edit([id], .addDependency(dependency), &state)
 
 			case let .dependencyRemoveButtonTapped(id, dependency):
-				return edit(id, .removeDependency(dependency), &state)
+				return edit([id], .removeDependency(dependency), &state)
 
 			case let .directoryResolved(directory):
 				state.directory = directory
@@ -514,7 +545,7 @@ struct ReplicaFeature {
 				return .none
 
 			case let .inspectorFieldSubmitted(id, taskEdit):
-				return edit(id, taskEdit, &state)
+				return edit([id], taskEdit, &state)
 
 			case .markPendingButtonTapped:
 				return perform(.markPending, &state)
@@ -608,7 +639,7 @@ struct ReplicaFeature {
 				return perform(.startStop, &state)
 
 			case let .tagRemoveButtonTapped(id, tag):
-				return edit(id, .removeTag(tag), &state)
+				return edit([id], .removeTag(tag), &state)
 
 			case .taskrcHintCloseButtonTapped:
 				state.isTaskrcHintPresented = false
@@ -675,10 +706,8 @@ struct ReplicaFeature {
 
 			case .writeCommitted:
 				// A closed task can't stay kept, or the table brings it back. An edit queued behind the
-				// chain repair prompt keeps the task it edits; a close that fails leaves it open, so kept.
-				if let kept = state.keptTask, state.leavingTasks.contains(kept) {
-					state.keptTask = nil
-				}
+				// chain repair prompt keeps the tasks it edits; a close that fails leaves them open, so kept.
+				state.keptTasks.subtract(state.leavingTasks)
 				selectCreatedTask(&state)
 				return finishWrite(&state)
 
@@ -872,16 +901,15 @@ struct ReplicaFeature {
 		return close(prompt.ids, prompt.command, chains: chains, &state)
 	}
 
-	/// Writes an inspector edit to the task `id`, keeping it in the table should the edit move it out.
+	/// Writes an inspector or bulk panel edit to the tasks `ids`, keeping them in the table should the
+	/// edit move them out.
 	private func edit(
-		_ id: Models.Task.ID,
+		_ ids: [Models.Task.ID],
 		_ edit: TaskEdit,
 		_ state: inout State,
 	) -> Effect<Action> {
-		if state.rows[id: id] != nil {
-			state.keptTask = id
-		}
-		return write(.edit([id], edit), &state)
+		state.keptTasks.formUnion(ids.filter { state.rows[id: $0] != nil })
+		return write(.edit(ids, edit), &state)
 	}
 
 	/// Ends the write in progress, whatever became of it, and starts the next queued one.
@@ -904,14 +932,14 @@ struct ReplicaFeature {
 		return write(next, &state)
 	}
 
-	/// Inspects the one selected task, and lets go of a task the table kept for the inspector.
+	/// Inspects the one selected task, and lets go of the tasks the table kept for an edit.
 	private func inspectSelection(_ state: inout State) {
 		state.focusesDescription = false
 		state.inspectedTask = state.selection.count == 1 ? state.selection.first : nil
-		guard state.keptTask != nil else {
+		guard !state.keptTasks.isEmpty else {
 			return
 		}
-		state.keptTask = nil
+		state.keptTasks = []
 		filterRows(&state)
 	}
 
@@ -1055,21 +1083,21 @@ struct ReplicaFeature {
 		sortRows(&state)
 	}
 
-	/// Narrows the ranked rows by the sidebar, then the search, keeping the task an inspector edit
-	/// may have moved out. Drops selected tasks that left the table, and inspects the one task a
+	/// Narrows the ranked rows by the sidebar, then the search, keeping the tasks an edit may have
+	/// moved out. Drops selected tasks that left the table, and inspects the one task a
 	/// selection is narrowed to.
 	private func filterRows(_ state: inout State) {
 		// Filtering keeps `allRows`' order, so the table needs no sort of its own.
 		state.rows = IdentifiedArray(
 			uniqueElements: state.allRows.filter { [
 				filter = SidebarFilter(state.sidebarSelection),
-				kept = state.keptTask,
+				kept = state.keptTasks,
 				search = state.searchText,
 			] in
 				guard !state.leavingTasks.contains($0.id) else {
 					return false
 				}
-				return $0.id == kept || filter.includes($0) && $0.matches(search: search)
+				return kept.contains($0.id) || filter.includes($0) && $0.matches(search: search)
 			},
 		)
 		let selectedCount = state.selection.count
@@ -1187,8 +1215,8 @@ private func undoName(for action: WriteAction, udaColumns: [UDAColumn]) -> Strin
 	case .edit(_, .addDependency):
 		String(localized: "Add Dependency")
 
-	case .edit(_, .addTag):
-		String(localized: "Add Tag")
+	case let .edit(ids, .addTag):
+		counted(ids, String(localized: "Add Tag"), String(localized: "Add Tag to \(ids.count) Tasks"))
 
 	case .edit(_, .removeAnnotation):
 		String(localized: "Remove Annotation")
@@ -1196,11 +1224,21 @@ private func undoName(for action: WriteAction, udaColumns: [UDAColumn]) -> Strin
 	case .edit(_, .removeDependency):
 		String(localized: "Remove Dependency")
 
-	case .edit(_, .removeTag):
-		String(localized: "Remove Tag")
+	case let .edit(ids, .removeTag):
+		counted(
+			ids,
+			String(localized: "Remove Tag"),
+			String(localized: "Remove Tag from \(ids.count) Tasks"),
+		)
 
-	case let .edit(_, .set(attribute, _)), let .edit(_, .setInput(attribute, _)):
-		String(localized: "Change \(attributeName(attribute, udaColumns: udaColumns))")
+	case let .edit(ids, .set(attribute, _)), let .edit(ids, .setInput(attribute, _)):
+		counted(
+			ids,
+			String(localized: "Change \(attributeName(attribute, udaColumns: udaColumns))"),
+			String(
+				localized: "Change \(attributeName(attribute, udaColumns: udaColumns)) of \(ids.count) Tasks",
+			),
+		)
 
 	case let .markPending(ids):
 		counted(

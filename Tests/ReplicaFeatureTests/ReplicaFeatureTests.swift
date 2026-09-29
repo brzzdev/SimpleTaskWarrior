@@ -49,6 +49,129 @@ struct ReplicaFeatureTests {
 	}
 
 	@Test
+	func bulkDoneAsksOnceListingEveryChainItRepairs() async throws {
+		// Beta and Beta 2 each break a chain of their own.
+		let tasks = chain() + chain(from: 3, suffix: " 2")
+		let initialState = try loadedState(tasks, selection: [UUID(1), UUID(4)])
+		let store = TestStore(initialState: initialState) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.date.now = now
+			$0.timeZone = .gmt
+		}
+
+		await store.send(.doneButtonTapped) {
+			$0.chainRepairPrompt = ReplicaFeature.ChainRepairPrompt(
+				command: .done,
+				ids: [UUID(1), UUID(4)],
+				message: """
+					“Alpha” would depend on “Gamma” instead of “Beta”.
+					“Alpha 2” would depend on “Gamma 2” instead of “Beta 2”.
+					""",
+				title: "Repair 2 Dependency Chains?",
+			)
+		}
+	}
+
+	@Test
+	func bulkEditsNameTheirUndoPointAfterTheTasksTheyChange() async throws {
+		let milk = storedTask(0, "Buy milk", workingSetID: 1, ["tag_home": "x"])
+		let dog = storedTask(1, "Walk the dog", workingSetID: 2)
+		let plans = LockIsolated<[WritePlan]>([])
+		let undoNames = LockIsolated<[String]>([])
+		let initialState = try loadedState([milk, dog], selection: [UUID(0), UUID(1)])
+		let store = TestStore(initialState: initialState) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.continuousClock = TestClock()
+			$0.date.now = now
+			$0.replicaClient.apply = { plan, name, _ in
+				plans.withValue { $0.append(plan) }
+				undoNames.withValue { $0.append(name) }
+				return ApplyOutcome(isCommitted: true, snapshot: snapshot([milk, dog]))
+			}
+			$0.timeZone = .gmt
+		}
+		// The table's reads are other tests' business: this one is about the plans.
+		store.exhaustivity = .off(showSkippedAssertions: false)
+
+		await store.send(.bulkFieldSubmitted([UUID(0), UUID(1)], .set("project", .string("Home"))))
+		await store.receive(\.writeCommitted)
+		await store.send(.bulkFieldSubmitted([UUID(0), UUID(1)], .addTag("errand")))
+		await store.receive(\.writeCommitted)
+		// Only Buy milk has it.
+		await store.send(.bulkTagRemoveButtonTapped("home"))
+		await store.receive(\.writeCommitted)
+
+		#expect(
+			undoNames.value == ["Change Project of 2 Tasks", "Add Tag to 2 Tasks", "Remove Tag"],
+		)
+		#expect(
+			try plans.value.last == planner.plan(
+				.edit([UUID(0)], .removeTag("home")),
+				tasks: [UUID(0): milk.properties, UUID(1): dog.properties],
+				at: now,
+			),
+		)
+		await store.finish()
+	}
+
+	@Test
+	func bulkTagRemovalWritesEverySelectedTaskAtOnceAndKeepsThemUntilTheSelectionChanges(
+	) async throws {
+		let milk = storedTask(0, "Buy milk", workingSetID: 1, ["tag_home": "x"])
+		let dog = storedTask(1, "Walk the dog", workingSetID: 2, ["tag_home": "x"])
+		let cat = storedTask(2, "Feed the cat", workingSetID: 3, ["tag_home": "x"])
+		let milkUntagged = storedTask(0, "Buy milk", workingSetID: 1)
+		let dogUntagged = storedTask(1, "Walk the dog", workingSetID: 2)
+		let plans = LockIsolated<[WritePlan]>([])
+		var initialState = try loadedState([milk, dog, cat], selection: [UUID(0), UUID(1)])
+		initialState.sidebarSelection = [.tag("home")]
+		let store = TestStore(initialState: initialState) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.continuousClock = TestClock()
+			$0.date.now = now
+			$0.replicaClient.apply = { plan, _, _ in
+				plans.withValue { $0.append(plan) }
+				return ApplyOutcome(isCommitted: true, snapshot: snapshot([milkUntagged, dogUntagged, cat]))
+			}
+			$0.timeZone = .gmt
+		}
+
+		await store.send(.bulkTagRemoveButtonTapped("home")) {
+			$0.keptTasks = [UUID(0), UUID(1)]
+			$0.writeProgress = .running
+		}
+		// Untagged, they're no longer in the sidebar's tag, yet they stay, selected.
+		await store.receive(\.tasksLoaded) {
+			$0.allRows = try [row(cat, urgency: 0.8), row(milkUntagged), row(dogUntagged)]
+			$0.rows = try [row(cat, urgency: 0.8), row(milkUntagged), row(dogUntagged)]
+			$0.storedTasks = [milkUntagged, dogUntagged, cat]
+		}
+		await store.receive(\.writeCommitted) {
+			$0.writeProgress = nil
+		}
+		#expect(
+			try plans.value == [
+				planner.plan(
+					.edit([UUID(0), UUID(1)], .removeTag("home")),
+					tasks: [UUID(0): milk.properties, UUID(1): dog.properties, UUID(2): cat.properties],
+					at: now,
+				),
+			],
+		)
+
+		await store.send(\.binding.selection, [UUID(2)]) {
+			$0.inspectedTask = UUID(2)
+			$0.keptTasks = []
+			$0.rows = try [row(cat, urgency: 0.8)]
+			$0.selection = [UUID(2)]
+		}
+		await store.finish()
+	}
+
+	@Test
 	func chainRepairPromptHoldsBackEveryOtherWrite() throws {
 		var state = try loadedState(chain(), selection: [UUID(1)])
 		state.redoName = "Complete Task"
@@ -297,7 +420,7 @@ struct ReplicaFeatureTests {
 			$0.selection = [UUID(0)]
 		}
 		await store.send(.tagRemoveButtonTapped(UUID(0), tag: "home")) {
-			$0.keptTask = UUID(0)
+			$0.keptTasks = [UUID(0)]
 			$0.writeProgress = .running
 		}
 		// Untagged, it's no longer in the sidebar's tag, yet it stays, selected.
@@ -321,7 +444,7 @@ struct ReplicaFeatureTests {
 
 		await store.send(\.binding.selection, [UUID(1)]) {
 			$0.inspectedTask = UUID(1)
-			$0.keptTask = nil
+			$0.keptTasks = []
 			$0.rows = try [row(dog, urgency: 0.8)]
 			$0.selection = [UUID(1)]
 		}
@@ -412,7 +535,7 @@ struct ReplicaFeatureTests {
 		let edit = TaskEdit.set("description", .string("Beta, renamed"))
 
 		await store.send(.inspectorFieldSubmitted(UUID(1), edit)) {
-			$0.keptTask = UUID(1)
+			$0.keptTasks = [UUID(1)]
 			$0.queuedWrites = [.edit([UUID(1)], edit)]
 		}
 		#expect(plans.value.isEmpty)
@@ -452,7 +575,7 @@ struct ReplicaFeatureTests {
 		let edit = TaskEdit.set("description", .string("Beta, renamed"))
 
 		await store.send(.inspectorFieldSubmitted(UUID(1), edit)) {
-			$0.keptTask = UUID(1)
+			$0.keptTasks = [UUID(1)]
 			$0.queuedWrites = [.edit([UUID(1)], edit)]
 		}
 
@@ -461,7 +584,7 @@ struct ReplicaFeatureTests {
 		await store.receive(\.writeCommitted)
 		await store.receive(\.writeCommitted)
 
-		#expect(store.state.keptTask == nil)
+		#expect(store.state.keptTasks.isEmpty)
 		#expect(Array(store.state.rows.ids) == [UUID(0), UUID(2)])
 	}
 
@@ -501,7 +624,7 @@ struct ReplicaFeatureTests {
 		let edit = TaskEdit.set("project", nil)
 
 		await store.send(.inspectorFieldSubmitted(UUID(1), edit)) {
-			$0.keptTask = UUID(1)
+			$0.keptTasks = [UUID(1)]
 			$0.queuedWrites = [.edit([UUID(1)], edit)]
 		}
 
@@ -512,7 +635,7 @@ struct ReplicaFeatureTests {
 		await store.receive(\.writeCommitted)
 
 		// Still open, so still shown until the selection changes, as any edited task is.
-		#expect(store.state.keptTask == UUID(1))
+		#expect(store.state.keptTasks == [UUID(1)])
 		#expect(Array(store.state.rows.ids) == [UUID(1)])
 	}
 
@@ -1738,16 +1861,17 @@ private func snapshot(
 	TaskSnapshot(readIndex: readIndex, redoName: redoName, tasks: tasks)
 }
 
-/// Three pending tasks in a chain, each depending on the next: 0 on 1, and 1 on 2.
-private func chain() -> [StoredTask] {
+/// Three pending tasks in a chain, each depending on the next: `first` on `first + 1`, and that on
+/// `first + 2`, named Alpha, Beta and Gamma, then `suffix`.
+private func chain(from first: Int = 0, suffix: String = "") -> [StoredTask] {
 	func dependingOn(_ seed: Int) -> [String: String] {
 		let uuid = UUID(seed).uuidString.lowercased()
 		return ["dep_\(uuid)": "x", "depends": uuid]
 	}
 	return [
-		storedTask(0, "Alpha", workingSetID: 1, dependingOn(1)),
-		storedTask(1, "Beta", workingSetID: 2, dependingOn(2)),
-		storedTask(2, "Gamma", workingSetID: 3),
+		storedTask(first, "Alpha" + suffix, workingSetID: first + 1, dependingOn(first + 1)),
+		storedTask(first + 1, "Beta" + suffix, workingSetID: first + 2, dependingOn(first + 2)),
+		storedTask(first + 2, "Gamma" + suffix, workingSetID: first + 3),
 	]
 }
 

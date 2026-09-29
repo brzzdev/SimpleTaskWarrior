@@ -107,21 +107,24 @@ func mainMenu(openRecent openRecentDelegate: any NSMenuDelegate) -> NSMenu {
 	]
 
 	let task = NSMenu(title: "Task")
-	task.items = ReplicaWindowController.taskCommandMenuItems() + [
-		.separator(),
-		menuItem(
-			"Previous Task",
-			#selector(ReplicaWindowController.selectPreviousTask(_:)),
-			key: functionKey(NSUpArrowFunctionKey),
-			modifiers: [.command, .option],
-		),
-		menuItem(
-			"Next Task",
-			#selector(ReplicaWindowController.selectNextTask(_:)),
-			key: functionKey(NSDownArrowFunctionKey),
-			modifiers: [.command, .option],
-		),
-	]
+	task.items = ReplicaWindowController.taskCommandMenuItems()
+		+ [.separator()]
+		+ ReplicaWindowController.selectionEditMenuItems()
+		+ [
+			.separator(),
+			menuItem(
+				"Previous Task",
+				#selector(ReplicaWindowController.selectPreviousTask(_:)),
+				key: functionKey(NSUpArrowFunctionKey),
+				modifiers: [.command, .option],
+			),
+			menuItem(
+				"Next Task",
+				#selector(ReplicaWindowController.selectNextTask(_:)),
+				key: functionKey(NSDownArrowFunctionKey),
+				modifiers: [.command, .option],
+			),
+		]
 
 	let window = NSMenu(title: "Window")
 	NSApp.windowsMenu = window

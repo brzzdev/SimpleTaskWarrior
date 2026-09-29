@@ -1,17 +1,37 @@
-// The inspector: the selected task's fields, written as each is finished, over the Replica's path.
+// The inspector: the selected task's fields, or the bulk panel for several, written as each is
+// finished, over the Replica's path.
 import AppKit
 import ComposableArchitecture
 import Models
 import SwiftNavigation
 import Taskrc
 
-/// Edits the inspected task's fields, writing each when you finish editing it, with no Save. Below
-/// them, the Replica's full path, which the window's subtitle cuts short.
+/// Edits the inspected task's fields, writing each when you finish editing it, with no Save. With
+/// several tasks selected, the bulk panel acts on them all instead. Below either, the Replica's
+/// full
+/// path, which the window's subtitle cuts short.
 final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDelegate {
+	/// A field Set Project… or Add Tag… puts the cursor in.
+	enum Field {
+		case project
+		case tag
+	}
+
 	private let annotationField = editableField(placeholder: String(localized: "Add Annotation"))
 	private let annotationList = verticalStack()
 	private let blockingList = verticalStack()
 	private let blockingSection = verticalStack()
+	private let bulkDeleteButton = NSButton(
+		title: String(localized: "Delete"),
+		target: nil,
+		action: nil,
+	)
+	private let bulkDoneButton = NSButton(title: String(localized: "Done"), target: nil, action: nil)
+	private let bulkForm = verticalStack()
+	private let bulkProjectField = editableField(placeholder: String(localized: "None"))
+	private let bulkTagField = editableField(placeholder: String(localized: "Add Tag"))
+	private let bulkTagList = verticalStack()
+	private let bulkTitle = NSTextField(labelWithString: "")
 	/// The built-in date attributes' editors under their headings, in the order they show.
 	private let dateEditors: [(title: String, editor: DateEditor)]
 	private let dependencyList = verticalStack()
@@ -20,6 +40,9 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 	/// The task a field's edit belongs to, from its first keystroke, so a click on another row writes
 	/// it to the task it was typed for. Nil while no field has changed, which writes nothing.
 	private var editingTask: Models.Task.ID?
+	/// The tasks a bulk panel field's edit belongs to, from its first keystroke, as `editingTask` is
+	/// for the task form. Empty while no field has changed.
+	private var editingTasks: [Models.Task.ID] = []
 	private let noSelectionView = EmptyStateView(
 		symbolName: "sidebar.trailing",
 		title: String(localized: "No Selection"),
@@ -35,6 +58,11 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 	private let projectField = editableField(placeholder: String(localized: "None"))
 	private let recurrenceLabel = WrappingLabel(wrappingLabelWithString: "")
 	private let recurrenceSection = verticalStack()
+	/// The selected tasks the bulk panel acts on, in the table's order.
+	private var shownSelection: [Models.Task.ID] = []
+	/// The tags the bulk panel's list shows, so a store change that leaves them alone doesn't build
+	/// its rows again.
+	private var shownTags: [String] = []
 	/// What the lists last showed, so a store change that leaves them alone, such as a search, doesn't
 	/// build their rows again.
 	private var shownLists: InspectedLists?
@@ -74,7 +102,14 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 	}
 
 	override func loadView() {
-		for field in [annotationField, descriptionField, projectField, tagField] {
+		for field in [
+			annotationField,
+			bulkProjectField,
+			bulkTagField,
+			descriptionField,
+			projectField,
+			tagField,
+		] {
 			field.delegate = self
 		}
 		// A pull-down's first item is its title.
@@ -104,6 +139,24 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 		udaStack.isHidden = true
 		udaStack.spacing = 16
 
+		bulkDeleteButton.action = #selector(bulkDeleteButtonClicked(_:))
+		bulkDeleteButton.target = self
+		bulkDoneButton.action = #selector(bulkDoneButtonClicked(_:))
+		bulkDoneButton.target = self
+		bulkTitle.font = .boldSystemFont(ofSize: NSFont.preferredFont(forTextStyle: .title3).pointSize)
+		let bulkButtons = NSStackView(views: [bulkDoneButton, bulkDeleteButton])
+		bulkButtons.alignment = .centerY
+		bulkForm.spacing = 16
+		bulkForm.setViews(
+			[
+				bulkTitle,
+				bulkButtons,
+				section(String(localized: "Project"), [bulkProjectField]),
+				section(String(localized: "Tags"), [bulkTagList, bulkTagField]),
+			],
+			in: .top,
+		)
+
 		// A path has few spaces to break at.
 		pathField.lineBreakMode = .byCharWrapping
 		pathField.isSelectable = true
@@ -122,7 +175,7 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 		let content = FlippedView()
 		let stack = verticalStack()
 		stack.spacing = 24
-		stack.setViews([taskForm, pathSection], in: .top)
+		stack.setViews([taskForm, bulkForm, pathSection], in: .top)
 		stack.translatesAutoresizingMaskIntoConstraints = false
 		content.addSubview(stack)
 		let scrollView = NSScrollView()
@@ -179,22 +232,55 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 		}
 	}
 
-	func controlTextDidBeginEditing(_: Notification) {
-		editingTask = shownTask
+	/// Puts the cursor in `field`, the inspected task's or the bulk panel's, expanding a collapsed
+	/// inspector.
+	func beginEditing(_ field: Field) {
+		let isBulk = shownSelection.count > 1
+		let target =
+			switch field {
+			case .project: isBulk ? bulkProjectField : projectField
+			case .tag: isBulk ? bulkTagField : tagField
+			}
+		splitViewItem?.isCollapsed = false
+		view.window?.makeFirstResponder(target)
 	}
 
-	/// Writes the field to the task it was editing, once you've typed in it.
+	func controlTextDidBeginEditing(_: Notification) {
+		editingTask = shownTask
+		editingTasks = shownSelection
+	}
+
+	/// Writes the field to the tasks it was editing, once you've typed in it.
 	func controlTextDidEndEditing(_ notification: Notification) {
 		let id = editingTask
+		let ids = editingTasks
 		editingTask = nil
-		guard
-			let field = notification.object as? NSTextField,
-			let id,
-			let task = store.allRows.first(where: { $0.id == id })?.task
-		else {
+		editingTasks = []
+		guard let field = notification.object as? NSTextField else {
 			return
 		}
 		let text = field.stringValue
+		switch field {
+		case bulkProjectField:
+			guard !ids.isEmpty else {
+				return
+			}
+			store.send(.bulkFieldSubmitted(ids, .set("project", .string(text))))
+			return
+
+		case bulkTagField:
+			field.stringValue = ""
+			for tag in tags(in: text) where !ids.isEmpty {
+				store.send(.bulkFieldSubmitted(ids, .addTag(tag)))
+			}
+			return
+
+		default:
+			break
+		}
+		guard let id, let task = store.allRows.first(where: { $0.id == id })?.task else {
+			return
+		}
 		switch field {
 		case annotationField:
 			field.stringValue = ""
@@ -213,12 +299,7 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 
 		case tagField:
 			field.stringValue = ""
-			// Tags hold no spaces, so each word is one, as `task modify +a +b` adds them.
-			for word in text.split(whereSeparator: \.isWhitespace) {
-				let tag = String(word.drop { $0 == "+" })
-				guard !tag.isEmpty else {
-					continue
-				}
+			for tag in tags(in: text) {
 				store.send(.inspectorFieldSubmitted(id, .addTag(tag)))
 			}
 
@@ -270,6 +351,16 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 			item.target = self
 			menu.addItem(item)
 		}
+	}
+
+	@objc
+	func bulkDeleteButtonClicked(_: Any?) {
+		store.send(.deleteButtonTapped)
+	}
+
+	@objc
+	func bulkDoneButtonClicked(_: Any?) {
+		store.send(.doneButtonTapped)
 	}
 
 	@objc
@@ -386,11 +477,51 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 		orphanSection.isHidden = orphans.isEmpty
 	}
 
-	/// Shows the inspected task's fields, or why there's none.
+	/// Shows the bulk panel for the selected tasks, where there are several.
+	private func updateBulkForm() {
+		let selection = store.selectedIDs
+		let isAnotherSelection = selection != shownSelection
+		shownSelection = selection
+		bulkForm.isHidden = selection.count < 2
+		guard selection.count > 1 else {
+			return
+		}
+		bulkTitle.stringValue = String(localized: "\(selection.count) Tasks Selected")
+		let enabled = store.enabledCommands
+		bulkDeleteButton.isEnabled = enabled.contains(.delete)
+		bulkDoneButton.isEnabled = enabled.contains(.done)
+
+		let projects = Set(selection.map { store.rows[id: $0]?.task.project })
+		bulkProjectField.placeholderString =
+			projects.count == 1 ? String(localized: "None") : String(localized: "Multiple Values")
+		// As the task form keeps what you typed while its write runs.
+		if isAnotherSelection || store.writeProgress == nil {
+			let project = projects.count == 1 ? projects.first.flatMap(\.self) : nil
+			show(project ?? "", in: bulkProjectField, isAnotherTask: isAnotherSelection)
+			show("", in: bulkTagField, isAnotherTask: isAnotherSelection)
+		}
+
+		let tags = store.selectedTags
+		guard tags != shownTags else {
+			return
+		}
+		shownTags = tags
+		bulkTagList.setViews(
+			tags.map { tag in
+				removableRow(selectableLabel(tag)) { [store] in
+					store.send(.bulkTagRemoveButtonTapped(tag))
+				}
+			},
+			in: .top,
+		)
+	}
+
+	/// Shows the inspected task's fields, the bulk panel, or why there's neither.
 	private func updateTask() {
 		if updateUDAControls() {
 			shownLists = nil
 		}
+		updateBulkForm()
 		let row = store.inspectedRow
 		let isAnotherTask = row?.id != shownTask
 		shownTask = row?.id
@@ -603,6 +734,14 @@ private func udaValue(_ text: String, type: UDAType) -> UDAValue? {
 		return nil
 	}
 	return value
+}
+
+/// The tags typed into a tag field. Tags hold no spaces, so each word is one, as
+/// `task modify +a +b` adds them, with any leading `+` dropped.
+private func tags(in text: String) -> [String] {
+	text.split(whereSeparator: \.isWhitespace)
+		.map { String($0.drop { $0 == "+" }) }
+		.filter { !$0.isEmpty }
 }
 
 /// A stack laying out its views top to bottom at its full width.
