@@ -71,7 +71,10 @@ extension TaskrcClient: DependencyKey {
 					while !_Concurrency.Task.isCancelled {
 						let paired = taskrc()
 						guard let url = paired ?? defaultTaskrc() else {
-							publish(Loaded(taskrc: .defaults, url: nil))
+							// The window runs on the defaults now, so a broken Taskrc that appears later keeps them
+							// rather than a deleted one's settings.
+							lastGood = .defaults
+							publish(Loaded(taskrc: lastGood, url: nil))
 							watched = []
 							// Waits on the default Taskrc alone, since pairing one starts another load.
 							while defaultTaskrc() == nil, !_Concurrency.Task.isCancelled {
