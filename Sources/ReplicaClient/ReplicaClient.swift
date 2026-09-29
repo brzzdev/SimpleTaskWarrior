@@ -21,9 +21,8 @@ public struct ReplicaClient: Sendable {
 
 	/// Opens the Replica in `directory` for one window, yielding its tasks at once and again
 	/// whenever anything, the CLI included, commits to it. Each read that fails yields its error,
-	/// and the first to succeed after one yields the tasks whether or not they changed. Holds the
-	/// directory's security scope while it reads. Ending iteration closes the Replica once any open
-	/// or read in flight returns.
+	/// and the first to succeed after one yields the tasks whether or not they changed. Ending
+	/// iteration closes the Replica once any open or read in flight returns.
 	public var tasks: @Sendable (_ directory: URL)
 		-> AsyncThrowingStream<Result<TaskSnapshot, ReplicaError>, any Error> = { _ in .finished() }
 
@@ -136,14 +135,6 @@ extension ReplicaClient: DependencyKey {
 		tasks: { directory in
 			AsyncThrowingStream { continuation in
 				let polling = _Concurrency.Task {
-					// Held here rather than by the caller, because cancelling doesn't interrupt an
-					// engine call blocked on the lock, and the scope must outlast it.
-					let isAccessing = directory.startAccessingSecurityScopedResource()
-					defer {
-						if isAccessing {
-							directory.stopAccessingSecurityScopedResource()
-						}
-					}
 					do {
 						let replica = try await Replica.open(directory: directory)
 						// Cancelled while `open` waited, the window has closed, and one reopened on the

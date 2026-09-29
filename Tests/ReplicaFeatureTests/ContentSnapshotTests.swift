@@ -24,7 +24,7 @@ struct ContentSnapshotTests {
 	func dataLocationBanner() {
 		var state = ReplicaFeature.State(bookmark: Data())
 		state.directory = replicaDirectory
-		let taskrc = Taskrc(path: taskrcFile.path(), environment: .fixture) { path, _ in
+		let taskrc = Taskrc(path: taskrcFile.path(), environment: .fixture) { path in
 			Taskrc.File(contents: "data.location=~/Sync/task", realPath: path)
 		}
 		state.taskrc = TaskrcClient.Loaded(taskrc: taskrc, url: taskrcFile)
@@ -66,12 +66,10 @@ struct ContentSnapshotTests {
 	func problemBanner() {
 		// No folder, so TW's default data.location doesn't add its own banner.
 		var state = ReplicaFeature.State(bookmark: Data())
-		let include = Taskrc.Include(file: taskrcFile.path(), line: "include ~/.config/task/secrets.rc")
 		state.taskrc = TaskrcClient.Loaded(
 			problem: Taskrc.Problem(
 				.unreadable(path: "/Users/paul/.config/task/secrets.rc", unsetVariables: []),
 				at: Taskrc.Location(file: taskrcFile.path(), line: 12),
-				include: include,
 			),
 			taskrc: .defaults,
 			url: taskrcFile,

@@ -6,13 +6,18 @@ import ProjectDescription
 // Forks/CI just supply their own; nothing personal is committed.
 let developmentTeam = Environment.developmentTeam.getString(default: "")
 
+// Shown when macOS asks whether the app may read a protected folder or volume, where a Replica or
+// Taskrc can live now that the app reads them by path outside the App Sandbox.
+let fileAccessReason =
+	"SimpleTaskWarrior reads and writes your Replica and Taskrc here, as the task command does."
+
 let baseSettings: SettingsDictionary = [
 	"ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon",
 	"ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS": "YES",
 	"ENABLE_HARDENED_RUNTIME": "YES",
 	// Off so the SwiftLint build phase can read the whole source tree. This is a
 	// build-time setting only — it does not affect the shipped app's hardened
-	// runtime, signing, or runtime App Sandbox.
+	// runtime or signing.
 	"ENABLE_USER_SCRIPT_SANDBOXING": "NO",
 	"SWIFT_VERSION": "6.0",
 ]
@@ -64,8 +69,14 @@ let project = Project(
 				"CFBundleVersion": "1",
 				"LSApplicationCategoryType": "public.app-category.productivity",
 				"LSMinimumSystemVersion": "$(MACOSX_DEPLOYMENT_TARGET)",
+				"NSDesktopFolderUsageDescription": .string(fileAccessReason),
+				"NSDocumentsFolderUsageDescription": .string(fileAccessReason),
+				"NSDownloadsFolderUsageDescription": .string(fileAccessReason),
+				"NSFileProviderDomainUsageDescription": .string(fileAccessReason),
 				"NSHumanReadableCopyright": "Copyright ©. All rights reserved.",
+				"NSNetworkVolumesUsageDescription": .string(fileAccessReason),
 				"NSPrincipalClass": "NSApplication",
+				"NSRemovableVolumesUsageDescription": .string(fileAccessReason),
 			]),
 			sources: ["AppHost/**"],
 			// Globbed, not bare: Tuist keeps a bare directory resource only if
@@ -76,7 +87,6 @@ let project = Project(
 			// into the opaque bundle, consulting no UTI database (needs
 			// Tuist >= 4.58).
 			resources: ["AppHost/AppIcon.icon/**"],
-			entitlements: "AppHost/SimpleTaskWarrior.entitlements",
 			scripts: [
 				.pre(
 					script: """

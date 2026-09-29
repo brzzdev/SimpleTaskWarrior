@@ -19,10 +19,9 @@ struct ReplicaFeatureTests {
 			ReplicaFeature()
 		} withDependencies: {
 			$0.bookmarkClient.changes = { changes }
-			$0.bookmarkClient.grants = { [:] }
 			$0.bookmarkClient.taskrc = { _ in pairedTaskrc.value }
 			$0.date.now = now
-			$0.taskrcClient.load = { taskrc, _, _ in
+			$0.taskrcClient.load = { taskrc, _ in
 				.finished(yielding: TaskrcClient.Loaded(taskrc: .defaults, url: taskrc()))
 			}
 			$0.timeZone = .gmt
@@ -364,7 +363,7 @@ struct ReplicaFeatureTests {
 	@Test
 	func doneRepairsAChainWithoutAskingWhereTheTaskrcSaysNotTo() async throws {
 		let tasks = chain()
-		let taskrc = Taskrc(path: taskrcFile.path(), environment: .fixture) { path, _ in
+		let taskrc = Taskrc(path: taskrcFile.path(), environment: .fixture) { path in
 			Taskrc.File(contents: "dependency.confirmation=off", realPath: path)
 		}
 		let plans = LockIsolated<[WritePlan]>([])
@@ -880,7 +879,7 @@ struct ReplicaFeatureTests {
 	@Test
 	func newTaskChecksItsSidebarAgainWhenTheTaskrcChangesBeforeReturn() async throws {
 		func taskrc(defaultProject: String) -> TaskrcClient.Loaded {
-			let taskrc = Taskrc(path: taskrcFile.path(), environment: .fixture) { path, _ in
+			let taskrc = Taskrc(path: taskrcFile.path(), environment: .fixture) { path in
 				Taskrc.File(contents: "default.project=\(defaultProject)", realPath: path)
 			}
 			return TaskrcClient.Loaded(taskrc: taskrc, url: taskrcFile)
@@ -1341,9 +1340,8 @@ struct ReplicaFeatureTests {
 			ReplicaFeature()
 		} withDependencies: {
 			$0.bookmarkClient.changes = { .finished }
-			$0.bookmarkClient.grants = { [:] }
 			$0.bookmarkClient.saveTaskrc = { _, _ in throw Gone() }
-			$0.taskrcClient.load = { _, _, _ in .finished }
+			$0.taskrcClient.load = { _, _ in .finished }
 		}
 		await store.send(.directoryResolved(replicaDirectory)) {
 			$0.directory = replicaDirectory
@@ -1363,80 +1361,21 @@ struct ReplicaFeatureTests {
 	}
 
 	@Test
-	func grantAccessAsksForTheIncludeAndReloadsKeepingTheRunningTaskrc() async {
-		let include = Taskrc.Include(file: taskrcFile.path(), line: "include $DOTFILES/work.rc")
-		let problem = Taskrc.Problem(
-			.unreadable(path: "/work.rc", unsetVariables: ["DOTFILES"]),
-			at: Taskrc.Location(file: taskrcFile.path(), line: 3),
-			include: include,
-		)
-		let granted = URL(filePath: "/Users/paul/dotfiles/work.rc")
-		let grants = LockIsolated<[Taskrc.Include: URL]>([:])
-		let running = Taskrc(path: taskrcFile.path(), environment: .fixture) { path, _ in
-			Taskrc.File(contents: "weekstart=monday", realPath: path)
-		}
-		let startingTaskrcs = LockIsolated<[Taskrc]>([])
-		let store = TestStore(initialState: ReplicaFeature.State(bookmark: Data())) {
-			ReplicaFeature()
-		} withDependencies: {
-			$0.bookmarkClient.changes = { .finished }
-			$0.bookmarkClient.grants = { grants.value }
-			$0.bookmarkClient.saveGrant = { file, include in
-				grants.withValue { $0[include] = file }
-			}
-			$0.date.now = now
-			$0.taskrcClient.load = { _, grants, lastGood in
-				startingTaskrcs.withValue { $0.append(lastGood) }
-				return .finished(
-					yielding: TaskrcClient.Loaded(
-						problem: grants()[include] == nil ? problem : nil,
-						taskrc: running,
-						url: taskrcFile,
-					),
-				)
-			}
-			$0.timeZone = .gmt
-		}
-
-		await store.send(.directoryResolved(replicaDirectory)) {
-			$0.directory = replicaDirectory
-		}
-		await store.receive(\.taskrcLoaded) {
-			$0.taskrc = TaskrcClient.Loaded(problem: problem, taskrc: running, url: taskrcFile)
-		}
-
-		await store.send(.grantAccessButtonTapped) {
-			$0.fileImporter = .grant(include, file: URL(filePath: "/work.rc"))
-		}
-		await store.send(.fileChosen(granted, for: .grant(include, file: URL(filePath: "/work.rc")))) {
-			$0.fileImporter = nil
-		}
-		await store.receive(\.taskrcLoaded) {
-			$0.taskrc?.problem = nil
-		}
-		#expect(grants.value == [include: granted])
-		#expect(startingTaskrcs.value == [.defaults, running])
-	}
-
-	@Test
-	func grantAccessIsOfferedOnlyWhereAGrantCanReachTheFile() {
-		let include = Taskrc.Include(file: taskrcFile.path(), line: "include $DOTFILES/work.rc")
-		let at = Taskrc.Location(file: taskrcFile.path(), line: 3)
+	func chooseTaskrcIsOfferedOnlyWhereTheTaskrcItselfCantBeRead() {
 		var state = ReplicaFeature.State(bookmark: Data())
-		let remedy = { (kind: Taskrc.Problem.Kind, include: Taskrc.Include?) in
+		let remedy = { (kind: Taskrc.Problem.Kind, location: Taskrc.Location?) in
 			state.taskrc = TaskrcClient.Loaded(
-				problem: Taskrc.Problem(kind, at: include == nil ? nil : at, include: include),
+				problem: Taskrc.Problem(kind, at: location),
 				taskrc: .defaults,
 				url: taskrcFile,
 			)
 			return state.taskrcRemedy
 		}
-		let unset = Taskrc.Problem.Kind.notFound(path: "/work.rc", unsetVariables: ["DOTFILES"])
+		let include = Taskrc.Location(file: taskrcFile.path(), line: 3)
 
-		#expect(remedy(unset, include) == .grant(include, file: URL(filePath: "/work.rc")))
-		#expect(remedy(.notFound(path: "/work.rc", unsetVariables: []), include) == nil)
 		#expect(remedy(.notFound(path: taskrcFile.path(), unsetVariables: []), nil) == .taskrc)
-		#expect(remedy(.malformedLine("oops"), nil) == nil)
+		#expect(remedy(.unreadable(path: taskrcFile.path(), unsetVariables: []), nil) == .taskrc)
+		#expect(remedy(.unreadable(path: "/work.rc", unsetVariables: []), include) == nil)
 	}
 
 	@Test
@@ -1446,14 +1385,13 @@ struct ReplicaFeatureTests {
 			ReplicaFeature()
 		} withDependencies: {
 			$0.bookmarkClient.changes = { .finished }
-			$0.bookmarkClient.grants = { [:] }
 			$0.bookmarkClient.saveTaskrc = { taskrc, replica in
 				#expect(replica == replicaDirectory)
 				pairedTaskrc.setValue(taskrc)
 			}
 			$0.bookmarkClient.taskrc = { _ in pairedTaskrc.value }
 			$0.date.now = now
-			$0.taskrcClient.load = { taskrc, _, _ in
+			$0.taskrcClient.load = { taskrc, _ in
 				.finished(yielding: TaskrcClient.Loaded(taskrc: .defaults, url: taskrc()))
 			}
 			$0.timeZone = .gmt
@@ -1496,12 +1434,11 @@ struct ReplicaFeatureTests {
 			ReplicaFeature()
 		} withDependencies: {
 			$0.bookmarkClient.changes = { .finished }
-			$0.bookmarkClient.grants = { [:] }
 			$0.bookmarkClient.resolve = { _ in directory }
 			$0.continuousClock = TestClock()
 			$0.date.now = now
 			$0.replicaClient.tasks = { _ in tasks }
-			$0.taskrcClient.load = { _, _, _ in .finished }
+			$0.taskrcClient.load = { _, _ in .finished }
 			$0.timeZone = .gmt
 		}
 		let milk = storedTask(0, "Buy milk", workingSetID: 1)
@@ -1555,12 +1492,11 @@ struct ReplicaFeatureTests {
 			ReplicaFeature()
 		} withDependencies: {
 			$0.bookmarkClient.changes = { .finished }
-			$0.bookmarkClient.grants = { [:] }
 			$0.bookmarkClient.resolve = { _ in replicaDirectory }
 			$0.continuousClock = clock
 			$0.date = DateGenerator { time.value }
 			$0.replicaClient.tasks = { _ in tasks }
-			$0.taskrcClient.load = { _, _, _ in .finished }
+			$0.taskrcClient.load = { _, _ in .finished }
 			$0.timeZone = .gmt
 		}
 		let call = storedTask(
@@ -1625,7 +1561,7 @@ struct ReplicaFeatureTests {
 			]
 		}
 
-		let taskrc = Taskrc(path: taskrcFile.path(), environment: .fixture) { path, _ in
+		let taskrc = Taskrc(path: taskrcFile.path(), environment: .fixture) { path in
 			Taskrc.File(
 				contents: "uda.estimate.type=numeric\nurgency.uda.estimate.coefficient=5",
 				realPath: path,
@@ -1811,12 +1747,11 @@ struct ReplicaFeatureTests {
 			ReplicaFeature()
 		} withDependencies: {
 			$0.bookmarkClient.changes = { .finished }
-			$0.bookmarkClient.grants = { [:] }
 			$0.bookmarkClient.resolve = { _ in replicaDirectory }
 			$0.continuousClock = clock
 			$0.date = DateGenerator { time.value }
 			$0.replicaClient.tasks = { _ in tasks }
-			$0.taskrcClient.load = { _, _, _ in .finished }
+			$0.taskrcClient.load = { _, _ in .finished }
 			$0.timeZone = .gmt
 		}
 		store.exhaustivity = .off
@@ -1846,7 +1781,7 @@ struct ReplicaFeatureTests {
 	@Test
 	func otherDataLocationIsReportedOnlyForAnAttachedTaskrc() {
 		let taskrc = { (location: String) in
-			Taskrc(path: taskrcFile.path(), environment: .fixture) { path, _ in
+			Taskrc(path: taskrcFile.path(), environment: .fixture) { path in
 				Taskrc.File(contents: "data.location=\(location)", realPath: path)
 			}
 		}

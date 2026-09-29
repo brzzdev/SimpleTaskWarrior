@@ -12,7 +12,7 @@ public struct Taskrc: Equatable, Sendable {
 
 	/// TW's compiled-in defaults alone, which the CLI runs on without a Taskrc.
 	public static let defaults = Self(
-		parser: Parser(environment: .live) { _, _ throws(ReadError) in throw .notFound },
+		parser: Parser(environment: .live) { _ throws(ReadError) in throw .notFound },
 	)
 
 	/// The active Context's write modifications, which new tasks take as defaults.
@@ -27,16 +27,15 @@ public struct Taskrc: Equatable, Sendable {
 	/// Keys set only as `context.<active>.rc.<key>`, which TW reads by name but never enumerates.
 	private var contextOnlyValues: [String: String]
 
-	/// Parses the Taskrc at `path`, an absolute path, reading it and its includes with `readFile`,
-	/// which is told the `include` line it reads for, or nil for the Taskrc itself.
+	/// Parses the Taskrc at `path`, an absolute path, reading it and its includes with `readFile`.
 	public init(
 		path: String,
 		environment: Environment,
-		readFile: @escaping (_ path: String, _ include: Include?) throws(ReadError) -> File,
+		readFile: @escaping (_ path: String) throws(ReadError) -> File,
 	) {
 		var parser = Parser(environment: environment, readFile: readFile)
 		do throws(ReadError) {
-			try parser.load(path, for: nil, at: nil, depth: 1)
+			try parser.load(path, at: nil, depth: 1)
 		} catch {
 			parser.problems.append(Problem(error.kind(path: path, unsetVariables: []), at: nil))
 		}
@@ -136,21 +135,6 @@ extension Taskrc {
 		}
 	}
 
-	/// An `include` line, which a grant of access to the file it names is kept against: the line
-	/// rather than the path it expands to, so the grant holds where the app's expansion differs from
-	/// the CLI's.
-	public struct Include: Codable, Hashable, Sendable {
-		/// The path the including file was read at.
-		public var file: String
-		/// The line as it's written, without a comment or surrounding whitespace.
-		public var line: String
-
-		public init(file: String, line: String) {
-			self.file = file
-			self.line = line
-		}
-	}
-
 	public struct Location: Equatable, Sendable {
 		/// The path the file was read at.
 		public var file: String
@@ -178,14 +162,11 @@ extension Taskrc {
 			case unsetVariables([String], key: String)
 		}
 
-		/// The `include` line naming a file that couldn't be read.
-		public var include: Include?
 		public var kind: Kind
 		/// The line that caused it, or nil when the Taskrc itself can't be read.
 		public var location: Location?
 
-		public init(_ kind: Kind, at location: Location?, include: Include? = nil) {
-			self.include = include
+		public init(_ kind: Kind, at location: Location?) {
 			self.kind = kind
 			self.location = location
 		}
@@ -336,19 +317,17 @@ private struct Configuration {
 }
 
 extension Taskrc.Environment {
-	/// The app's environment, with `HOME` and `USER` set to the real user's rather than the sandbox
-	/// container's, so `~` means what it does to the CLI.
-	public static let live: Self = {
-		var variables = ProcessInfo.processInfo.environment
-		if let account = getpwuid(getuid()) {
-			variables["HOME"] = String(cString: account.pointee.pw_dir)
-			variables["USER"] = String(cString: account.pointee.pw_name)
-		}
-		return Self(
-			homeDirectory: { user in
-				getpwnam(user).map { String(cString: $0.pointee.pw_dir) }
-			},
-			variables: variables,
-		)
-	}()
+	/// The app's environment, which the CLI would run in too.
+	public static let live = Self(
+		homeDirectory: { user in
+			getpwnam(user).map { String(cString: $0.pointee.pw_dir) }
+		},
+		variables: ProcessInfo.processInfo.environment,
+	)
+
+	/// The Taskrc the CLI reads when nothing names another: `$TASKRC`, else `~/.taskrc`, or nil
+	/// with neither variable set.
+	public var taskrcPath: String? {
+		variables["TASKRC"] ?? variables["HOME"].map { "\($0)/.taskrc" }
+	}
 }

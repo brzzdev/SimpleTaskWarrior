@@ -378,7 +378,7 @@ struct WritePlannerTests {
 	/// resolves against the task's `due`.
 	@Test
 	func creatingATaskResolvesADefaultThatRefersToAnotherAttribute() throws {
-		let taskrc = Taskrc(path: "/taskrc", environment: .fixture) { path, _ throws(Taskrc.ReadError) in
+		let taskrc = Taskrc(path: "/taskrc", environment: .fixture) { path throws(Taskrc.ReadError) in
 			Taskrc.File(
 				contents: """
 					default.due=2030-01-02
@@ -400,7 +400,7 @@ struct WritePlannerTests {
 	/// would resolve without it, since TW reads an unset attribute plus a duration from now.
 	@Test
 	func creatingATaskResolvesADefaultThatRefersToItsModifiedStamp() throws {
-		let taskrc = Taskrc(path: "/taskrc", environment: .fixture) { path, _ throws(Taskrc.ReadError) in
+		let taskrc = Taskrc(path: "/taskrc", environment: .fixture) { path throws(Taskrc.ReadError) in
 			Taskrc.File(
 				contents: """
 					uda.review.default=modified-1d
@@ -425,7 +425,7 @@ struct WritePlannerTests {
 		("default.scheduled", "easter", DateInputError.holiday("easter")),
 	])
 	func creatingATaskWithAnUnresolvedDefaultThrows(key: String, text: String, error: DateInputError) {
-		let taskrc = Taskrc(path: "/taskrc", environment: .fixture) { path, _ throws(Taskrc.ReadError) in
+		let taskrc = Taskrc(path: "/taskrc", environment: .fixture) { path throws(Taskrc.ReadError) in
 			Taskrc.File(contents: "\(key)=\(text)", realPath: path)
 		}
 		let planner = WritePlanner(taskrc: taskrc, timeZone: .gmt)
@@ -497,7 +497,7 @@ struct WritePlannerTests {
 
 	@Test
 	func settingDurationInputStoresItNormalised() throws {
-		let taskrc = Taskrc(path: "/taskrc", environment: .fixture) { path, _ throws(Taskrc.ReadError) in
+		let taskrc = Taskrc(path: "/taskrc", environment: .fixture) { path throws(Taskrc.ReadError) in
 			Taskrc.File(contents: "uda.estimate.type=duration", realPath: path)
 		}
 		let planner = WritePlanner(taskrc: taskrc, timeZone: .gmt)
@@ -567,7 +567,7 @@ private let newYear2030 = Date(timeIntervalSince1970: 1_893_456_000)
 
 /// A Taskrc whose active Context writes the reserved `+PENDING` to new tasks.
 private let pendingContext = Taskrc(path: "/taskrc", environment: .fixture) {
-	path, _ throws(Taskrc.ReadError) in
+	path throws(Taskrc.ReadError) in
 	Taskrc.File(contents: "context=work\ncontext.work.write=+PENDING\n", realPath: path)
 }
 

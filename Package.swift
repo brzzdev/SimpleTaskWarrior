@@ -52,7 +52,6 @@ let package = Package(
 		.target(
 			name: "BookmarkClient",
 			dependencies: [
-				"Taskrc",
 				.product(name: "ComposableArchitecture", package: "swift-composable-architecture"),
 			],
 		),

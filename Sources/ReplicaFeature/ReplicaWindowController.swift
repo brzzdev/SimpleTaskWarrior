@@ -201,11 +201,6 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 	}
 
 	@objc
-	public func grantAccess(_: Any?) {
-		store.send(.grantAccessButtonTapped)
-	}
-
-	@objc
 	public func markDone(_: Any?) {
 		store.send(.doneButtonTapped)
 	}
@@ -323,9 +318,6 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 		return switch menuItem.action {
 		case #selector(addTag(_:)), #selector(removeTag(_:)), #selector(setProject(_:)):
 			store.canEditSelection
-
-		case #selector(grantAccess(_:)):
-			store.canGrantAccess
 
 		case #selector(newTask(_:)):
 			store.canCreateTask
@@ -568,13 +560,9 @@ private final class ReplicaWindow: NSWindow {
 }
 
 extension ReplicaFeature.FileImporter {
-	/// Where the panel opens: at the path an include resolved to, or in the home folder, where the
-	/// CLI looks for `.taskrc`.
+	/// Where the panel opens: in the home folder, where the CLI looks for `.taskrc`.
 	fileprivate var directory: URL? {
 		switch self {
-		case let .grant(_, file):
-			file.deletingLastPathComponent()
-
 		case .taskrc:
 			Taskrc.Environment.live.variables["HOME"].map { URL(filePath: $0, directoryHint: .isDirectory) }
 		}
@@ -582,9 +570,6 @@ extension ReplicaFeature.FileImporter {
 
 	fileprivate var message: String {
 		switch self {
-		case let .grant(_, file):
-			String(localized: "Grant access to \(file.lastPathComponent), which the Taskrc includes.")
-
 		case .taskrc:
 			String(localized: "Choose the Taskrc to use with this Replica.")
 		}

@@ -12,7 +12,7 @@ alongside the `task` CLI: changes made in either show up in the other.
    with Developer ID and ad-hoc signing is disabled, so a build without the
    certificate fails at the signing step even with the team ID set.
 
-2. Set your signing team so Tuist can produce a signed, sandboxed app:
+2. Set your signing team so Tuist can produce a signed app:
 
    ```sh
    export TUIST_DEVELOPMENT_TEAM=XXXXXXXXXX

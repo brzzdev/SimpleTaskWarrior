@@ -113,13 +113,6 @@ final class ReplicaContentController: NSViewController {
 		if let problem = store.taskrc?.problem {
 			let remedy: NSButton? =
 				switch store.taskrcRemedy {
-				case .grant:
-					NSButton(
-						title: String(localized: "Grant Access…"),
-						target: target,
-						action: #selector(Self.grantAccessButtonClicked(_:)),
-					)
-
 				case .taskrc:
 					NSButton(
 						title: String(localized: "Choose Taskrc…"),
@@ -169,11 +162,6 @@ final class ReplicaContentController: NSViewController {
 	@objc
 	func chooseTaskrcButtonClicked(_: Any?) {
 		store.send(.chooseTaskrcButtonTapped)
-	}
-
-	@objc
-	func grantAccessButtonClicked(_: Any?) {
-		store.send(.grantAccessButtonTapped)
 	}
 
 	@objc

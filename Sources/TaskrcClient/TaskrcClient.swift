@@ -1,4 +1,4 @@
-// Loads, watches and reloads the Taskrc paired with a window.
+// Loads, watches and reloads the Taskrc a window runs on.
 public import ComposableArchitecture
 import Darwin
 import Dispatch
@@ -7,17 +7,15 @@ public import Taskrc
 
 @DependencyClient
 public struct TaskrcClient: Sendable {
-	/// Parses the Taskrc that `taskrc` returns, or yields TW's defaults when it returns nil, then
-	/// parses it again whenever it or an include it read changes. Calls `taskrc` and `grants`
-	/// before every parse, so a Taskrc that was moved or replaced is found again, and a grant made
-	/// in another window is picked up. Reads an include through its grant where it has one, and
-	/// holds the scope of every file it reads while it watches. Until a parse succeeds, a broken
-	/// Taskrc runs on `lastGood`.
+	/// Parses the Taskrc that `taskrc` returns, or the one the CLI reads by default when it returns
+	/// nil, then parses it again whenever it or an include it read changes. Calls `taskrc` before
+	/// every parse, so a Taskrc that was moved or replaced is found again. With neither, yields TW's
+	/// defaults until a default Taskrc appears. Until a parse succeeds, a broken Taskrc runs on
+	/// `lastGood`.
 	public var load: @Sendable (
 		_ taskrc: @escaping @Sendable () -> URL?,
-		_ grants: @escaping @Sendable () -> [Taskrc.Include: URL],
 		_ lastGood: Taskrc,
-	) -> AsyncStream<Loaded> = { _, _, _ in .finished }
+	) -> AsyncStream<Loaded> = { _, _ in .finished }
 }
 
 extension TaskrcClient {
@@ -42,13 +40,13 @@ extension TaskrcClient {
 /// parse once.
 private let debounce = Duration.milliseconds(250)
 
-/// How often the Taskrc is parsed again while a file it names is missing or unreadable, since
-/// there's no file to watch until one appears.
+/// How often the Taskrc is parsed again while a file it names is missing or unreadable, or looked
+/// for while there's none, since there's no file to watch until one appears.
 private let missingFilePoll = Duration.seconds(2)
 
 extension TaskrcClient: DependencyKey {
 	public static let liveValue = Self(
-		load: { taskrc, grants, lastGood in
+		load: { taskrc, lastGood in
 			AsyncStream { continuation in
 				let loading = _Concurrency.Task {
 					var lastGood = lastGood
@@ -56,27 +54,23 @@ extension TaskrcClient: DependencyKey {
 					// The files the last parse read, which the next is watched over.
 					var watched: [URL] = []
 					while !_Concurrency.Task.isCancelled {
-						guard let url = taskrc() else {
-							continuation.yield(Loaded(taskrc: .defaults, url: nil))
-							break
-						}
-						// Held until the next parse, since the watchers below reopen the files.
-						let grants = grants()
-						let inScope = ([url] + grants.values).filter {
-							$0.startAccessingSecurityScopedResource()
-						}
-						defer {
-							for file in inScope {
-								file.stopAccessingSecurityScopedResource()
+						guard let url = taskrc() ?? defaultTaskrc() else {
+							let loaded = Loaded(taskrc: .defaults, url: nil)
+							if loaded != lastLoaded {
+								continuation.yield(loaded)
+								lastLoaded = loaded
 							}
+							watched = []
+							try? await _Concurrency.Task.sleep(for: missingFilePoll)
+							continue
 						}
 
 						// Armed before reading, so a save that lands mid-parse still wakes the loop.
 						let watchedChanges = changes(to: watched)
 						var read: [URL] = []
 						let parsed = Taskrc(path: url.path(percentEncoded: false), environment: .live) {
-							path, include throws(Taskrc.ReadError) in
-							let file = include.flatMap { grants[$0] } ?? URL(filePath: path)
+							path throws(Taskrc.ReadError) in
+							let file = URL(filePath: path)
 							let contents = try Taskrc.File(reading: file)
 							read.append(file)
 							return contents
@@ -124,6 +118,18 @@ extension DependencyValues {
 	}
 }
 
+/// The Taskrc the CLI reads when nothing names another, where it exists. TW runs on its defaults
+/// without one.
+private func defaultTaskrc() -> URL? {
+	guard
+		let path = Taskrc.Environment.live.taskrcPath,
+		FileManager.default.fileExists(atPath: path)
+	else {
+		return nil
+	}
+	return URL(filePath: path)
+}
+
 /// Returns once `changes` yields, or after `timeout` when there is one.
 private func firstChange(in changes: AsyncStream<Void>, orAfter timeout: Duration?) async {
 	await withTaskGroup { group in
@@ -142,12 +148,17 @@ private func firstChange(in changes: AsyncStream<Void>, orAfter timeout: Duratio
 	}
 }
 
-/// Yields when any of `files` is written, renamed or deleted. The CLI's `task config` and
-/// `task context` write in place, and an editor's atomic save arrives as a delete.
+/// Yields when any of `files` is written, renamed or deleted, or a symlink among them is replaced.
+/// The CLI's `task config` and `task context` write in place, an editor's atomic save arrives as a
+/// delete, and so does a dotfile manager repointing its link.
 private func changes(to files: [URL]) -> AsyncStream<Void> {
 	AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
-		let sources = files.compactMap { file in
-			watch(file.path(percentEncoded: false)) { continuation.yield() }
+		let sources = files.flatMap { file in
+			let path = file.path(percentEncoded: false)
+			let flags = isSymlink(path) ? [O_EVTONLY, O_EVTONLY | O_SYMLINK] : [O_EVTONLY]
+			return flags.compactMap { flags in
+				watch(path, flags: flags) { continuation.yield() }
+			}
 		}
 		continuation.onTermination = { _ in
 			for source in sources {
@@ -157,13 +168,20 @@ private func changes(to files: [URL]) -> AsyncStream<Void> {
 	}
 }
 
-/// A source calling `changed` when the file at `path` is written, renamed or deleted, or nil when
-/// it can't be opened.
+/// Whether the file at `path` is a symlink.
+private func isSymlink(_ path: String) -> Bool {
+	var info = stat()
+	return lstat(path, &info) == 0 && info.st_mode & S_IFMT == S_IFLNK
+}
+
+/// A source calling `changed` when the file `open` finds at `path` with `flags` is written,
+/// renamed or deleted, or nil when it can't be opened. `O_SYMLINK` opens a symlink itself.
 private func watch(
 	_ path: String,
+	flags: Int32,
 	changed: @escaping @Sendable () -> Void,
 ) -> (any DispatchSourceFileSystemObject)? {
-	let descriptor = open(path, O_EVTONLY)
+	let descriptor = open(path, flags)
 	guard descriptor >= 0 else {
 		return nil
 	}
