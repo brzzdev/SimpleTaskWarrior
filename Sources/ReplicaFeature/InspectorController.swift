@@ -213,7 +213,12 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 	/// Puts the cursor in `field` for the tasks the inspector shows, expanding a collapsed inspector.
 	func beginEditing(_ field: Field) {
 		splitViewItem?.isCollapsed = false
-		view.window?.makeFirstResponder(field == .project ? projectField : tagField)
+		let target =
+			switch field {
+			case .project: projectField
+			case .tag: tagField
+			}
+		view.window?.makeFirstResponder(target)
 	}
 
 	func controlTextDidBeginEditing(_: Notification) {
@@ -421,33 +426,6 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 		orphanSection.isHidden = orphans.isEmpty
 	}
 
-	/// Shows the project and tags the selected tasks `ids` share, with Done and Delete for them all.
-	private func showSelection(_ ids: [Models.Task.ID], isAnotherSelection: Bool) {
-		// The lists show several tasks' tags now, so one task's are shown afresh.
-		shownLists = nil
-		bulkTitle.stringValue = String(localized: "\(ids.count) Tasks Selected")
-		let enabled = store.enabledCommands
-		bulkDeleteButton.isEnabled = enabled.contains(.delete)
-		bulkDoneButton.isEnabled = enabled.contains(.done)
-
-		let projects = store.selectedProjects
-		projectField.placeholderString =
-			projects.count == 1 ? noneTitle : String(localized: "Multiple Values")
-		// As one task's fields keep what you typed while its write runs.
-		if isAnotherSelection || store.writeProgress == nil {
-			let project = projects.count == 1 ? projects.first.flatMap(\.self) : nil
-			show(project ?? "", in: projectField, isAnotherTask: isAnotherSelection)
-			show("", in: tagField, isAnotherTask: isAnotherSelection)
-		}
-
-		let tags = store.selectedTags
-		guard isAnotherSelection || tags != shownTags else {
-			return
-		}
-		shownTags = tags
-		tagList.setViews(tagRows(tags, of: ids), in: .top)
-	}
-
 	/// Shows the inspected task's fields, the selected tasks' project and tags, or why there's
 	/// neither.
 	private func updateTask() {
@@ -530,6 +508,34 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 				continue
 			}
 		}
+	}
+
+	/// Shows the selected tasks `ids`' project where they share one, and every tag any of them has,
+	/// with Done and Delete for them all.
+	private func showSelection(_ ids: [Models.Task.ID], isAnotherSelection: Bool) {
+		// The lists show several tasks' tags now, so one task's are shown afresh.
+		shownLists = nil
+		bulkTitle.stringValue = String(localized: "\(ids.count) Tasks Selected")
+		let enabled = store.enabledCommands
+		bulkDeleteButton.isEnabled = enabled.contains(.delete)
+		bulkDoneButton.isEnabled = enabled.contains(.done)
+
+		let projects = store.selectedProjects
+		// Nil where they differ, else the project they share, which may be none.
+		let project = projects.count == 1 ? projects.first : nil
+		projectField.placeholderString = project == nil ? String(localized: "Multiple Values") : noneTitle
+		// As one task's fields keep what you typed while its write runs.
+		if isAnotherSelection || store.writeProgress == nil {
+			show(project.flatMap(\.self) ?? "", in: projectField, isAnotherTask: isAnotherSelection)
+			show("", in: tagField, isAnotherTask: isAnotherSelection)
+		}
+
+		let tags = store.selectedTags
+		guard isAnotherSelection || tags != shownTags else {
+			return
+		}
+		shownTags = tags
+		tagList.setViews(tagRows(tags, of: ids), in: .top)
 	}
 
 	/// Makes a control for each UDA the inspector edits, reusing one whose definition is unchanged.
@@ -675,6 +681,14 @@ private func selectableLabel(_ text: String) -> NSTextField {
 	return label
 }
 
+/// The tags typed into a tag field. Tags hold no spaces, so each word is one, as
+/// `task modify +a +b` adds them, with any leading `+` dropped.
+private func tags(in text: String) -> [String] {
+	text.split(whereSeparator: \.isWhitespace)
+		.map { String($0.drop { $0 == "+" }) }
+		.filter { !$0.isEmpty }
+}
+
 /// The value typed into a UDA's field, or nil where it doesn't read as one of `type`. Empty text
 /// removes the UDA.
 private func udaValue(_ text: String, type: UDAType) -> UDAValue? {
@@ -687,14 +701,6 @@ private func udaValue(_ text: String, type: UDAType) -> UDAValue? {
 		return nil
 	}
 	return value
-}
-
-/// The tags typed into a tag field. Tags hold no spaces, so each word is one, as
-/// `task modify +a +b` adds them, with any leading `+` dropped.
-private func tags(in text: String) -> [String] {
-	text.split(whereSeparator: \.isWhitespace)
-		.map { String($0.drop { $0 == "+" }) }
-		.filter { !$0.isEmpty }
 }
 
 /// A stack laying out its views top to bottom at its full width.

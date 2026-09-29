@@ -11,7 +11,7 @@ import UniformTypeIdentifiers
 public final class ReplicaWindowController: NSWindowController, NSMenuItemValidation,
 	NSToolbarDelegate, NSWindowDelegate
 {
-	fileprivate let store: StoreOf<ReplicaFeature>
+	private let store: StoreOf<ReplicaFeature>
 
 	/// The alert on screen, for a failed write or a broken chain, so a store change while it's up
 	/// doesn't show a second.
@@ -41,6 +41,11 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 	/// The file panel on screen, so a store change while it's up doesn't open a second.
 	private var openPanel: NSOpenPanel?
 	private let searchItem = NSSearchToolbarItem(itemIdentifier: searchIdentifier)
+
+	/// Every tag any selected task has, which Remove Tag lists.
+	fileprivate var selectedTags: [String] {
+		store.selectedTags
+	}
 
 	/// A controller for the Replica `bookmark` locates, which autosaves the layout of its split
 	/// view and table under `autosaveName`. It calls `onClose` as its window closes.
@@ -524,7 +529,7 @@ private final class RemoveTagMenuDelegate: NSObject, NSMenuDelegate {
 		menu.removeAllItems()
 		let action = #selector(ReplicaWindowController.removeTag(_:))
 		let controller = NSApp.target(forAction: action) as? ReplicaWindowController
-		let tags = controller?.store.selectedTags ?? []
+		let tags = controller?.selectedTags ?? []
 		guard !tags.isEmpty else {
 			menu.addItem(withTitle: String(localized: "No Tags"), action: nil, keyEquivalent: "")
 			return

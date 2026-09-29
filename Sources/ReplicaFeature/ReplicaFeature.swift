@@ -38,7 +38,8 @@ struct ReplicaFeature {
 		/// Set once the Replica's tasks first arrive, by which point `apply` can reach it.
 		var isReplicaOpen = false
 		var isTaskrcHintPresented = false
-		/// The tasks an inspector or bulk panel edit may move out of the table, which the table keeps
+		/// The tasks an inspector edit, of one task or several, may move out of the table, which the
+		/// table keeps
 		/// until the selection changes.
 		var keptTasks: Set<Models.Task.ID> = []
 		/// The tasks a Done or Delete in progress is writing, which the table drops as the write
@@ -895,7 +896,8 @@ struct ReplicaFeature {
 		return close(prompt.ids, prompt.command, chains: chains, &state)
 	}
 
-	/// Writes an inspector or bulk panel edit to the tasks `ids`, keeping them in the table should the
+	/// Writes an inspector edit, of one task or several, to the tasks `ids`, keeping them in the table
+	/// should the
 	/// edit move them out.
 	private func edit(
 		_ ids: [Models.Task.ID],
