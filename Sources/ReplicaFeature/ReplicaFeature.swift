@@ -44,8 +44,8 @@ struct ReplicaFeature {
 		/// The tasks a Done or Delete in progress is writing, which the table drops as the write
 		/// starts rather than once it commits, since that can wait seconds on the Replica's lock.
 		var leavingTasks: Set<Models.Task.ID> = []
-		/// Writes asked for while another was in progress, written in order once it ends. Only inspector
-		/// edits get here: every other write is disabled while one runs.
+		/// Writes asked for while another was in progress or a Done or Delete asked about chains, written
+		/// in order once that ends. Only inspector edits get here: every other write is disabled then.
 		var queuedWrites: [WriteAction] = []
 		/// Why reading the Replica fails, while it does. The window keeps the last tasks it read.
 		var readFailure: String?
@@ -106,7 +106,7 @@ struct ReplicaFeature {
 			undoName != nil && canWrite
 		}
 
-		/// The commands that apply to every selected task. None applies while nothing can write, or
+		/// The commands that apply to every selected task. None applies while a write would queue, or
 		/// while the new-task row is open, whose Return would find the write in the way. Read once for
 		/// all of them, since the selection is looked up for each read.
 		var enabledCommands: Set<TaskCommand> {
@@ -195,9 +195,9 @@ struct ReplicaFeature {
 			}
 		}
 
-		/// Whether a write can start: not while one is in progress, nor while a Done or Delete asks
-		/// about chains, whose answer writes against the tasks it asked about.
-		private var canWrite: Bool {
+		/// Whether a write can start now, rather than queue: not while one is in progress, nor while a
+		/// Done or Delete asks about chains, whose answer writes against the tasks it asked about.
+		var canWrite: Bool {
 			writeProgress == nil && chainRepairPrompt == nil
 		}
 
@@ -424,7 +424,8 @@ struct ReplicaFeature {
 
 			case .chainRepairDismissed:
 				state.chainRepairPrompt = nil
-				return .none
+				// Starts any edit that queued behind the question.
+				return finishWrite(&state)
 
 			case .chooseTaskrcButtonTapped:
 				state.fileImporter = .taskrc
@@ -728,7 +729,7 @@ struct ReplicaFeature {
 
 	/// The one path every write takes. Every other write queues until it finishes.
 	private func write(_ action: WriteAction, _ state: inout State) -> Effect<Action> {
-		guard state.writeProgress == nil else {
+		guard state.canWrite else {
 			state.queuedWrites.append(action)
 			return .none
 		}
