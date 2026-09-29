@@ -23,8 +23,8 @@ public struct WritePlanner: Sendable {
 	) throws(WritePlanError) -> WritePlan {
 		let epoch = String(now.epoch)
 		switch action {
-		case let .complete(ids):
-			return try plan(ids, tasks: tasks, at: epoch) { $0.complete(at: epoch) }
+		case let .complete(ids, chains):
+			return try plan(ids, tasks: tasks, at: epoch, chains: chains) { $0.complete(at: epoch) }
 
 		case let .create(id, description):
 			let description = description.trimmingSpaces
@@ -46,8 +46,8 @@ public struct WritePlanner: Sendable {
 			}
 			return plan
 
-		case let .delete(ids):
-			return try plan(ids, tasks: tasks, at: epoch) { $0.delete(at: epoch) }
+		case let .delete(ids, chains):
+			return try plan(ids, tasks: tasks, at: epoch, chains: chains) { $0.delete(at: epoch) }
 
 		case let .edit(ids, edit):
 			let edit = edit.trimmed
@@ -188,25 +188,84 @@ public struct WritePlanner: Sendable {
 		taskrc[key].flatMap { $0.isEmpty ? nil : $0 }
 	}
 
-	/// Plans `change` on each task in `ids`, once each, in order.
+	/// Plans `change` on each task in `ids`, once each, in order, repairing each chain it breaks
+	/// where `chains` says to, as `dependencyChainOnComplete` does after each task in turn. Closing
+	/// one task can rewire the next, so the order matters: `task` goes in ID order, and so must the
+	/// caller.
 	private func plan(
 		_ ids: [Task.ID],
 		tasks: [Task.ID: [String: String]],
 		at epoch: String,
+		chains: ChainRepair = .leave,
 		change: (inout Draft) throws(WritePlanError) -> Void,
 	) throws(WritePlanError) -> WritePlan {
-		var drafts: [Draft] = []
+		var drafts = Drafts(tasks: tasks)
+		var repairedChains: [WritePlan.RepairedChain] = []
 		var seen: Set<Task.ID> = []
 		for id in ids where seen.insert(id).inserted {
-			guard let properties = tasks[id] else {
+			guard let index = drafts.index(id) else {
 				throw .noSuchTask(id)
 			}
-			var draft = Draft(id: id, properties: properties, isNew: false)
-			try change(&draft)
-			draft.rewriteLegacyWaiting()
-			drafts.append(draft)
+			let status = drafts[index].properties["status"]
+			try change(&drafts[index])
+			// Only closing a task breaks a chain: a closed one stopped blocking when it closed.
+			guard chains == .repair, isOpen(status), !isOpen(drafts[index].properties["status"]) else {
+				continue
+			}
+			if let chain = repairChain(of: index, in: &drafts) {
+				repairedChains.append(chain)
+			}
 		}
-		return WritePlan(drafts, epoch: epoch)
+		var all = drafts.all
+		for index in all.indices {
+			all[index].rewriteLegacyWaiting()
+		}
+		var plan = WritePlan(all, epoch: epoch)
+		plan.repairedChains = repairedChains
+		return plan
+	}
+
+	/// Moves the open tasks that depend on the task the draft at `closing` just closed onto the open
+	/// tasks it depends on, where there are both, and reports the chain.
+	private func repairChain(
+		of closing: Int,
+		in drafts: inout Drafts,
+	) -> WritePlan.RepairedChain? {
+		let id = drafts[closing].id
+		// Read only to expect them, so a dependency added or removed before the plan commits changes
+		// the repair: `depends` catches an added one, which TW rewrites with the keys, and each
+		// `dep_*` key its own removal, as `refuseCycle` expects both.
+		_ = drafts[closing].read("depends")
+		// Only the tasks it still blocks on, as `getDependencyTasks` reads them.
+		var blocking: [Task.ID] = []
+		for dependency in dependencies(drafts[closing].properties).sorted() {
+			_ = drafts[closing].read("dep_\(dependency.uuidString.lowercased())")
+			guard let index = drafts.index(dependency), isOpen(drafts[index].read("status")) else {
+				continue
+			}
+			blocking.append(dependency)
+		}
+		guard !blocking.isEmpty else {
+			return nil
+		}
+		// Found by scanning, so a dependent the CLI adds before the plan commits is left unrepaired,
+		// as one added just after `task done` would be.
+		let member = "dep_\(id.uuidString.lowercased())"
+		var blocked: [Task.ID] = []
+		for candidate in drafts.ids.filter({ drafts.properties($0)[member] != nil }).sorted() {
+			guard let index = drafts.index(candidate), isOpen(drafts[index].read("status")) else {
+				continue
+			}
+			drafts[index].setDependency(id, isPresent: false)
+			for dependency in blocking where dependency != candidate {
+				drafts[index].setDependency(dependency, isPresent: true)
+			}
+			blocked.append(candidate)
+		}
+		guard !blocked.isEmpty else {
+			return nil
+		}
+		return WritePlan.RepairedChain(blocked: blocked, blocking: blocking, task: id)
 	}
 
 	/// What an expression reads for `name`: a date attribute or UDA as its value, dates and durations
@@ -287,16 +346,25 @@ public struct WritePlanner: Sendable {
 /// annotation's entry are chosen once, when the user acts.
 public enum WriteAction: Equatable, Sendable {
 	/// `task done`, which leaves a task that isn't pending as it is.
-	case complete([Task.ID])
+	case complete([Task.ID], chains: ChainRepair)
 	case create(Task.ID, description: String)
 	/// `task delete`, which keeps `start`.
-	case delete([Task.ID])
+	case delete([Task.ID], chains: ChainRepair)
 	case edit([Task.ID], TaskEdit)
 	/// `task modify status:pending` on a completed or deleted task.
 	case markPending([Task.ID])
 	/// `task start`, which reopens a completed or deleted task.
 	case start([Task.ID])
 	case stop([Task.ID])
+}
+
+/// What a Done or Delete does to a dependency chain it breaks: a task it closes that both blocks
+/// and is blocked, as `task` asks under `dependency.confirmation`.
+public enum ChainRepair: Equatable, Sendable {
+	/// Leaves each dependent depending on the closed task, as answering no does.
+	case leave
+	/// Moves each open dependent of the closed task onto the open tasks it depended on.
+	case repair
 }
 
 /// One change to each task an edit names. `wait` is an attribute like any other: setting it touches
@@ -368,6 +436,12 @@ private let dateAttributes: Set = [
 	"due", "end", "entry", "modified", "scheduled", "start", "until", "wait",
 ]
 
+/// Whether a task with `status` blocks or is blocked: any status but completed or deleted, as
+/// `Status.isOpen` reads it, a Recurrence template and a legacy `waiting` included.
+private func isOpen(_ status: String?) -> Bool {
+	status.flatMap(Status.init(rawValue:))?.isOpen ?? true
+}
+
 /// The status TW 2 stored for a waiting task, which `Status` doesn't decode. TW 3 reads it as
 /// pending and writes it back as `pending`.
 private let legacyWaiting = "waiting"
@@ -435,6 +509,8 @@ public struct WritePlan: Equatable, Sendable {
 	public var expectations: [Expectation] = []
 	/// Each task's changes, with `status` last, as `TDB2` writes it.
 	public var operations: [Operation] = []
+	/// The chains the plan repairs, in the order it closes their tasks.
+	public var repairedChains: [RepairedChain] = []
 	/// The active Context's write modifications a New Task left out, being neither `project:` nor
 	/// `+tag`.
 	public var skippedContextWrite: [String] = []
@@ -476,6 +552,21 @@ extension WritePlan {
 		case setStatus(Task.ID, Status)
 		/// Removes the property when `value` is nil.
 		case setValue(Task.ID, property: String, value: String?)
+	}
+
+	/// A closed task's open dependents, moved onto the open tasks it depended on.
+	public struct RepairedChain: Equatable, Sendable {
+		/// The dependents, which depend on `blocking` instead.
+		public var blocked: [Task.ID]
+		public var blocking: [Task.ID]
+		/// The task closed.
+		public var task: Task.ID
+
+		public init(blocked: [Task.ID], blocking: [Task.ID], task: Task.ID) {
+			self.blocked = blocked
+			self.blocking = blocking
+			self.task = task
+		}
 	}
 
 	/// `tasks` with the plan applied, as the engine would commit it.
@@ -651,7 +742,7 @@ private struct Draft {
 		set("start", nil)
 	}
 
-	private mutating func setDependency(_ dependency: Task.ID, isPresent: Bool) {
+	mutating func setDependency(_ dependency: Task.ID, isPresent: Bool) {
 		let member = dependency.uuidString.lowercased()
 		setMember(member, isPresent: isPresent, prefix: "dep_", mirror: "depends")
 	}
@@ -682,5 +773,48 @@ private struct Draft {
 		if read("end") == nil {
 			set("end", epoch)
 		}
+	}
+}
+
+/// The drafts a plan makes, in the order it first reads each task. A repair drafts the other tasks
+/// it reads, which a later task the action names may be.
+private struct Drafts {
+	private(set) var all: [Draft] = []
+
+	private var indices: [Task.ID: Int] = [:]
+	private let tasks: [Task.ID: [String: String]]
+
+	/// Every task in the snapshot.
+	var ids: Dictionary<Task.ID, [String: String]>.Keys {
+		tasks.keys
+	}
+
+	init(tasks: [Task.ID: [String: String]]) {
+		self.tasks = tasks
+	}
+
+	subscript(index: Int) -> Draft {
+		get { all[index] }
+		set { all[index] = newValue }
+	}
+
+	/// The index of the draft of `id`, drafted from the snapshot first where it isn't yet, or nil
+	/// where the snapshot has no such task.
+	mutating func index(_ id: Task.ID) -> Int? {
+		if let index = indices[id] {
+			return index
+		}
+		guard let properties = tasks[id] else {
+			return nil
+		}
+		indices[id] = all.count
+		all.append(Draft(id: id, properties: properties, isNew: false))
+		return all.count - 1
+	}
+
+	/// The properties of `id` as the plan has them so far, without reading them: none where the
+	/// snapshot has no such task.
+	func properties(_ id: Task.ID) -> [String: String] {
+		indices[id].map { all[$0].properties } ?? tasks[id] ?? [:]
 	}
 }

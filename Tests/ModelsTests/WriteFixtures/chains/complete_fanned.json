@@ -1,0 +1,203 @@
+{
+	"after": {
+		"0315296b-e893-458e-8e65-9aae0eb76529": {
+			"dep_12056780-3459-49b2-951f-2113712392b8": "x",
+			"dep_748ce915-a2ff-424b-bdd8-82013bbde7c5": "x",
+			"depends": "12056780-3459-49b2-951f-2113712392b8,748ce915-a2ff-424b-bdd8-82013bbde7c5",
+			"description": "Alpha",
+			"entry": "1790616479",
+			"modified": "1790616479",
+			"status": "pending"
+		},
+		"12056780-3459-49b2-951f-2113712392b8": {
+			"description": "Gamma",
+			"entry": "1790616479",
+			"modified": "1790616479",
+			"status": "pending"
+		},
+		"5a697801-a72d-470f-834c-5ee97272eecc": {
+			"dep_12056780-3459-49b2-951f-2113712392b8": "x",
+			"dep_748ce915-a2ff-424b-bdd8-82013bbde7c5": "x",
+			"depends": "12056780-3459-49b2-951f-2113712392b8,748ce915-a2ff-424b-bdd8-82013bbde7c5",
+			"description": "Beta",
+			"end": "1790616479",
+			"entry": "1790616479",
+			"modified": "1790616479",
+			"status": "completed"
+		},
+		"748ce915-a2ff-424b-bdd8-82013bbde7c5": {
+			"description": "Epsilon",
+			"entry": "1790616479",
+			"modified": "1790616479",
+			"status": "pending"
+		},
+		"9ebdfaee-fed2-4f64-acff-6a595b5f0e61": {
+			"dep_12056780-3459-49b2-951f-2113712392b8": "x",
+			"dep_748ce915-a2ff-424b-bdd8-82013bbde7c5": "x",
+			"depends": "12056780-3459-49b2-951f-2113712392b8,748ce915-a2ff-424b-bdd8-82013bbde7c5",
+			"description": "Delta",
+			"entry": "1790616479",
+			"modified": "1790616479",
+			"status": "pending"
+		}
+	},
+	"before": {
+		"0315296b-e893-458e-8e65-9aae0eb76529": {
+			"dep_5a697801-a72d-470f-834c-5ee97272eecc": "x",
+			"depends": "5a697801-a72d-470f-834c-5ee97272eecc",
+			"description": "Alpha",
+			"entry": "1790616479",
+			"modified": "1790616479",
+			"status": "pending"
+		},
+		"12056780-3459-49b2-951f-2113712392b8": {
+			"description": "Gamma",
+			"entry": "1790616479",
+			"modified": "1790616479",
+			"status": "pending"
+		},
+		"5a697801-a72d-470f-834c-5ee97272eecc": {
+			"dep_12056780-3459-49b2-951f-2113712392b8": "x",
+			"dep_748ce915-a2ff-424b-bdd8-82013bbde7c5": "x",
+			"depends": "12056780-3459-49b2-951f-2113712392b8,748ce915-a2ff-424b-bdd8-82013bbde7c5",
+			"description": "Beta",
+			"entry": "1790616479",
+			"modified": "1790616479",
+			"status": "pending"
+		},
+		"748ce915-a2ff-424b-bdd8-82013bbde7c5": {
+			"description": "Epsilon",
+			"entry": "1790616479",
+			"modified": "1790616479",
+			"status": "pending"
+		},
+		"9ebdfaee-fed2-4f64-acff-6a595b5f0e61": {
+			"dep_5a697801-a72d-470f-834c-5ee97272eecc": "x",
+			"depends": "5a697801-a72d-470f-834c-5ee97272eecc",
+			"description": "Delta",
+			"entry": "1790616479",
+			"modified": "1790616479",
+			"status": "pending"
+		}
+	},
+	"now": 1790616479,
+	"operations": [
+		{
+			"Update": {
+				"old_value": "1790616479",
+				"property": "modified",
+				"timestamp": "2026-09-28T17:27:59.765158Z",
+				"uuid": "5a697801-a72d-470f-834c-5ee97272eecc",
+				"value": "1790616479"
+			}
+		},
+		{
+			"Update": {
+				"old_value": null,
+				"property": "end",
+				"timestamp": "2026-09-28T17:27:59.765158Z",
+				"uuid": "5a697801-a72d-470f-834c-5ee97272eecc",
+				"value": "1790616479"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "pending",
+				"property": "status",
+				"timestamp": "2026-09-28T17:27:59.765162Z",
+				"uuid": "5a697801-a72d-470f-834c-5ee97272eecc",
+				"value": "completed"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "1790616479",
+				"property": "modified",
+				"timestamp": "2026-09-28T17:27:59.765826Z",
+				"uuid": "0315296b-e893-458e-8e65-9aae0eb76529",
+				"value": "1790616479"
+			}
+		},
+		{
+			"Update": {
+				"old_value": null,
+				"property": "dep_12056780-3459-49b2-951f-2113712392b8",
+				"timestamp": "2026-09-28T17:27:59.765826Z",
+				"uuid": "0315296b-e893-458e-8e65-9aae0eb76529",
+				"value": "x"
+			}
+		},
+		{
+			"Update": {
+				"old_value": null,
+				"property": "dep_748ce915-a2ff-424b-bdd8-82013bbde7c5",
+				"timestamp": "2026-09-28T17:27:59.765827Z",
+				"uuid": "0315296b-e893-458e-8e65-9aae0eb76529",
+				"value": "x"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "5a697801-a72d-470f-834c-5ee97272eecc",
+				"property": "depends",
+				"timestamp": "2026-09-28T17:27:59.765828Z",
+				"uuid": "0315296b-e893-458e-8e65-9aae0eb76529",
+				"value": "12056780-3459-49b2-951f-2113712392b8,748ce915-a2ff-424b-bdd8-82013bbde7c5"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "x",
+				"property": "dep_5a697801-a72d-470f-834c-5ee97272eecc",
+				"timestamp": "2026-09-28T17:27:59.765829Z",
+				"uuid": "0315296b-e893-458e-8e65-9aae0eb76529",
+				"value": null
+			}
+		},
+		{
+			"Update": {
+				"old_value": "1790616479",
+				"property": "modified",
+				"timestamp": "2026-09-28T17:27:59.766280Z",
+				"uuid": "9ebdfaee-fed2-4f64-acff-6a595b5f0e61",
+				"value": "1790616479"
+			}
+		},
+		{
+			"Update": {
+				"old_value": null,
+				"property": "dep_12056780-3459-49b2-951f-2113712392b8",
+				"timestamp": "2026-09-28T17:27:59.766280Z",
+				"uuid": "9ebdfaee-fed2-4f64-acff-6a595b5f0e61",
+				"value": "x"
+			}
+		},
+		{
+			"Update": {
+				"old_value": null,
+				"property": "dep_748ce915-a2ff-424b-bdd8-82013bbde7c5",
+				"timestamp": "2026-09-28T17:27:59.766283Z",
+				"uuid": "9ebdfaee-fed2-4f64-acff-6a595b5f0e61",
+				"value": "x"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "5a697801-a72d-470f-834c-5ee97272eecc",
+				"property": "depends",
+				"timestamp": "2026-09-28T17:27:59.766284Z",
+				"uuid": "9ebdfaee-fed2-4f64-acff-6a595b5f0e61",
+				"value": "12056780-3459-49b2-951f-2113712392b8,748ce915-a2ff-424b-bdd8-82013bbde7c5"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "x",
+				"property": "dep_5a697801-a72d-470f-834c-5ee97272eecc",
+				"timestamp": "2026-09-28T17:27:59.766285Z",
+				"uuid": "9ebdfaee-fed2-4f64-acff-6a595b5f0e61",
+				"value": null
+			}
+		}
+	]
+}

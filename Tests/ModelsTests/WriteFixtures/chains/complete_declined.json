@@ -1,0 +1,81 @@
+{
+	"after": {
+		"4f0d7892-5eb6-4d29-a2d2-16e93651b65c": {
+			"description": "Gamma",
+			"entry": "1790616479",
+			"modified": "1790616479",
+			"status": "pending"
+		},
+		"60d46137-b22c-4925-a1bc-5cfc508b12f8": {
+			"dep_4f0d7892-5eb6-4d29-a2d2-16e93651b65c": "x",
+			"depends": "4f0d7892-5eb6-4d29-a2d2-16e93651b65c",
+			"description": "Beta",
+			"end": "1790616479",
+			"entry": "1790616479",
+			"modified": "1790616479",
+			"status": "completed"
+		},
+		"b9d67f12-159f-4ff9-a4b9-4d41b09d5136": {
+			"dep_60d46137-b22c-4925-a1bc-5cfc508b12f8": "x",
+			"depends": "60d46137-b22c-4925-a1bc-5cfc508b12f8",
+			"description": "Alpha",
+			"entry": "1790616479",
+			"modified": "1790616479",
+			"status": "pending"
+		}
+	},
+	"before": {
+		"4f0d7892-5eb6-4d29-a2d2-16e93651b65c": {
+			"description": "Gamma",
+			"entry": "1790616479",
+			"modified": "1790616479",
+			"status": "pending"
+		},
+		"60d46137-b22c-4925-a1bc-5cfc508b12f8": {
+			"dep_4f0d7892-5eb6-4d29-a2d2-16e93651b65c": "x",
+			"depends": "4f0d7892-5eb6-4d29-a2d2-16e93651b65c",
+			"description": "Beta",
+			"entry": "1790616479",
+			"modified": "1790616479",
+			"status": "pending"
+		},
+		"b9d67f12-159f-4ff9-a4b9-4d41b09d5136": {
+			"dep_60d46137-b22c-4925-a1bc-5cfc508b12f8": "x",
+			"depends": "60d46137-b22c-4925-a1bc-5cfc508b12f8",
+			"description": "Alpha",
+			"entry": "1790616479",
+			"modified": "1790616479",
+			"status": "pending"
+		}
+	},
+	"now": 1790616479,
+	"operations": [
+		{
+			"Update": {
+				"old_value": "1790616479",
+				"property": "modified",
+				"timestamp": "2026-09-28T17:27:59.469008Z",
+				"uuid": "60d46137-b22c-4925-a1bc-5cfc508b12f8",
+				"value": "1790616479"
+			}
+		},
+		{
+			"Update": {
+				"old_value": null,
+				"property": "end",
+				"timestamp": "2026-09-28T17:27:59.469009Z",
+				"uuid": "60d46137-b22c-4925-a1bc-5cfc508b12f8",
+				"value": "1790616479"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "pending",
+				"property": "status",
+				"timestamp": "2026-09-28T17:27:59.469013Z",
+				"uuid": "60d46137-b22c-4925-a1bc-5cfc508b12f8",
+				"value": "completed"
+			}
+		}
+	]
+}

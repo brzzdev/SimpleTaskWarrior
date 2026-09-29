@@ -8,6 +8,19 @@ import TestSupport
 struct WritePlannerTests {
 	/// The app's action for each recorded write, by fixture and case.
 	static let actions: [String: @Sendable (Recording) throws -> WriteAction] = [
+		"chains/complete_already_depending": { try .complete([$0.id("Beta")], chains: .repair) },
+		"chains/complete_declined": { try .complete([$0.id("Beta")], chains: .leave) },
+		"chains/complete_fanned": { try .complete([$0.id("Beta")], chains: .repair) },
+		"chains/complete_middle": { try .complete([$0.id("Beta")], chains: .repair) },
+		"chains/complete_several": {
+			try .complete([$0.id("Beta"), $0.id("Gamma")], chains: .repair)
+		},
+		"chains/complete_with_closed_ends": { try .complete([$0.id("Beta")], chains: .repair) },
+		"chains/complete_with_template_dependent": {
+			try .complete([$0.id("Beta")], chains: .repair)
+		},
+		"chains/delete_completed": { try .delete([$0.id("Beta")], chains: .repair) },
+		"chains/delete_middle": { try .delete([$0.id("Beta")], chains: .repair) },
 		"context/add": { try .create($0.created(), description: "Alpha") },
 		"defaults/add": { try .create($0.created(), description: "Alpha") },
 		"edits/add": { try .create($0.created(), description: "Alpha") },
@@ -28,10 +41,12 @@ struct WritePlannerTests {
 		"edits/add_padded": { try .create($0.created(), description: " Alpha ") },
 		"edits/add_tab_only": { try .create($0.created(), description: "\t") },
 		"edits/add_tag": { try .edit([$0.id("Alpha")], .addTag("Work")) },
-		"edits/complete": { try .complete([$0.id("Alpha")]) },
-		"edits/complete_several": { try .complete([$0.id("Alpha"), $0.id("Beta")]) },
-		"edits/complete_started": { try .complete([$0.id("Alpha")]) },
-		"edits/delete_started": { try .delete([$0.id("Alpha")]) },
+		"edits/complete": { try .complete([$0.id("Alpha")], chains: .repair) },
+		"edits/complete_several": {
+			try .complete([$0.id("Alpha"), $0.id("Beta")], chains: .repair)
+		},
+		"edits/complete_started": { try .complete([$0.id("Alpha")], chains: .repair) },
+		"edits/delete_started": { try .delete([$0.id("Alpha")], chains: .repair) },
 		"edits/mark_completed_pending": { try .markPending([$0.id("Alpha")]) },
 		"edits/mark_deleted_pending": { try .markPending([$0.id("Alpha")]) },
 		"edits/remove_annotation": { try .edit([$0.id("Alpha")], .removeAnnotation(entry: $0.now)) },
@@ -128,6 +143,47 @@ struct WritePlannerTests {
 		#expect(replanned == WritePlan())
 	}
 
+	/// A dependency the CLI adds to the closed task before the plan commits rewrites `depends`, which
+	/// the plan must expect to fail and be made again.
+	@Test
+	func repairExpectsTheClosedTasksDependencies() throws {
+		let recording = try Recording("chains/complete_middle")
+		let planner = WritePlanner(taskrc: recording.taskrc, timeZone: .gmt)
+		let beta = try recording.id("Beta")
+
+		let plan = try planner.plan(
+			.complete([beta], chains: .repair),
+			tasks: recording.before,
+			at: recording.now,
+		)
+
+		let depends = WritePlan.Expectation(
+			property: "depends",
+			uuid: beta,
+			value: recording.before[beta]?["depends"],
+		)
+		#expect(plan.expectations.contains(depends))
+	}
+
+	@Test
+	func repairReportsEachChainItRepairs() throws {
+		let recording = try Recording("chains/complete_fanned")
+		let planner = WritePlanner(taskrc: recording.taskrc, timeZone: .gmt)
+		let beta = try recording.id("Beta")
+
+		let plan = try planner.plan(
+			.complete([beta], chains: .repair),
+			tasks: recording.before,
+			at: recording.now,
+		)
+
+		#expect(plan.repairedChains.count == 1)
+		let chain = try #require(plan.repairedChains.first)
+		#expect(chain.task == beta)
+		#expect(try Set(chain.blocked) == [recording.id("Alpha"), recording.id("Delta")])
+		#expect(try Set(chain.blocking) == [recording.id("Epsilon"), recording.id("Gamma")])
+	}
+
 	@Test
 	func completingALegacyWaitingTaskCompletesIt() throws {
 		let planner = WritePlanner(taskrc: .defaults, timeZone: .gmt)
@@ -135,7 +191,11 @@ struct WritePlannerTests {
 		let now = Date(timeIntervalSince1970: 1_790_000_000)
 
 		// TW 2 stored `waiting`, which `task done` reads as pending.
-		let plan = try planner.plan(.complete([id]), tasks: [id: ["status": "waiting"]], at: now)
+		let plan = try planner.plan(
+			.complete([id], chains: .repair),
+			tasks: [id: ["status": "waiting"]],
+			at: now,
+		)
 
 		#expect(plan.operations.contains(.setValue(id, property: "end", value: "1790000000")))
 		#expect(plan.operations.last == .setStatus(id, .completed))

@@ -17,6 +17,8 @@ struct ReplicaFeature {
 		/// to `rows`.
 		var allRows: [TaskRow] = []
 		let bookmark: Data
+		/// The Done or Delete asking whether to repair the dependency chains it breaks.
+		var chainRepairPrompt: ChainRepairPrompt?
 		/// The task a New Task is creating, which is selected once it commits.
 		var creatingTask: Models.Task.ID?
 		var directory: URL?
@@ -42,8 +44,8 @@ struct ReplicaFeature {
 		/// The tasks a Done or Delete in progress is writing, which the table drops as the write
 		/// starts rather than once it commits, since that can wait seconds on the Replica's lock.
 		var leavingTasks: Set<Models.Task.ID> = []
-		/// Writes asked for while another was in progress, written in order once it ends. Only inspector
-		/// edits get here: every other write is disabled while one runs.
+		/// Writes asked for while another was in progress or a Done or Delete asked about chains, written
+		/// in order once that ends. Only inspector edits get here: every other write is disabled then.
 		var queuedWrites: [WriteAction] = []
 		/// Why reading the Replica fails, while it does. The window keeps the last tasks it read.
 		var readFailure: String?
@@ -80,9 +82,9 @@ struct ReplicaFeature {
 		}
 
 		/// Whether New Task applies: once `apply` can reach the Replica and the Taskrc, whose defaults
-		/// and Context a new task takes, has loaded, and while no write is in progress.
+		/// and Context a new task takes, has loaded, and while nothing holds writes back.
 		var canCreateTask: Bool {
-			isReplicaOpen && failure == nil && taskrc != nil && writeProgress == nil
+			isReplicaOpen && failure == nil && taskrc != nil && canWrite
 		}
 
 		/// Whether Grant Access… can fix the Taskrc's problem.
@@ -93,22 +95,22 @@ struct ReplicaFeature {
 			return false
 		}
 
-		/// Whether Redo applies: while nothing has written since the undo, and no write is in progress.
+		/// Whether Redo applies: while nothing has written since the undo, and nothing holds writes back.
 		var canRedo: Bool {
-			redoName != nil && writeProgress == nil
+			redoName != nil && canWrite
 		}
 
-		/// Whether Undo applies: while the window's newest Undo point is the Replica's newest, and no
-		/// write is in progress.
+		/// Whether Undo applies: while the window's newest Undo point is the Replica's newest, and
+		/// nothing holds writes back.
 		var canUndo: Bool {
-			undoName != nil && writeProgress == nil
+			undoName != nil && canWrite
 		}
 
-		/// The commands that apply to every selected task. None applies while a write is in progress,
-		/// or while the new-task row is open, whose Return would find the write in the way. Read once
-		/// for all of them, since the selection is looked up for each read.
+		/// The commands that apply to every selected task. None applies while a write would queue, or
+		/// while the new-task row is open, whose Return would find the write in the way. Read once for
+		/// all of them, since the selection is looked up for each read.
 		var enabledCommands: Set<TaskCommand> {
-			guard writeProgress == nil, !isNewTaskRowPresented else {
+			guard canWrite, !isNewTaskRowPresented else {
 				return []
 			}
 			let tasks = selectedTasks()
@@ -193,6 +195,12 @@ struct ReplicaFeature {
 			}
 		}
 
+		/// Whether a write can start now, rather than queue: not while one is in progress, nor while a
+		/// Done or Delete asks about chains, whose answer writes against the tasks it asked about.
+		var canWrite: Bool {
+			writeProgress == nil && chainRepairPrompt == nil
+		}
+
 		init(bookmark: Data) {
 			self.bookmark = bookmark
 		}
@@ -231,6 +239,49 @@ struct ReplicaFeature {
 		case done
 		case markPending
 		case startStop
+	}
+
+	/// A Done or Delete that would break dependency chains, as `dependency.confirmation` asks about.
+	struct ChainRepairPrompt: Equatable {
+		/// Done or Delete.
+		var command: TaskCommand
+		var ids: [Models.Task.ID]
+		/// What repairing would do, as planned when the command was chosen: a line for each dependent.
+		var message: String
+		var title: String
+
+		init(command: TaskCommand, ids: [Models.Task.ID], message: String, title: String) {
+			self.command = command
+			self.ids = ids
+			self.message = message
+			self.title = title
+		}
+
+		/// Asks about `chains`, naming each task by its description in `tasks`.
+		init(
+			chains: [WritePlan.RepairedChain],
+			command: TaskCommand,
+			ids: [Models.Task.ID],
+			tasks: [Models.Task.ID: [String: String]],
+		) {
+			let quoted = { (id: Models.Task.ID) in "“\(tasks[id]?["description"] ?? "")”" }
+			let lines = chains.flatMap { chain in
+				let blocking = ListFormatter.localizedString(byJoining: chain.blocking.map(quoted))
+				return chain.blocked.map { blocked in
+					String(
+						localized: "\(quoted(blocked)) would depend on \(blocking) instead of \(quoted(chain.task)).",
+					)
+				}
+			}
+			self.init(
+				command: command,
+				ids: ids,
+				message: lines.joined(separator: "\n"),
+				title: chains.count == 1
+					? String(localized: "Repair the Dependency Chain?")
+					: String(localized: "Repair \(chains.count) Dependency Chains?"),
+			)
+		}
 	}
 
 	struct TaskrcSaveFailure: Equatable {
@@ -278,12 +329,15 @@ struct ReplicaFeature {
 		/// Return in the inspector's new-annotation field, or clicking away from it.
 		case annotationSubmitted(Models.Task.ID, String)
 		case binding(BindingAction<State>)
+		/// Cancel in the sheet asking whether to repair dependency chains.
+		case chainRepairDismissed
 		case chooseTaskrcButtonTapped
 		case deleteButtonTapped
 		case dependencyChosen(Models.Task.ID, dependency: Models.Task.ID)
 		case dependencyRemoveButtonTapped(Models.Task.ID, dependency: Models.Task.ID)
 		case directoryResolved(URL)
 		case doneButtonTapped
+		case dontRepairChainButtonTapped
 		case fetchRequested
 		case fileChosen(URL, for: FileImporter)
 		case grantAccessButtonTapped
@@ -303,6 +357,7 @@ struct ReplicaFeature {
 		case readFailureDelayElapsed
 		case readSucceeded(TaskSnapshot)
 		case redoButtonTapped
+		case repairChainButtonTapped
 		case savingDelayElapsed
 		/// A column header was clicked, or the table restored the Replica's sort.
 		case sortOrderChanged([TaskSort])
@@ -367,6 +422,11 @@ struct ReplicaFeature {
 			case .binding:
 				return .none
 
+			case .chainRepairDismissed:
+				state.chainRepairPrompt = nil
+				// Starts any edit that queued behind the question.
+				return finishWrite(&state)
+
 			case .chooseTaskrcButtonTapped:
 				state.fileImporter = .taskrc
 				return .none
@@ -398,6 +458,9 @@ struct ReplicaFeature {
 
 			case .doneButtonTapped:
 				return perform(.done, &state)
+
+			case .dontRepairChainButtonTapped:
+				return closePromptedTasks(chains: .leave, &state)
 
 			case .fetchRequested:
 				return .merge(
@@ -526,6 +589,9 @@ struct ReplicaFeature {
 				}
 				return undoOrRedo(.redo, failureTitle: String(localized: "Couldn't Redo \(name)"), &state)
 
+			case .repairChainButtonTapped:
+				return closePromptedTasks(chains: .repair, &state)
+
 			case .savingDelayElapsed:
 				// The delay can elapse just as the write ends, or fails.
 				if state.writeProgress == .running {
@@ -608,6 +674,11 @@ struct ReplicaFeature {
 				}
 
 			case .writeCommitted:
+				// A closed task can't stay kept, or the table brings it back. An edit queued behind the
+				// chain repair prompt keeps the task it edits; a close that fails leaves it open, so kept.
+				if let kept = state.keptTask, state.leavingTasks.contains(kept) {
+					state.keptTask = nil
+				}
 				selectCreatedTask(&state)
 				return finishWrite(&state)
 
@@ -663,7 +734,7 @@ struct ReplicaFeature {
 
 	/// The one path every write takes. Every other write queues until it finishes.
 	private func write(_ action: WriteAction, _ state: inout State) -> Effect<Action> {
-		guard state.writeProgress == nil else {
+		guard state.canWrite else {
 			state.queuedWrites.append(action)
 			return .none
 		}
@@ -767,6 +838,40 @@ struct ReplicaFeature {
 		return taken.max().map { $0.addingTimeInterval(annotationSpacing) } ?? now
 	}
 
+	/// Completes or deletes the tasks `ids`, as `command` says, which the table drops while it writes.
+	private func close(
+		_ ids: [Models.Task.ID],
+		_ command: TaskCommand,
+		chains: ChainRepair,
+		_ state: inout State,
+	) -> Effect<Action> {
+		let effect = write(closeAction(ids, command, chains: chains), &state)
+		// Only once the write has started, since only its end brings them back.
+		if state.writeProgress != nil {
+			state.leavingTasks = Set(ids)
+			filterRows(&state)
+		}
+		return effect
+	}
+
+	/// The Done or Delete `command` over `ids`.
+	private func closeAction(
+		_ ids: [Models.Task.ID],
+		_ command: TaskCommand,
+		chains: ChainRepair,
+	) -> WriteAction {
+		command == .delete ? .delete(ids, chains: chains) : .complete(ids, chains: chains)
+	}
+
+	/// Writes the Done or Delete that asked about chains, with the user's answer.
+	private func closePromptedTasks(chains: ChainRepair, _ state: inout State) -> Effect<Action> {
+		guard let prompt = state.chainRepairPrompt else {
+			return .none
+		}
+		state.chainRepairPrompt = nil
+		return close(prompt.ids, prompt.command, chains: chains, &state)
+	}
+
 	/// Writes an inspector edit to the task `id`, keeping it in the table should the edit move it out.
 	private func edit(
 		_ id: Models.Task.ID,
@@ -816,20 +921,39 @@ struct ReplicaFeature {
 			return .none
 		}
 		let ids = state.selectedIDs
-		let action: WriteAction =
-			switch command {
-			case .delete: .delete(ids)
-			case .done: .complete(ids)
-			case .markPending: .markPending(ids)
-			case .startStop: if state.isStopping { .stop(ids) } else { .start(ids) }
+		switch command {
+		case .delete, .done:
+			// In ID order, as `task` closes them, since closing one can rewire the next.
+			let rows = state.rows
+			let ids = ids.sorted { lhs, rhs in
+				let rank = { (id: Models.Task.ID) in rows[id: id]?.task.workingSetID ?? .max }
+				return (rank(lhs), lhs) < (rank(rhs), rhs)
 			}
-		let effect = write(action, &state)
-		// Only once the write has started, since only its end brings them back.
-		if state.writeProgress != nil, command == .delete || command == .done {
-			state.leavingTasks = Set(ids)
-			filterRows(&state)
+			guard state.runningTaskrc.boolean("dependency.confirmation") else {
+				return close(ids, command, chains: .repair, &state)
+			}
+			let tasks = properties(of: state.storedTasks)
+			// A plan that can't be made asks nothing, and the write reports why.
+			let chains = try? WritePlanner(taskrc: state.runningTaskrc, timeZone: timeZone)
+				.plan(closeAction(ids, command, chains: .repair), tasks: tasks, at: now)
+				.repairedChains
+			guard let chains, !chains.isEmpty else {
+				return close(ids, command, chains: .leave, &state)
+			}
+			state.chainRepairPrompt = ChainRepairPrompt(
+				chains: chains,
+				command: command,
+				ids: ids,
+				tasks: tasks,
+			)
+			return .none
+
+		case .markPending:
+			return write(.markPending(ids), &state)
+
+		case .startStop:
+			return write(state.isStopping ? .stop(ids) : .start(ids), &state)
 		}
-		return effect
 	}
 
 	/// Selects the task `offset` rows from the inspected one, as ⌘⌥↑ and ⌘⌥↓ do.
@@ -1048,13 +1172,13 @@ private func properties(of tasks: [StoredTask]) -> [Models.Task.ID: [String: Str
 /// The name the Edit menu gives `action`'s Undo point, as in "Undo Change Due Date".
 private func undoName(for action: WriteAction, udaColumns: [UDAColumn]) -> String {
 	switch action {
-	case let .complete(ids):
+	case let .complete(ids, _):
 		counted(ids, String(localized: "Complete Task"), String(localized: "Complete \(ids.count) Tasks"))
 
 	case .create:
 		newTaskTitle
 
-	case let .delete(ids):
+	case let .delete(ids, _):
 		counted(ids, String(localized: "Delete Task"), String(localized: "Delete \(ids.count) Tasks"))
 
 	case .edit(_, .addAnnotation):

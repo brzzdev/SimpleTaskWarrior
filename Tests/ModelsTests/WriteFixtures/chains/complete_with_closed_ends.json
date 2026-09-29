@@ -1,0 +1,151 @@
+{
+	"after": {
+		"1b08ba17-10a5-4b94-92d3-12b9099c4f6f": {
+			"dep_942564a9-5131-429c-99ff-fafa1a8c8898": "x",
+			"depends": "942564a9-5131-429c-99ff-fafa1a8c8898",
+			"description": "Delta",
+			"entry": "1790616480",
+			"modified": "1790616480",
+			"status": "pending"
+		},
+		"942564a9-5131-429c-99ff-fafa1a8c8898": {
+			"description": "Epsilon",
+			"entry": "1790616480",
+			"modified": "1790616480",
+			"status": "pending"
+		},
+		"b76ce1ad-4fce-44d0-934e-bb75c3d4f708": {
+			"dep_942564a9-5131-429c-99ff-fafa1a8c8898": "x",
+			"dep_f83c9745-2d15-497f-a549-c42bfb901116": "x",
+			"depends": "942564a9-5131-429c-99ff-fafa1a8c8898,f83c9745-2d15-497f-a549-c42bfb901116",
+			"description": "Beta",
+			"end": "1790616480",
+			"entry": "1790616480",
+			"modified": "1790616480",
+			"status": "completed"
+		},
+		"d8b03ebe-757c-4ea9-bef0-cf13289eb864": {
+			"dep_b76ce1ad-4fce-44d0-934e-bb75c3d4f708": "x",
+			"depends": "b76ce1ad-4fce-44d0-934e-bb75c3d4f708",
+			"description": "Alpha",
+			"end": "1790616480",
+			"entry": "1790616480",
+			"modified": "1790616480",
+			"status": "completed"
+		},
+		"f83c9745-2d15-497f-a549-c42bfb901116": {
+			"description": "Gamma",
+			"end": "1790616480",
+			"entry": "1790616480",
+			"modified": "1790616480",
+			"status": "completed"
+		}
+	},
+	"before": {
+		"1b08ba17-10a5-4b94-92d3-12b9099c4f6f": {
+			"dep_b76ce1ad-4fce-44d0-934e-bb75c3d4f708": "x",
+			"depends": "b76ce1ad-4fce-44d0-934e-bb75c3d4f708",
+			"description": "Delta",
+			"entry": "1790616480",
+			"modified": "1790616480",
+			"status": "pending"
+		},
+		"942564a9-5131-429c-99ff-fafa1a8c8898": {
+			"description": "Epsilon",
+			"entry": "1790616480",
+			"modified": "1790616480",
+			"status": "pending"
+		},
+		"b76ce1ad-4fce-44d0-934e-bb75c3d4f708": {
+			"dep_942564a9-5131-429c-99ff-fafa1a8c8898": "x",
+			"dep_f83c9745-2d15-497f-a549-c42bfb901116": "x",
+			"depends": "942564a9-5131-429c-99ff-fafa1a8c8898,f83c9745-2d15-497f-a549-c42bfb901116",
+			"description": "Beta",
+			"entry": "1790616480",
+			"modified": "1790616480",
+			"status": "pending"
+		},
+		"d8b03ebe-757c-4ea9-bef0-cf13289eb864": {
+			"dep_b76ce1ad-4fce-44d0-934e-bb75c3d4f708": "x",
+			"depends": "b76ce1ad-4fce-44d0-934e-bb75c3d4f708",
+			"description": "Alpha",
+			"end": "1790616480",
+			"entry": "1790616480",
+			"modified": "1790616480",
+			"status": "completed"
+		},
+		"f83c9745-2d15-497f-a549-c42bfb901116": {
+			"description": "Gamma",
+			"end": "1790616480",
+			"entry": "1790616480",
+			"modified": "1790616480",
+			"status": "completed"
+		}
+	},
+	"now": 1790616480,
+	"operations": [
+		{
+			"Update": {
+				"old_value": "1790616480",
+				"property": "modified",
+				"timestamp": "2026-09-28T17:28:00.844944Z",
+				"uuid": "b76ce1ad-4fce-44d0-934e-bb75c3d4f708",
+				"value": "1790616480"
+			}
+		},
+		{
+			"Update": {
+				"old_value": null,
+				"property": "end",
+				"timestamp": "2026-09-28T17:28:00.844944Z",
+				"uuid": "b76ce1ad-4fce-44d0-934e-bb75c3d4f708",
+				"value": "1790616480"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "pending",
+				"property": "status",
+				"timestamp": "2026-09-28T17:28:00.844948Z",
+				"uuid": "b76ce1ad-4fce-44d0-934e-bb75c3d4f708",
+				"value": "completed"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "1790616480",
+				"property": "modified",
+				"timestamp": "2026-09-28T17:28:00.845651Z",
+				"uuid": "1b08ba17-10a5-4b94-92d3-12b9099c4f6f",
+				"value": "1790616480"
+			}
+		},
+		{
+			"Update": {
+				"old_value": null,
+				"property": "dep_942564a9-5131-429c-99ff-fafa1a8c8898",
+				"timestamp": "2026-09-28T17:28:00.845651Z",
+				"uuid": "1b08ba17-10a5-4b94-92d3-12b9099c4f6f",
+				"value": "x"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "b76ce1ad-4fce-44d0-934e-bb75c3d4f708",
+				"property": "depends",
+				"timestamp": "2026-09-28T17:28:00.845652Z",
+				"uuid": "1b08ba17-10a5-4b94-92d3-12b9099c4f6f",
+				"value": "942564a9-5131-429c-99ff-fafa1a8c8898"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "x",
+				"property": "dep_b76ce1ad-4fce-44d0-934e-bb75c3d4f708",
+				"timestamp": "2026-09-28T17:28:00.845653Z",
+				"uuid": "1b08ba17-10a5-4b94-92d3-12b9099c4f6f",
+				"value": null
+			}
+		}
+	]
+}

@@ -11,7 +11,8 @@ import UniformTypeIdentifiers
 public final class ReplicaWindowController: NSWindowController, NSMenuItemValidation,
 	NSToolbarDelegate, NSWindowDelegate
 {
-	/// The failed write's alert on screen, so a store change while it's up doesn't show a second.
+	/// The alert on screen, for a failed write or a broken chain, so a store change while it's up
+	/// doesn't show a second.
 	private var alert: NSAlert?
 	private let commandItems = Dictionary(
 		uniqueKeysWithValues: ReplicaFeature.TaskCommand.all.map { command in
@@ -117,6 +118,12 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 				return
 			}
 			beginAlert(for: failure)
+		}
+		observe { [weak self] in
+			guard let self, let prompt = store.chainRepairPrompt else {
+				return
+			}
+			beginAlert(for: prompt)
 		}
 		// The store clears a search that would hide the task New Task created.
 		observe { [weak self] in
@@ -365,6 +372,37 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 				return
 			}
 			store.send(.writeFailureTryAgainButtonTapped)
+		}
+	}
+
+	/// Asks as a sheet on the window whether to repair the chains `prompt` breaks, and reports the
+	/// answer.
+	private func beginAlert(for prompt: ReplicaFeature.ChainRepairPrompt) {
+		guard alert == nil, let window else {
+			return
+		}
+		let alert = NSAlert()
+		alert.messageText = prompt.title
+		alert.informativeText = prompt.message
+		alert.addButton(withTitle: String(localized: "Repair"))
+		alert.addButton(withTitle: String(localized: "Don't Repair"))
+		alert.addButton(withTitle: String(localized: "Cancel"))
+		self.alert = alert
+		alert.beginSheetModal(for: window) { [weak self] response in
+			guard let self else {
+				return
+			}
+			self.alert = nil
+			switch response {
+			case .alertFirstButtonReturn:
+				store.send(.repairChainButtonTapped)
+
+			case .alertSecondButtonReturn:
+				store.send(.dontRepairChainButtonTapped)
+
+			default:
+				store.send(.chainRepairDismissed)
+			}
 		}
 	}
 
