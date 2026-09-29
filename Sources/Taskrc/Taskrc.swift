@@ -325,9 +325,10 @@ extension Taskrc.Environment {
 		variables: ProcessInfo.processInfo.environment,
 	)
 
-	/// The Taskrc the CLI reads when nothing names another: `$TASKRC`, else `~/.taskrc`, or nil
-	/// with neither variable set.
+	/// The Taskrc the CLI reads when nothing names another: `$TASKRC`, expanded as TW expands it,
+	/// else `~/.taskrc`, or nil with neither variable set.
 	public var taskrcPath: String? {
-		variables["TASKRC"] ?? variables["HOME"].map { "\($0)/.taskrc" }
+		variables["TASKRC"].map { expand($0.unicodeScalars[...]).value }
+			?? variables["HOME"].map { "\($0)/.taskrc" }
 	}
 }

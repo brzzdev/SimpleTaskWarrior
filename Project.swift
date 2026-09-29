@@ -6,8 +6,8 @@ import ProjectDescription
 // Forks/CI just supply their own; nothing personal is committed.
 let developmentTeam = Environment.developmentTeam.getString(default: "")
 
-// Shown when macOS asks whether the app may read a protected folder or volume, where a Replica or
-// Taskrc can live now that the app reads them by path outside the App Sandbox.
+// Shown when macOS asks whether the app may read a protected folder or volume: the app reads a
+// Replica or Taskrc there by path, outside the App Sandbox, as the CLI does.
 let fileAccessReason =
 	"SimpleTaskWarrior reads and writes your Replica and Taskrc here, as the task command does."
 

@@ -155,12 +155,15 @@ struct TaskrcTests {
 	}
 
 	@Test
-	func taskrcPathIsTASKRCElseTheHomeTaskrc() {
+	func taskrcPathIsTASKRCExpandedElseTheHomeTaskrc() {
 		var environment = Taskrc.Environment.fixture
 		#expect(environment.taskrcPath == "/home/fixture/.taskrc")
 
 		environment.variables["TASKRC"] = "/dotfiles/taskrc"
 		#expect(environment.taskrcPath == "/dotfiles/taskrc")
+
+		environment.variables["TASKRC"] = "~/dotfiles/taskrc"
+		#expect(environment.taskrcPath == "/home/fixture/dotfiles/taskrc")
 	}
 
 	@Test

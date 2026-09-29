@@ -36,8 +36,8 @@ struct ReplicaFeature {
 		var isReadFailureBannerPresented = false
 		/// Set once the Replica's tasks first arrive, by which point `apply` can reach it.
 		var isReplicaOpen = false
-		var isTaskrcPanelPresented = false
 		var isTaskrcHintPresented = false
+		var isTaskrcPanelPresented = false
 		/// The tasks an inspector edit, of one task or several, may move out of the table, which the
 		/// table keeps
 		/// until the selection changes.
@@ -139,12 +139,6 @@ struct ReplicaFeature {
 			taskrc?.url != nil
 		}
 
-		/// Whether the window's Taskrc is paired with its Replica, which Use Taskwarrior Defaults
-		/// detaches.
-		var isTaskrcPaired: Bool {
-			taskrc?.isPaired ?? false
-		}
-
 		/// The row the inspector shows, whether or not the table does.
 		var inspectedRow: TaskRow? {
 			inspectedTask.flatMap { id in allRows.first { $0.id == id } }
@@ -153,6 +147,18 @@ struct ReplicaFeature {
 		/// Whether Start/Stop stops, which it does when every selected task is active.
 		var isStopping: Bool {
 			isStopping(selectedTasks())
+		}
+
+		/// Whether the window's Taskrc is paired with its Replica, which Use Taskwarrior Defaults
+		/// detaches.
+		var isTaskrcPaired: Bool {
+			taskrc?.isPaired ?? false
+		}
+
+		/// Whether the Taskrc itself can't be read, which choosing another fixes. An include the app
+		/// can't read has no remedy in the app.
+		var isTaskrcUnreadable: Bool {
+			taskrc?.problem.map { $0.location == nil } ?? false
 		}
 
 		/// The Taskrc's `data.location`, where it names a folder other than the window's Replica.
@@ -187,12 +193,6 @@ struct ReplicaFeature {
 
 		var sidebar: Sidebar {
 			Sidebar(rows: allRows, selection: sidebarSelection)
-		}
-
-		/// Whether the Taskrc itself can't be read, which choosing another fixes. An include the app
-		/// can't read has no remedy in the app.
-		var isTaskrcUnreadable: Bool {
-			taskrc?.problem.map { $0.location == nil } ?? false
 		}
 
 		/// Whether a write can start now, rather than queue: not while one is in progress, nor while a

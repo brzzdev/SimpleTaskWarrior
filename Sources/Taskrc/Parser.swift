@@ -151,7 +151,7 @@ struct Parser {
 
 			if let equals = line.firstIndex(of: "=") {
 				let key = String(line[..<equals].trimmed)
-				let expansion = expand(line[line.index(after: equals)...].trimmed)
+				let expansion = environment.expand(line[line.index(after: equals)...].trimmed)
 				if !expansion.unsetVariables.isEmpty {
 					problems.append(
 						Taskrc.Problem(.unsetVariables(expansion.unsetVariables, key: key), at: location),
@@ -166,7 +166,7 @@ struct Parser {
 				problems.append(Taskrc.Problem(.malformedLine(String(line)), at: location))
 				continue
 			}
-			let expansion = expand(line[include.upperBound...].trimmed)
+			let expansion = environment.expand(line[include.upperBound...].trimmed)
 			let path = expansion.value
 			let isRelative = !path.hasPrefix("/")
 			// TW tries a relative path against the CWD first, which means nothing to a GUI app. The
@@ -237,9 +237,11 @@ struct Parser {
 		}
 		return String(output)
 	}
+}
 
+extension Taskrc.Environment {
 	/// `Path::expand`: a leading `~` or `~user`, then every `$NAME`, an unset one becoming empty.
-	private func expand(
+	func expand(
 		_ input: Substring.UnicodeScalarView,
 	) -> (value: String, unsetVariables: [String]) {
 		var output = String.UnicodeScalarView()
@@ -251,9 +253,9 @@ struct Parser {
 			let user = String(input[input.index(after: index) ..< slash])
 			let home =
 				if user.isEmpty {
-					environment.variables["HOME"] ?? ""
+					variables["HOME"] ?? ""
 				} else {
-					environment.homeDirectory(user) ?? "/home/\(user)"
+					homeDirectory(user) ?? "/home/\(user)"
 				}
 			output.append(contentsOf: home.unicodeScalars)
 			index = slash
@@ -273,7 +275,7 @@ struct Parser {
 				continue
 			}
 			let name = String(input[nameStart ..< nameEnd])
-			guard let value = environment.variables[name] else {
+			guard let value = variables[name] else {
 				unsetVariables.append(name)
 				continue
 			}
