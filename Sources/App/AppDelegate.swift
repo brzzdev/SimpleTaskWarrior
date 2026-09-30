@@ -4,6 +4,7 @@ import BookmarkClient
 import ComposableArchitecture
 import ReplicaClient
 import ReplicaFeature
+import Sparkle
 
 /// Opens each Replica in one window, and restores the windows after a relaunch.
 @MainActor
@@ -14,6 +15,18 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
 	private var cascadePoint = NSPoint.zero
 	/// Each window's controller, by its Replica's resolved folder, kept until the window closes.
 	private var controllers: [URL: ReplicaWindowController] = [:]
+	#if DEBUG
+	/// None, so a Debug build never checks the production feed or installs the Release product over
+	/// itself.
+	private let updater: SPUStandardUpdaterController? = nil
+	#else
+	/// Checks the feed on Sparkle's schedule, for as long as the app runs.
+	private let updater: SPUStandardUpdaterController? = SPUStandardUpdaterController(
+		startingUpdater: true,
+		updaterDelegate: nil,
+		userDriverDelegate: nil,
+	)
+	#endif
 
 	public static func restoreWindow(
 		withIdentifier _: NSUserInterfaceItemIdentifier,
@@ -53,7 +66,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
 	}
 
 	public func applicationWillFinishLaunching(_: Notification) {
-		NSApp.mainMenu = mainMenu(openRecent: self)
+		NSApp.mainMenu = mainMenu(openRecent: self, updater: updater)
 	}
 
 	/// None, so a key equivalent search doesn't fill Open Recent: its entries have no shortcuts.

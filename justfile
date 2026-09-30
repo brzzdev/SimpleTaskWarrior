@@ -20,8 +20,13 @@ destination := "platform=macOS"
 # Xcode.app keeps its own DerivedData under ~/Library, so a CLI build and an
 # Xcode build do not share one; the first after switching cold-compiles.
 # `archive` deliberately does not pin it — a notarised build has no business
-# reusing an incremental dev cache.
+# reusing an incremental dev cache. It shares only the package checkouts.
 derived_data := ".build/xcode"
+# Where every build checks out the packages, `archive` included, so `publish` runs the
+# `generate_appcast` of the Sparkle version `.package.resolved` pins.
+source_packages := derived_data / "SourcePackages"
+sparkle_bin := source_packages / "artifacts/sparkle/Sparkle/bin"
+releases_url := "https://github.com/brzzdev/SimpleTaskWarrior/releases"
 # Repo-scoped because a path shared across repos lets two checkouts on different
 # config revisions fight over one file, each overwriting the other's mid-commit.
 swiftformat_base := "/tmp/swiftformat-base-SimpleTaskWarrior"
@@ -417,6 +422,7 @@ archive version="": ensure-generated
 		-workspace {{ workspace }} -scheme {{ scheme }} \
 		-destination 'generic/platform=macOS' \
 		-archivePath "$archive" \
+		-clonedSourcePackagesDirPath {{ source_packages }} \
 		-allowProvisioningUpdates "${versioning[@]}" | xcbeautify
 
 	echo "==> Exporting (Developer ID)"
@@ -552,14 +558,15 @@ check-tag version:
 
 # Run `just notary-setup` once first, then tag HEAD `v<version>` and push the
 # tag. Never installs, quits or launches the app. The zip is what Sparkle
-# updates from; the DMG is for downloading by hand.
-# Archive, notarize, and publish a zip and DMG as release `v<version>`
+# updates from, through the appcast; the DMG is for downloading by hand.
+# Archive, notarize, and publish a zip, DMG and appcast as release `v<version>`
 publish version: (check-tag version) (archive version)
 	#!/usr/bin/env bash
 	set -euo pipefail
 
 	tag="v{{ version }}"
 	app="{{ release_app }}"
+	appcast="{{ release_dir }}/appcast"
 	dmg="{{ release_dir }}/{{ scheme }}.dmg"
 	staging="{{ release_dir }}/dmg"
 	unzipped="{{ release_dir }}/unzipped"
@@ -598,8 +605,20 @@ publish version: (check-tag version) (archive version)
 	xcrun stapler validate "$unzipped/{{ scheme }}.app"
 	spctl -a -vv -t exec "$unzipped/{{ scheme }}.app"
 
+	# From the final zip, so its item's length and EdDSA signature match the upload. Alone in its
+	# folder, since `generate_appcast` takes in every archive there, so the appcast holds only this
+	# release. No deltas: no older release sits beside it to diff against.
+	echo "==> Generating the appcast"
+	mkdir "$appcast"
+	cp "$zip" "$appcast/"
+	"{{ sparkle_bin }}/generate_appcast" --maximum-deltas 0 \
+		--download-url-prefix "{{ releases_url }}/download/$tag/" "$appcast"
+
+	# The feed follows the release marked latest, so it's marked only once all three are attached.
 	echo "==> Publishing $tag"
-	gh release create "$tag" --verify-tag --generate-notes "$zip" "$dmg"
+	gh release create "$tag" --verify-tag --generate-notes --draft \
+		"$zip" "$dmg" "$appcast/appcast.xml"
+	gh release edit "$tag" --draft=false --latest
 
 	echo "✅ Published {{ scheme }} $tag"
 
