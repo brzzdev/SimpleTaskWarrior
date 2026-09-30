@@ -506,6 +506,12 @@ check-tag version:
 		echo "$tag isn't on origin as it is here: push it first" >&2
 		exit 1
 	fi
+	# A shallow clone counts only the commits it holds, so neither the build
+	# number nor the comparisons below would be right.
+	if [ "$(git rev-parse --is-shallow-repository)" = true ]; then
+		echo "the clone is shallow: run \`git fetch --unshallow\` first" >&2
+		exit 1
+	fi
 	# Off `main`, the commit count stops ordering releases.
 	git fetch --quiet origin main
 	if ! git merge-base --is-ancestor HEAD origin/main; then
@@ -525,8 +531,14 @@ check-tag version:
 	while read -r other commit; do
 		[ -z "$other" ] && continue
 		[ "$other" = "$tag" ] && continue
-		# Only a tag on `main` can have been published.
-		git merge-base --is-ancestor "$commit" origin/main || continue
+		# Only a tag on `main` can have been published. The clone holds all of
+		# `main`, so a commit it lacks is off it too; any other git failure stops
+		# the check rather than skipping a release.
+		git cat-file -e "$commit^{commit}" 2>/dev/null || continue
+		ancestor=0
+		git merge-base --is-ancestor "$commit" origin/main || ancestor=$?
+		[ "$ancestor" = 1 ] && continue
+		[ "$ancestor" = 0 ] || exit "$ancestor"
 		count="$(git rev-list --count "$commit")"
 		if [ "$count" -ge "$build" ]; then
 			echo "$other is built at $count, not below HEAD's $build" >&2
