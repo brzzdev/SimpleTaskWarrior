@@ -325,6 +325,9 @@ struct Checks {
 	/// Tasks the batch creates, which must not exist yet.
 	creates: Vec<Uuid>,
 	expectations: Vec<ExpectedValue>,
+	/// Tasks the batch updates without creating, which must still exist. TaskChampion skips an
+	/// update to a missing task but still logs it, so a purge would otherwise commit.
+	updates: Vec<Uuid>,
 }
 
 impl Checks {
@@ -335,7 +338,8 @@ impl Checks {
 		txn: &mut (dyn StorageTxn + Send),
 	) -> Result<Vec<Uuid>, taskchampion::Error> {
 		let mut tasks: HashMap<Uuid, Option<TaskMap>> = HashMap::new();
-		for &uuid in self.expectations.iter().map(|expected| &expected.uuid).chain(&self.creates) {
+		let expected = self.expectations.iter().map(|expected| &expected.uuid);
+		for &uuid in expected.chain(&self.creates).chain(&self.updates) {
 			if let Entry::Vacant(entry) = tasks.entry(uuid) {
 				entry.insert(txn.get_task(uuid).await?);
 			}
@@ -345,8 +349,9 @@ impl Checks {
 			task.and_then(|task| task.get(&expected.property)) != expected.value.as_ref()
 		});
 		let existing = self.creates.iter().filter(|uuid| tasks[*uuid].is_some());
+		let missing = self.updates.iter().filter(|uuid| tasks[*uuid].is_none());
 		let mut conflicts = Vec::new();
-		for &uuid in changed.map(|expected| &expected.uuid).chain(existing) {
+		for &uuid in changed.map(|expected| &expected.uuid).chain(existing).chain(missing) {
 			if !conflicts.contains(&uuid) {
 				conflicts.push(uuid);
 			}
@@ -516,6 +521,15 @@ impl EngineHandle {
 						update(replica, &mut tasks, &uuid, &property, value, &mut batch).await?;
 					}
 				}
+			}
+			for operation in &batch {
+				let Operation::Update { uuid, .. } = operation else {
+					continue;
+				};
+				if checks.creates.contains(uuid) || checks.updates.contains(uuid) {
+					continue;
+				}
+				checks.updates.push(*uuid);
 			}
 			self.checks.lock().unwrap().pending = Some(checks);
 			let committed = replica.commit_operations(batch.clone()).await;
@@ -711,6 +725,33 @@ mod tests {
 		assert_conflict(outcome, uuid);
 		assert_eq!(description(&handle, uuid).as_deref(), Some("cli"));
 		assert!(handle.get_undo_operations().unwrap().is_empty());
+	}
+
+	#[test]
+	fn refuses_an_update_to_a_task_purged_before_the_commit_transaction() {
+		let (directory, handle) = open_replica();
+		let uuid = Uuid::new_v4();
+		create_task(&handle, uuid);
+		write_before_transaction(&handle, &directory, "DELETE FROM tasks WHERE uuid = ?1", uuid);
+		let set_priority = PlannedOperation::SetValue {
+			uuid: uuid.to_string(),
+			property: "priority".into(),
+			value: Some("H".into()),
+		};
+		// An edit setting an absent property expects only its absence, which a purged task matches.
+		let priority_is_absent = Expectation {
+			uuid: uuid.to_string(),
+			property: "priority".into(),
+			value: None,
+		};
+
+		let outcome = handle.apply(vec![set_priority], vec![priority_is_absent]).unwrap();
+
+		assert_conflict(outcome, uuid);
+		let logged_priority = handle.get_undo_operations().unwrap().into_iter().any(|operation| {
+			matches!(operation, UndoOperation::Update { property, .. } if property == "priority")
+		});
+		assert!(!logged_priority);
 	}
 
 	#[test]
