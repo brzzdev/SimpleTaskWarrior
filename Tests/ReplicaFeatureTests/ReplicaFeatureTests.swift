@@ -89,11 +89,12 @@ struct ReplicaFeatureTests {
 		}
 
 		await store.send(.deleteButtonTapped) {
-			$0.seriesDeletePrompt = ReplicaFeature.SeriesDeletePrompt(
+			$0.seriesPrompt = ReplicaFeature.SeriesPrompt(
 				choices: [
-					ReplicaFeature.SeriesDeletePrompt.Choice(description: "Water plants", id: UUID(0)),
-					ReplicaFeature.SeriesDeletePrompt.Choice(description: "Take out bins", id: UUID(3)),
+					ReplicaFeature.SeriesPrompt.Choice(description: "Water plants", id: UUID(0)),
+					ReplicaFeature.SeriesPrompt.Choice(description: "Take out bins", id: UUID(3)),
 				],
+				command: .delete,
 				ids: [UUID(1), UUID(2), UUID(4)],
 			)
 		}
@@ -385,20 +386,21 @@ struct ReplicaFeatureTests {
 		}
 
 		await store.send(.deleteButtonTapped) {
-			$0.seriesDeletePrompt = ReplicaFeature.SeriesDeletePrompt(
-				choices: [ReplicaFeature.SeriesDeletePrompt.Choice(description: "Water plants", id: UUID(0))],
+			$0.seriesPrompt = ReplicaFeature.SeriesPrompt(
+				choices: [ReplicaFeature.SeriesPrompt.Choice(description: "Water plants", id: UUID(0))],
+				command: .delete,
 				ids: [UUID(1)],
 			)
 		}
-		await store.send(.seriesChoiceChanged(UUID(0), deletesSeries: true)) {
-			$0.seriesDeletePrompt?.choices[id: UUID(0)]?.deletesSeries = true
+		await store.send(.seriesChoiceChanged(UUID(0), includesSeries: true)) {
+			$0.seriesPrompt?.choices[id: UUID(0)]?.includesSeries = true
 		}
 		await store.send(.seriesDeleteButtonTapped) {
 			// Everything the Delete takes, the hidden template included.
 			$0.leavingTasks = [UUID(0), UUID(1), UUID(2)]
 			$0.rows = []
 			$0.selection = []
-			$0.seriesDeletePrompt = nil
+			$0.seriesPrompt = nil
 			$0.writeProgress = .running
 		}
 		// The table's reads are other tests' business: this one is about the plan.
@@ -488,18 +490,19 @@ struct ReplicaFeatureTests {
 
 		// Deleting only the instance breaks no chain.
 		await store.send(.deleteButtonTapped) {
-			$0.seriesDeletePrompt = ReplicaFeature.SeriesDeletePrompt(
-				choices: [ReplicaFeature.SeriesDeletePrompt.Choice(description: "Water plants", id: UUID(0))],
+			$0.seriesPrompt = ReplicaFeature.SeriesPrompt(
+				choices: [ReplicaFeature.SeriesPrompt.Choice(description: "Water plants", id: UUID(0))],
+				command: .delete,
 				ids: [UUID(1)],
 			)
 		}
-		await store.send(.seriesChoiceChanged(UUID(0), deletesSeries: true)) {
-			$0.seriesDeletePrompt?.chainRepairMessage =
+		await store.send(.seriesChoiceChanged(UUID(0), includesSeries: true)) {
+			$0.seriesPrompt?.chainRepairMessage =
 				"“Alpha” would depend on “Gamma” instead of “Water plants”."
-			$0.seriesDeletePrompt?.choices[id: UUID(0)]?.deletesSeries = true
+			$0.seriesPrompt?.choices[id: UUID(0)]?.includesSeries = true
 		}
 		await store.send(.repairChainsCheckboxChanged(repairsChains: false)) {
-			$0.seriesDeletePrompt?.repairsChains = false
+			$0.seriesPrompt?.repairsChains = false
 		}
 		// The table's reads are other tests' business: this one is about the plan.
 		store.exhaustivity = .off(showSkippedAssertions: false)
@@ -513,6 +516,296 @@ struct ReplicaFeatureTests {
 					tasks: properties(of: stored),
 					at: now,
 				),
+			],
+		)
+		await store.finish()
+	}
+
+	@Test
+	func bulkEditOfInstancesAsksOnceForEachSeriesAndWritesTheChoices() async throws {
+		let plants = series(0, "Water plants", instances: [1, 2])
+		let bins = series(3, "Take out bins", instances: [4])
+		let plans = LockIsolated<[WritePlan]>([])
+		var initialState = try loadedState(
+			plants.instances + bins.instances,
+			selection: [UUID(1), UUID(2), UUID(4)],
+		)
+		initialState.storedTasks += [plants.template, bins.template]
+		let stored = initialState.storedTasks
+		let store = TestStore(initialState: initialState) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.continuousClock = TestClock()
+			$0.date.now = now
+			$0.replicaClient.apply = { plan, _, _ in
+				plans.withValue { $0.append(plan) }
+				return ApplyOutcome(isCommitted: true, snapshot: snapshot(stored))
+			}
+			$0.timeZone = .gmt
+		}
+		let edit = TaskEdit.set("project", .string("Home"))
+		let ids = [UUID(1), UUID(2), UUID(4)]
+
+		await store.send(.inspectorFieldSubmitted(ids, edit)) {
+			$0.keptTasks = Set(ids)
+			$0.seriesPrompt = ReplicaFeature.SeriesPrompt(
+				choices: [
+					ReplicaFeature.SeriesPrompt.Choice(description: "Water plants", id: UUID(0)),
+					ReplicaFeature.SeriesPrompt.Choice(description: "Take out bins", id: UUID(3)),
+				],
+				command: .edit(edit),
+				ids: ids,
+			)
+		}
+		await store.send(.seriesChoiceChanged(UUID(3), includesSeries: true)) {
+			$0.seriesPrompt?.choices[id: UUID(3)]?.includesSeries = true
+		}
+		// The table's reads are other tests' business: this one is about the plan.
+		store.exhaustivity = .off(showSkippedAssertions: false)
+		await store.send(.seriesChangeButtonTapped)
+		await store.receive(\.writeCommitted)
+
+		#expect(
+			try plans.value == [
+				planner.plan(.edit(ids, edit, series: [UUID(3)]), tasks: properties(of: stored), at: now),
+			],
+		)
+		await store.finish()
+	}
+
+	/// The inspector sends a value a task already shows, and a date never takes the Series.
+	@Test(arguments: [
+		TaskEdit.set("description", .string("Water plants")),
+		.setInput("due", text: "2030-01-01"),
+	])
+	func editThatLeavesTheSeriesAloneAsksNothing(edit: TaskEdit) async throws {
+		let plants = series(0, "Water plants", instances: [1, 2])
+		let plans = LockIsolated<[WritePlan]>([])
+		var initialState = try loadedState(plants.instances, selection: [UUID(1)])
+		initialState.storedTasks.append(plants.template)
+		let stored = initialState.storedTasks
+		let store = TestStore(initialState: initialState) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.continuousClock = TestClock()
+			$0.date.now = now
+			$0.replicaClient.apply = { plan, _, _ in
+				plans.withValue { $0.append(plan) }
+				return ApplyOutcome(isCommitted: true, snapshot: snapshot(stored))
+			}
+			$0.timeZone = .gmt
+		}
+		// The table's reads are other tests' business: this one is about the plan.
+		store.exhaustivity = .off(showSkippedAssertions: false)
+
+		await store.send(.inspectorFieldSubmitted([UUID(1)], edit))
+		await store.receive(\.writeCommitted)
+
+		#expect(
+			try plans.value == [
+				planner.plan(.edit([UUID(1)], edit), tasks: properties(of: stored), at: now),
+			],
+		)
+		await store.finish()
+	}
+
+	/// As `task modify` reads it: only `prompt` asks.
+	@Test(arguments: [("no", false), ("yes", true)])
+	func editOfAnInstanceFollowsTheTaskrcWithoutAsking(
+		confirmation: String,
+		includesSeries: Bool,
+	) async throws {
+		let plants = series(0, "Water plants", instances: [1, 2])
+		let taskrc = Taskrc(path: taskrcFile.path(), environment: .fixture) { path in
+			Taskrc.File(contents: "recurrence.confirmation=\(confirmation)", realPath: path)
+		}
+		let plans = LockIsolated<[WritePlan]>([])
+		var initialState = try loadedState(plants.instances, selection: [UUID(1)])
+		initialState.storedTasks.append(plants.template)
+		let stored = initialState.storedTasks
+		initialState.taskrc = TaskrcClient.Loaded(taskrc: taskrc, url: taskrcFile)
+		let store = TestStore(initialState: initialState) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.continuousClock = TestClock()
+			$0.date.now = now
+			$0.replicaClient.apply = { plan, _, _ in
+				plans.withValue { $0.append(plan) }
+				return ApplyOutcome(isCommitted: true, snapshot: snapshot(stored))
+			}
+			$0.timeZone = .gmt
+		}
+		// The table's reads are other tests' business: this one is about the plan.
+		store.exhaustivity = .off(showSkippedAssertions: false)
+		let edit = TaskEdit.addTags(["garden"])
+
+		await store.send(.inspectorFieldSubmitted([UUID(1)], edit))
+		await store.receive(\.writeCommitted)
+
+		#expect(
+			try plans.value == [
+				WritePlanner(taskrc: taskrc, timeZone: .gmt).plan(
+					.edit([UUID(1)], edit, series: includesSeries ? [UUID(0)] : []),
+					tasks: properties(of: stored),
+					at: now,
+				),
+			],
+		)
+		await store.finish()
+	}
+
+	/// As `task modify` offers it: the selected instance may already have the value its Series lacks,
+	/// and a sibling the view hides is still in the Series.
+	@Test
+	func editOfAnInstanceAsksWhereOnlyItsHiddenSiblingWouldChange() async throws {
+		var plants = series(0, "Water plants", instances: [1, 2])
+		plants.instances[0].properties.merge(["tag_garden": "x", "tags": "garden"]) { $1 }
+		plants.template.properties.merge(["tag_garden": "x", "tags": "garden"]) { $1 }
+		let plans = LockIsolated<[WritePlan]>([])
+		var initialState = try loadedState([plants.instances[0]], selection: [UUID(1)])
+		initialState.storedTasks += [plants.instances[1], plants.template]
+		let stored = initialState.storedTasks
+		let store = TestStore(initialState: initialState) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.continuousClock = TestClock()
+			$0.date.now = now
+			$0.replicaClient.apply = { plan, _, _ in
+				plans.withValue { $0.append(plan) }
+				return ApplyOutcome(isCommitted: true, snapshot: snapshot(stored))
+			}
+			$0.timeZone = .gmt
+		}
+		let edit = TaskEdit.addTags(["garden"])
+
+		await store.send(.inspectorFieldSubmitted([UUID(1)], edit)) {
+			$0.keptTasks = [UUID(1)]
+			$0.seriesPrompt = ReplicaFeature.SeriesPrompt(
+				choices: [ReplicaFeature.SeriesPrompt.Choice(description: "Water plants", id: UUID(0))],
+				command: .edit(edit),
+				ids: [UUID(1)],
+			)
+		}
+		await store.send(.seriesChoiceChanged(UUID(0), includesSeries: true)) {
+			$0.seriesPrompt?.choices[id: UUID(0)]?.includesSeries = true
+		}
+		// The table's reads are other tests' business: this one is about the plan.
+		store.exhaustivity = .off(showSkippedAssertions: false)
+		await store.send(.seriesChangeButtonTapped)
+		await store.receive(\.writeCommitted)
+
+		let applied = try #require(plans.value.first).applied(to: properties(of: stored))
+		#expect(applied[UUID(2)]?["tag_garden"] == "x")
+		await store.finish()
+	}
+
+	/// A sibling can't depend on itself, so the Series can't take the edit, but it's still offered
+	/// rather than quietly dropped.
+	@Test
+	func editOfAnInstanceTheSeriesCantTakeStillAsks() async throws {
+		let plants = series(0, "Water plants", instances: [1, 2])
+		var initialState = try loadedState(plants.instances, selection: [UUID(1)])
+		initialState.storedTasks.append(plants.template)
+		let store = TestStore(initialState: initialState) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.date.now = now
+			$0.timeZone = .gmt
+		}
+		let edit = TaskEdit.addDependency(UUID(2))
+
+		await store.send(.inspectorFieldSubmitted([UUID(1)], edit)) {
+			$0.keptTasks = [UUID(1)]
+			$0.seriesPrompt = ReplicaFeature.SeriesPrompt(
+				choices: [ReplicaFeature.SeriesPrompt.Choice(description: "Water plants", id: UUID(0))],
+				command: .edit(edit),
+				ids: [UUID(1)],
+			)
+		}
+	}
+
+	/// Taking the Series reports why it can't, where `task` would refuse the whole command.
+	@Test
+	func editOfAnInstanceTheSeriesCantTakeFailsWhereTheTaskrcTakesIt() async throws {
+		let plants = series(0, "Water plants", instances: [1, 2])
+		let taskrc = Taskrc(path: taskrcFile.path(), environment: .fixture) { path in
+			Taskrc.File(contents: "recurrence.confirmation=yes", realPath: path)
+		}
+		var initialState = try loadedState(plants.instances, selection: [UUID(1)])
+		initialState.storedTasks.append(plants.template)
+		initialState.taskrc = TaskrcClient.Loaded(taskrc: taskrc, url: taskrcFile)
+		let store = TestStore(initialState: initialState) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.continuousClock = TestClock()
+			$0.date.now = now
+			$0.timeZone = .gmt
+		}
+		store.exhaustivity = .off(showSkippedAssertions: false)
+
+		await store.send(.inspectorFieldSubmitted([UUID(1)], .addDependency(UUID(2))))
+		await store.receive(\.writeFailed) {
+			$0.writeProgress = .failed(ReplicaFeature.WriteFailure(
+				reason: WritePlanError.selfDependency(UUID(2)).localizedDescription,
+				retry: nil,
+				title: "Couldn't Add Dependency",
+			))
+		}
+	}
+
+	/// Asked as it starts, so an edit queued behind a running write asks once that write ends, and
+	/// the edits queued behind the question wait for the answer.
+	@Test
+	func editQueuedBehindAWriteAsksAboutItsSeriesOnceItStarts() async throws {
+		let plants = series(0, "Water plants", instances: [1, 2])
+		let plans = LockIsolated<[WritePlan]>([])
+		var initialState = try loadedState(plants.instances, selection: [UUID(1)])
+		initialState.storedTasks.append(plants.template)
+		initialState.writeProgress = .running
+		let stored = initialState.storedTasks
+		let store = TestStore(initialState: initialState) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.continuousClock = TestClock()
+			$0.date.now = now
+			$0.replicaClient.apply = { plan, _, _ in
+				plans.withValue { $0.append(plan) }
+				return ApplyOutcome(isCommitted: true, snapshot: snapshot(stored))
+			}
+			$0.timeZone = .gmt
+		}
+		let project = TaskEdit.set("project", .string("Home"))
+		let tag = TaskEdit.addTags(["garden"])
+
+		await store.send(.inspectorFieldSubmitted([UUID(1)], project)) {
+			$0.keptTasks = [UUID(1)]
+			$0.queuedWrites = [.edit([UUID(1)], project)]
+		}
+		await store.send(.writeCommitted) {
+			$0.queuedWrites = []
+			$0.seriesPrompt = ReplicaFeature.SeriesPrompt(
+				choices: [ReplicaFeature.SeriesPrompt.Choice(description: "Water plants", id: UUID(0))],
+				command: .edit(project),
+				ids: [UUID(1)],
+			)
+			$0.writeProgress = nil
+		}
+		await store.send(.inspectorFieldSubmitted([UUID(1)], tag)) {
+			$0.queuedWrites = [.edit([UUID(1)], tag)]
+		}
+		// The table's reads are other tests' business: this one is about the plans.
+		store.exhaustivity = .off(showSkippedAssertions: false)
+		await store.send(.seriesChangeButtonTapped)
+		await store.receive(\.writeCommitted)
+		await store.send(.seriesChoiceChanged(UUID(0), includesSeries: true))
+		await store.send(.seriesChangeButtonTapped)
+		await store.receive(\.writeCommitted)
+
+		let tasks = properties(of: stored)
+		#expect(
+			try plans.value == [
+				planner.plan(.edit([UUID(1)], project), tasks: tasks, at: now),
+				planner.plan(.edit([UUID(1)], tag, series: [UUID(0)]), tasks: tasks, at: now),
 			],
 		)
 		await store.finish()

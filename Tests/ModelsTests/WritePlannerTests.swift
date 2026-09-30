@@ -97,9 +97,15 @@ struct WritePlannerTests {
 			try .edit([$0.instance()], .set("wait", .date(december2029)))
 		},
 		"recurrence/start_instance": { try .start([$0.instance()]) },
+		"series/add_tag_to_series": { try .editSeries(.addTags(["work"]), in: $0) },
+		"series/annotate_series": { try .editSeries(.addAnnotation("Note", entry: $0.now), in: $0) },
 		"series/delete_series": { try .deleteSeries(of: $0.deleted(), in: $0) },
 		"series/delete_series_with_completed_and_waiting": { try .deleteSeries(of: $0.deleted(), in: $0)
 		},
+		"series/set_description_of_series_with_completed_and_waiting": {
+			try .editSeries(.set("description", .string("Beta")), in: $0)
+		},
+		"series/set_until_of_series": { try .editSeries(.set("until", .date(newYear2030)), in: $0) },
 	]
 
 	/// Where the app writes something other than `task` on purpose, as the value the app stores, or
@@ -637,7 +643,7 @@ struct WritePlannerTests {
 		let recording = try Recording("series/delete_series")
 		let planner = WritePlanner(taskrc: recording.taskrc, timeZone: .gmt)
 		let deleted = try recording.deleted()
-		let template = try #require(recording.before[deleted]?["parent"].flatMap(UUID.init(uuidString:)))
+		let template = try recording.template(of: deleted)
 		let both = try WriteAction.delete(
 			[deleted, recording.siblings()[0]],
 			chains: .repair,
@@ -655,7 +661,7 @@ struct WritePlannerTests {
 		let recording = try Recording("series/delete_series")
 		let planner = WritePlanner(taskrc: recording.taskrc, timeZone: .gmt)
 		let deleted = try recording.deleted()
-		let template = try #require(recording.before[deleted]?["parent"].flatMap(UUID.init(uuidString:)))
+		let template = try recording.template(of: deleted)
 		var tasks = recording.before
 		tasks[template] = nil
 
@@ -667,6 +673,103 @@ struct WritePlannerTests {
 
 		let applied = plan.applied(to: tasks)
 		#expect(try recording.siblings().allSatisfy { applied[$0]?["status"] == "deleted" })
+	}
+
+	/// As a bulk edit of two instances writes it, once for each.
+	@Test
+	func editingTwoInstancesOfASeriesEditsItOnce() throws {
+		let recording = try Recording("series/set_until_of_series")
+		let planner = WritePlanner(taskrc: recording.taskrc, timeZone: .gmt)
+		let instances = recording.pendingInstances()
+		let template = try recording.template(of: instances[0])
+		let both = WriteAction.edit(
+			Array(instances.prefix(2)),
+			.set("until", .date(newYear2030)),
+			series: [template],
+		)
+
+		let plan = try planner.plan(both, tasks: recording.before, at: recording.now)
+
+		#expect(plan.applied(to: recording.before) == recording.after)
+	}
+
+	/// So an instance the CLI generates from the old template before the plan commits fails it, even
+	/// where the edit changes no instance.
+	@Test
+	func editingOnlyATemplateExpectsItsMask() throws {
+		let planner = WritePlanner(taskrc: .defaults, timeZone: .gmt)
+		let (template, instance) = (UUID(), UUID())
+		let tasks = [
+			instance: [
+				"imask": "0",
+				"parent": template.uuidString.lowercased(),
+				"status": "pending",
+				"tag_garden": "x",
+				"tags": "garden",
+			],
+			template: ["mask": "-", "status": "recurring"],
+		]
+
+		let plan = try planner.plan(
+			.edit([instance], .addTags(["garden"]), series: [template]),
+			tasks: tasks,
+			at: .now,
+		)
+
+		#expect(plan.operations.allSatisfy { $0.id == template })
+		#expect(plan.expectations.contains(WritePlan.Expectation(
+			property: "mask",
+			uuid: template,
+			value: "-",
+		)))
+	}
+
+	/// The CLI sets the date on every task in the Series, collapsing it onto one date.
+	@Test(arguments: ["due", "scheduled", "wait"])
+	func editingADateOfAnInstanceLeavesItsSeries(property: String) throws {
+		let recording = try Recording("series/set_until_of_series")
+		let planner = WritePlanner(taskrc: recording.taskrc, timeZone: .gmt)
+		let instances = recording.pendingInstances()
+		let instance = try #require(instances.first)
+		let template = try recording.template(of: instance)
+
+		let plan = try planner.plan(
+			.edit([instance], .setInput(property, text: "2030-01-01"), series: [template]),
+			tasks: recording.before,
+			at: recording.now,
+		)
+
+		let applied = plan.applied(to: recording.before)
+		#expect(applied[instance]?[property] == "1893456000")
+		#expect(instances.dropFirst().allSatisfy { applied[$0] == recording.before[$0] })
+		#expect(applied[template]?[property] == recording.before[template]?[property])
+	}
+
+	@Test(arguments: [
+		(TaskEdit.addAnnotation("Note", entry: .now), true),
+		(.addDependency(UUID()), true),
+		(.addTags(["work"]), true),
+		(.removeAnnotation(entry: .now), false),
+		(.removeDependency(UUID()), true),
+		(.removeTag("work"), true),
+		(.set("description", .string("Beta")), true),
+		(.set("due", nil), false),
+		(.set("review", .date(newYear2030)), false),
+		(.set("scheduled", nil), false),
+		(.set("until", nil), true),
+		(.setInput("estimate", text: "1h"), true),
+		(.setInput("until", text: "eom"), true),
+		(.setInput("wait", text: "tomorrow"), false),
+	])
+	func cascadesToSeries(edit: TaskEdit, cascades: Bool) {
+		let taskrc = Taskrc(path: "/taskrc", environment: .fixture) { path throws(Taskrc.ReadError) in
+			Taskrc.File(
+				contents: "uda.estimate.type=duration\nuda.review.type=date\n",
+				realPath: path,
+			)
+		}
+
+		#expect(WritePlanner(taskrc: taskrc, timeZone: .gmt).cascadesToSeries(edit) == cascades)
 	}
 
 	@Test
@@ -766,13 +869,20 @@ struct Recording {
 		return try #require(ended.first { before[$0]?["parent"] != nil })
 	}
 
+	/// The pending instances, in `imask` order.
+	func pendingInstances() -> [Task.ID] {
+		instances { $1["status"] == "pending" }
+	}
+
 	/// The instances other than `deleted()`, in `imask` order.
 	func siblings() throws -> [Task.ID] {
 		let deleted = try deleted()
-		return before
-			.filter { $0.key != deleted && $0.value["parent"] != nil }
-			.sorted { Int($0.value["imask"] ?? "") ?? .max < Int($1.value["imask"] ?? "") ?? .max }
-			.map(\.key)
+		return instances { id, _ in id != deleted }
+	}
+
+	/// The template of `instance`, from its `parent`.
+	func template(of instance: Task.ID) throws -> Task.ID {
+		try #require(before[instance]?["parent"].flatMap(UUID.init(uuidString:)))
 	}
 
 	/// What the write left different, by task and property.
@@ -791,6 +901,14 @@ struct Recording {
 			}
 		}
 		return changes.dropping(before)
+	}
+
+	/// The instances `isIncluded` keeps, in `imask` order.
+	private func instances(where isIncluded: (Task.ID, [String: String]) -> Bool) -> [Task.ID] {
+		before
+			.filter { $0.value["parent"] != nil && isIncluded($0.key, $0.value) }
+			.sorted { Int($0.value["imask"] ?? "") ?? .max < Int($1.value["imask"] ?? "") ?? .max }
+			.map(\.key)
 	}
 }
 
@@ -896,7 +1014,16 @@ extension WriteAction {
 		of instance: Task.ID,
 		in recording: Recording,
 	) throws -> Self {
-		let template = try #require(recording.before[instance]?["parent"].flatMap(UUID.init(uuidString:)))
+		let template = try recording.template(of: instance)
 		return .delete([instance], chains: .repair, series: [template])
+	}
+
+	/// `edit` of the first pending instance with the rest of its Series, as
+	/// `recurrence.confirmation=yes` makes it. The patch is the same on every pending instance, so any
+	/// stands for the one `task` was run on.
+	fileprivate static func editSeries(_ edit: TaskEdit, in recording: Recording) throws -> Self {
+		let instance = try #require(recording.pendingInstances().first)
+		let template = try recording.template(of: instance)
+		return .edit([instance], edit, series: [template])
 	}
 }

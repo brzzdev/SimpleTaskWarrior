@@ -1,0 +1,262 @@
+{
+	"after": {
+		"3246b3ef-e401-4de9-8295-87c11c66b134": {
+			"description": "Alpha",
+			"due": "1790553600",
+			"entry": "1790786294",
+			"imask": "0",
+			"modified": "1790786294",
+			"parent": "ad4293f3-514a-467a-8960-a4ae3b0627e3",
+			"recur": "daily",
+			"rtype": "periodic",
+			"status": "pending",
+			"tag_work": "x",
+			"tags": "work"
+		},
+		"64bf7e17-6530-4702-bebb-a375138d9582": {
+			"description": "Alpha",
+			"due": "1790640000",
+			"entry": "1790786294",
+			"imask": "1",
+			"modified": "1790786294",
+			"parent": "ad4293f3-514a-467a-8960-a4ae3b0627e3",
+			"recur": "daily",
+			"rtype": "periodic",
+			"status": "pending",
+			"tag_work": "x",
+			"tags": "work"
+		},
+		"80af4436-57c7-423c-9d50-3f4fd6abfcb6": {
+			"description": "Alpha",
+			"due": "1790812800",
+			"entry": "1790786294",
+			"imask": "3",
+			"modified": "1790786294",
+			"parent": "ad4293f3-514a-467a-8960-a4ae3b0627e3",
+			"recur": "daily",
+			"rtype": "periodic",
+			"status": "pending",
+			"tag_work": "x",
+			"tags": "work"
+		},
+		"91ebd1bc-c48d-4103-bfec-08be11c3e755": {
+			"description": "Alpha",
+			"due": "1790726400",
+			"entry": "1790786294",
+			"imask": "2",
+			"modified": "1790786294",
+			"parent": "ad4293f3-514a-467a-8960-a4ae3b0627e3",
+			"recur": "daily",
+			"rtype": "periodic",
+			"status": "pending",
+			"tag_work": "x",
+			"tags": "work"
+		},
+		"ad4293f3-514a-467a-8960-a4ae3b0627e3": {
+			"description": "Alpha",
+			"due": "1790553600",
+			"entry": "1790786294",
+			"mask": "----",
+			"modified": "1790786294",
+			"recur": "daily",
+			"rtype": "periodic",
+			"status": "recurring",
+			"tag_work": "x",
+			"tags": "work"
+		}
+	},
+	"before": {
+		"3246b3ef-e401-4de9-8295-87c11c66b134": {
+			"description": "Alpha",
+			"due": "1790553600",
+			"entry": "1790786294",
+			"imask": "0",
+			"modified": "1790786294",
+			"parent": "ad4293f3-514a-467a-8960-a4ae3b0627e3",
+			"recur": "daily",
+			"rtype": "periodic",
+			"status": "pending"
+		},
+		"64bf7e17-6530-4702-bebb-a375138d9582": {
+			"description": "Alpha",
+			"due": "1790640000",
+			"entry": "1790786294",
+			"imask": "1",
+			"modified": "1790786294",
+			"parent": "ad4293f3-514a-467a-8960-a4ae3b0627e3",
+			"recur": "daily",
+			"rtype": "periodic",
+			"status": "pending"
+		},
+		"80af4436-57c7-423c-9d50-3f4fd6abfcb6": {
+			"description": "Alpha",
+			"due": "1790812800",
+			"entry": "1790786294",
+			"imask": "3",
+			"modified": "1790786294",
+			"parent": "ad4293f3-514a-467a-8960-a4ae3b0627e3",
+			"recur": "daily",
+			"rtype": "periodic",
+			"status": "pending"
+		},
+		"91ebd1bc-c48d-4103-bfec-08be11c3e755": {
+			"description": "Alpha",
+			"due": "1790726400",
+			"entry": "1790786294",
+			"imask": "2",
+			"modified": "1790786294",
+			"parent": "ad4293f3-514a-467a-8960-a4ae3b0627e3",
+			"recur": "daily",
+			"rtype": "periodic",
+			"status": "pending"
+		},
+		"ad4293f3-514a-467a-8960-a4ae3b0627e3": {
+			"description": "Alpha",
+			"due": "1790553600",
+			"entry": "1790786294",
+			"mask": "----",
+			"modified": "1790786294",
+			"recur": "daily",
+			"rtype": "periodic",
+			"status": "recurring"
+		}
+	},
+	"now": 1790786294,
+	"operations": [
+		{
+			"Update": {
+				"old_value": "1790786294",
+				"property": "modified",
+				"timestamp": "2026-09-30T16:38:14.552467Z",
+				"uuid": "3246b3ef-e401-4de9-8295-87c11c66b134",
+				"value": "1790786294"
+			}
+		},
+		{
+			"Update": {
+				"old_value": null,
+				"property": "tag_work",
+				"timestamp": "2026-09-30T16:38:14.552467Z",
+				"uuid": "3246b3ef-e401-4de9-8295-87c11c66b134",
+				"value": "x"
+			}
+		},
+		{
+			"Update": {
+				"old_value": null,
+				"property": "tags",
+				"timestamp": "2026-09-30T16:38:14.552467Z",
+				"uuid": "3246b3ef-e401-4de9-8295-87c11c66b134",
+				"value": "work"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "1790786294",
+				"property": "modified",
+				"timestamp": "2026-09-30T16:38:14.552794Z",
+				"uuid": "64bf7e17-6530-4702-bebb-a375138d9582",
+				"value": "1790786294"
+			}
+		},
+		{
+			"Update": {
+				"old_value": null,
+				"property": "tag_work",
+				"timestamp": "2026-09-30T16:38:14.552794Z",
+				"uuid": "64bf7e17-6530-4702-bebb-a375138d9582",
+				"value": "x"
+			}
+		},
+		{
+			"Update": {
+				"old_value": null,
+				"property": "tags",
+				"timestamp": "2026-09-30T16:38:14.552795Z",
+				"uuid": "64bf7e17-6530-4702-bebb-a375138d9582",
+				"value": "work"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "1790786294",
+				"property": "modified",
+				"timestamp": "2026-09-30T16:38:14.553073Z",
+				"uuid": "91ebd1bc-c48d-4103-bfec-08be11c3e755",
+				"value": "1790786294"
+			}
+		},
+		{
+			"Update": {
+				"old_value": null,
+				"property": "tag_work",
+				"timestamp": "2026-09-30T16:38:14.553073Z",
+				"uuid": "91ebd1bc-c48d-4103-bfec-08be11c3e755",
+				"value": "x"
+			}
+		},
+		{
+			"Update": {
+				"old_value": null,
+				"property": "tags",
+				"timestamp": "2026-09-30T16:38:14.553073Z",
+				"uuid": "91ebd1bc-c48d-4103-bfec-08be11c3e755",
+				"value": "work"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "1790786294",
+				"property": "modified",
+				"timestamp": "2026-09-30T16:38:14.553425Z",
+				"uuid": "80af4436-57c7-423c-9d50-3f4fd6abfcb6",
+				"value": "1790786294"
+			}
+		},
+		{
+			"Update": {
+				"old_value": null,
+				"property": "tag_work",
+				"timestamp": "2026-09-30T16:38:14.553425Z",
+				"uuid": "80af4436-57c7-423c-9d50-3f4fd6abfcb6",
+				"value": "x"
+			}
+		},
+		{
+			"Update": {
+				"old_value": null,
+				"property": "tags",
+				"timestamp": "2026-09-30T16:38:14.553426Z",
+				"uuid": "80af4436-57c7-423c-9d50-3f4fd6abfcb6",
+				"value": "work"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "1790786294",
+				"property": "modified",
+				"timestamp": "2026-09-30T16:38:14.553688Z",
+				"uuid": "ad4293f3-514a-467a-8960-a4ae3b0627e3",
+				"value": "1790786294"
+			}
+		},
+		{
+			"Update": {
+				"old_value": null,
+				"property": "tag_work",
+				"timestamp": "2026-09-30T16:38:14.553689Z",
+				"uuid": "ad4293f3-514a-467a-8960-a4ae3b0627e3",
+				"value": "x"
+			}
+		},
+		{
+			"Update": {
+				"old_value": null,
+				"property": "tags",
+				"timestamp": "2026-09-30T16:38:14.553690Z",
+				"uuid": "ad4293f3-514a-467a-8960-a4ae3b0627e3",
+				"value": "work"
+			}
+		}
+	]
+}
