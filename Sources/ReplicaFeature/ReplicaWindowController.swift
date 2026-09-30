@@ -184,7 +184,7 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 	}
 
 	/// The task commands, then Set Project…, Add Tag… and Remove Tag, as the menu bar's Task menu
-	/// and a row's context menu list them.
+	/// and a row's context menu list them. An uppercase key equivalent adds ⇧, so Set Project… is ⌘⇧M.
 	public static func taskCommandMenuItems() -> [NSMenuItem] {
 		let removeTag = NSMenu(title: String(localized: "Remove Tag"))
 		removeTag.delegate = removeTagMenuDelegate

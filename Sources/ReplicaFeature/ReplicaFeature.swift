@@ -94,8 +94,8 @@ struct ReplicaFeature {
 			isReplicaOpen && unavailable == nil && taskrc != nil && canWrite
 		}
 
-		/// Whether Locate… applies: while the window shows no Replica, unless another window has it. The
-		/// menu item and the window's button both read this.
+		/// Whether Locate Replica… (the window's Locate… button) applies: while the window shows no
+		/// Replica, unless another window has it. The menu item and the button both read this.
 		var canLocateReplica: Bool {
 			switch unavailable {
 			case .cantOpen, .notFound, .replaced: true
