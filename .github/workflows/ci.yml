@@ -89,6 +89,10 @@ jobs:
             exit 1
           fi
 
+      - name: Test engine
+        if: '!cancelled()'
+        run: just engine-test
+
       - name: Build and test
         if: '!cancelled()'
         # xcodebuild hands the tests a TEST_RUNNER_ variable without its prefix. The image snapshots

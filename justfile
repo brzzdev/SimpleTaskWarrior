@@ -81,6 +81,13 @@ engine:
 		xcodebuild -create-xcframework -library "$library" -headers build/headers -output "$xcframework"
 	fi
 
+# rustup's proxies go first on PATH for the reason `engine` gives, and the target
+# matches its, so the test build shares `Engine/target` and CI's Rust cache.
+# Run the Rust engine's tests
+engine-test:
+	export PATH="/opt/homebrew/opt/rustup/bin:$PATH" && cd Engine && \
+		cargo test --locked --target aarch64-apple-darwin --package engine
+
 # Generate the Xcode project from Project.swift. The touch stamps the workspace
 # for `ensure-generated`: Tuist leaves unchanged files alone, so without it the
 # workspace's mtime would not record that a generate ran.
