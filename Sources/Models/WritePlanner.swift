@@ -453,8 +453,8 @@ public enum WriteAction: Equatable, Sendable {
 	/// `task delete`, which keeps `start`. An instance of a template in `series` takes the rest of its
 	/// Series with it, as `task delete` does under `recurrence.confirmation`.
 	case delete([Task.ID], chains: ChainRepair, series: Set<Task.ID> = [])
-	/// An edit that `cascadesToSeries` changes an instance of a template in `series` and the rest of
-	/// its Series alike, as `task modify` does under `recurrence.confirmation`.
+	/// An edit of an instance of a template in `series` changes the rest of its Series too, where it
+	/// `cascadesToSeries`, as `task modify` does under `recurrence.confirmation`.
 	case edit([Task.ID], TaskEdit, series: Set<Task.ID> = [])
 	/// `task modify status:pending` on a completed or deleted task.
 	case markPending([Task.ID])

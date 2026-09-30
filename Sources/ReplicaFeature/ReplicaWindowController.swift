@@ -484,7 +484,7 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 				? String(localized: "Change a Repeating Task?")
 				: String(localized: "Change Repeating Tasks?")
 			alert.informativeText = String(
-				localized: "Change only the selected tasks, or every pending task in their series and the tasks it repeats into. A due, scheduled or wait date only ever changes the task it’s set on.",
+				localized: "Change only the selected tasks, or every pending task in their series and the series itself, which the tasks it repeats into later take after. A date other than Until only ever changes the task it’s set on.",
 			)
 			alert.addButton(withTitle: String(localized: "Change"))
 			confirmation = .seriesChangeButtonTapped

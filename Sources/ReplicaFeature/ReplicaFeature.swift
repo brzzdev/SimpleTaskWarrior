@@ -917,6 +917,23 @@ struct ReplicaFeature {
 		return taken.max().map { $0.addingTimeInterval(annotationSpacing) } ?? now
 	}
 
+	/// The templates of the Series `applied` changes from `tasks`, by the templates themselves or
+	/// their
+	/// instances, leaving out `mask`, which records an instance's status, and `modified`.
+	private func changedSeries(
+		_ applied: [Models.Task.ID: [String: String]],
+		tasks: [Models.Task.ID: [String: String]],
+	) -> Set<Models.Task.ID> {
+		let fields = { (properties: [String: String]) in
+			properties.filter { $0.key != "mask" && $0.key != "modified" }
+		}
+		var changed: Set<Models.Task.ID> = []
+		for (id, properties) in applied where fields(properties) != fields(tasks[id] ?? [:]) {
+			changed.insert(properties["parent"].flatMap(UUID.init(uuidString:)) ?? id)
+		}
+		return changed
+	}
+
 	/// What repairing would do to the chains a Delete of `ids` and `series` breaks, nil where
 	/// `dependency.confirmation` doesn't ask or it breaks none.
 	private func chainRepairMessage(
@@ -1010,9 +1027,9 @@ struct ReplicaFeature {
 		return write(.edit(ids, edit), &state)
 	}
 
-	/// Starts `edit` of the tasks `ids`, taking the Series of each Recurrence instance it changes as
-	/// `recurrence.confirmation` says, or first asking. An edit that changes no instance asks nothing,
-	/// since the inspector sends a value a task already shows.
+	/// Starts `edit` of the tasks `ids`, taking the Series of each Recurrence instance among them as
+	/// `recurrence.confirmation` says, or first asking. A Series the edit would leave as it is asks
+	/// nothing, since the inspector sends a value a task already shows.
 	private func editAskingAboutSeries(
 		_ ids: [Models.Task.ID],
 		_ edit: TaskEdit,
@@ -1020,19 +1037,25 @@ struct ReplicaFeature {
 	) -> Effect<Action> {
 		let planner = WritePlanner(taskrc: state.runningTaskrc, timeZone: timeZone)
 		let tasks = properties(of: state.storedTasks)
+		let every = seriesChoices(ids, tasks: tasks)
 		// Planned only where it might ask. A plan that can't be made asks nothing, and the write
 		// reports why.
 		guard
 			planner.cascadesToSeries(edit),
-			ids.contains(where: { tasks[$0]?["parent"] != nil }),
-			let applied = try? planner.plan(.edit(ids, edit), tasks: tasks, at: now).applied(to: tasks),
-			case let choices = seriesChoices(ids.filter { applied[$0] != tasks[$0] }, tasks: tasks),
+			!every.isEmpty,
+			let plan = try? planner.plan(
+				.edit(ids, edit, series: Set(every.ids)),
+				tasks: tasks,
+				at: now,
+			),
+			case let changed = changedSeries(plan.applied(to: tasks), tasks: tasks),
+			case let choices = every.filter({ changed.contains($0.id) }),
 			!choices.isEmpty
 		else {
 			return startWrite(.edit(ids, edit), at: now, &state)
 		}
 		guard state.runningTaskrc[recurrenceConfirmation] == askingConfirmation else {
-			let series = seriesUnasked(choices, state)
+			let series = seriesByTaskrc(choices, taskrc: state.runningTaskrc)
 			return startWrite(.edit(ids, edit, series: series), at: now, &state)
 		}
 		state.seriesPrompt = SeriesPrompt(choices: choices, command: .edit(edit), ids: ids)
@@ -1091,7 +1114,7 @@ struct ReplicaFeature {
 			}
 			// As `task delete` reads it: `prompt` asks, else it's a boolean.
 			guard state.runningTaskrc[recurrenceConfirmation] == askingConfirmation else {
-				let series = seriesUnasked(choices, state)
+				let series = seriesByTaskrc(choices, taskrc: state.runningTaskrc)
 				return closeAskingAboutChains(ids, command, series: series, tasks: tasks, &state)
 			}
 			state.seriesPrompt = SeriesPrompt(
@@ -1148,6 +1171,15 @@ struct ReplicaFeature {
 		state.focusesDescription = true
 	}
 
+	/// The templates in `choices` whose Series a write takes where `recurrence.confirmation` doesn't
+	/// ask, which `task` then reads as a boolean: every one or none.
+	private func seriesByTaskrc(
+		_ choices: IdentifiedArrayOf<SeriesPrompt.Choice>,
+		taskrc: Taskrc,
+	) -> Set<Models.Task.ID> {
+		taskrc.boolean(recurrenceConfirmation) ? Set(choices.ids) : []
+	}
+
 	/// A choice for each Series the tasks `ids` are Recurrence instances of, in the order of the first
 	/// of each, named by its template's description, or the instance's where the template is gone,
 	/// since `task delete` still takes the siblings then.
@@ -1164,39 +1196,6 @@ struct ReplicaFeature {
 			choices.append(SeriesPrompt.Choice(description: description, id: template))
 		}
 		return choices
-	}
-
-	/// The templates in `choices` whose Series a write takes where `recurrence.confirmation` doesn't
-	/// ask, which `task` then reads as a boolean: every one or none.
-	private func seriesUnasked(
-		_ choices: IdentifiedArrayOf<SeriesPrompt.Choice>,
-		_ state: State,
-	) -> Set<Models.Task.ID> {
-		state.runningTaskrc.boolean(recurrenceConfirmation) ? Set(choices.ids) : []
-	}
-
-	/// Writes the Delete or edit that asked about Series, with the user's choices.
-	private func writePromptedSeries(_ state: inout State) -> Effect<Action> {
-		guard let prompt = state.seriesPrompt else {
-			return .none
-		}
-		state.seriesPrompt = nil
-		switch prompt.command {
-		case .delete:
-			// Repaired unasked where the Taskrc says not to ask, and left where there was nothing to ask.
-			let repairs = !state.runningTaskrc.boolean(dependencyConfirmation)
-				|| prompt.chainRepairMessage != nil && prompt.repairsChains
-			return close(
-				prompt.ids,
-				.delete,
-				chains: repairs ? .repair : .leave,
-				series: prompt.series,
-				&state,
-			)
-
-		case let .edit(edit):
-			return startWrite(.edit(prompt.ids, edit, series: prompt.series), at: now, &state)
-		}
 	}
 
 	/// Resets the sidebar to Pending where it wouldn't show a task New Task would create now.
@@ -1234,6 +1233,30 @@ struct ReplicaFeature {
 		}
 		let row = TaskRow(isBlocked: false, task: task, udaColumns: [], urgency: 0, view: view)
 		return SidebarFilter(state.sidebarSelection).includes(row)
+	}
+
+	/// Writes the Delete or edit that asked about Series, with the user's choices.
+	private func writePromptedSeries(_ state: inout State) -> Effect<Action> {
+		guard let prompt = state.seriesPrompt else {
+			return .none
+		}
+		state.seriesPrompt = nil
+		switch prompt.command {
+		case .delete:
+			// Repaired unasked where the Taskrc says not to ask, and left where there was nothing to ask.
+			let repairs = !state.runningTaskrc.boolean(dependencyConfirmation)
+				|| prompt.chainRepairMessage != nil && prompt.repairsChains
+			return close(
+				prompt.ids,
+				.delete,
+				chains: repairs ? .repair : .leave,
+				series: prompt.series,
+				&state,
+			)
+
+		case let .edit(edit):
+			return startWrite(.edit(prompt.ids, edit, series: prompt.series), at: now, &state)
+		}
 	}
 
 	/// Ranks the Replica's tasks with the Taskrc the window runs on, decoding their UDAs, computing

@@ -654,6 +654,51 @@ struct ReplicaFeatureTests {
 		await store.finish()
 	}
 
+	/// As `task modify` offers it: the selected instance may already have the value its Series lacks,
+	/// and a sibling the view hides is still in the Series.
+	@Test
+	func editOfAnInstanceAsksWhereOnlyItsHiddenSiblingWouldChange() async throws {
+		var plants = series(0, "Water plants", instances: [1, 2])
+		plants.instances[0].properties.merge(["tag_garden": "x", "tags": "garden"]) { $1 }
+		plants.template.properties.merge(["tag_garden": "x", "tags": "garden"]) { $1 }
+		let plans = LockIsolated<[WritePlan]>([])
+		var initialState = try loadedState([plants.instances[0]], selection: [UUID(1)])
+		initialState.storedTasks += [plants.instances[1], plants.template]
+		let stored = initialState.storedTasks
+		let store = TestStore(initialState: initialState) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.continuousClock = TestClock()
+			$0.date.now = now
+			$0.replicaClient.apply = { plan, _, _ in
+				plans.withValue { $0.append(plan) }
+				return ApplyOutcome(isCommitted: true, snapshot: snapshot(stored))
+			}
+			$0.timeZone = .gmt
+		}
+		let edit = TaskEdit.addTags(["garden"])
+
+		await store.send(.inspectorFieldSubmitted([UUID(1)], edit)) {
+			$0.keptTasks = [UUID(1)]
+			$0.seriesPrompt = ReplicaFeature.SeriesPrompt(
+				choices: [ReplicaFeature.SeriesPrompt.Choice(description: "Water plants", id: UUID(0))],
+				command: .edit(edit),
+				ids: [UUID(1)],
+			)
+		}
+		await store.send(.seriesChoiceChanged(UUID(0), includesSeries: true)) {
+			$0.seriesPrompt?.choices[id: UUID(0)]?.includesSeries = true
+		}
+		// The table's reads are other tests' business: this one is about the plan.
+		store.exhaustivity = .off(showSkippedAssertions: false)
+		await store.send(.seriesChangeButtonTapped)
+		await store.receive(\.writeCommitted)
+
+		let applied = try #require(plans.value.first).applied(to: properties(of: stored))
+		#expect(applied[UUID(2)]?["tag_garden"] == "x")
+		await store.finish()
+	}
+
 	/// Asked as it starts, so an edit queued behind a running write asks once that write ends, and
 	/// the edits queued behind the question wait for the answer.
 	@Test
