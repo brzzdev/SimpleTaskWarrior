@@ -41,9 +41,8 @@ if !developmentTeam.isEmpty {
 	signingSettings["DEVELOPMENT_TEAM"] = .string(developmentTeam)
 }
 
-// The Debug build runs alongside the installed release as an app of its own, so the two keep
-// separate preferences, Replica bookmarks, Taskrc pairings, restored windows and table layouts.
-// The app menu reads the process name, which is the executable's, so the product is renamed too.
+// The Debug build runs alongside the installed release as an app of its own, keeping its own state.
+// The app menu shows the process name, so the product is renamed too.
 let debugSettings: SettingsDictionary = [
 	"PRODUCT_BUNDLE_IDENTIFIER": "dev.brzz.SimpleTaskWarrior.debug",
 	"PRODUCT_NAME": "SimpleTaskWarrior Debug",

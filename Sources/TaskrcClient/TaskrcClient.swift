@@ -76,16 +76,8 @@ extension TaskrcClient: DependencyKey {
 							lastGood = .defaults
 							publish(Loaded(taskrc: lastGood, url: nil))
 							watched = []
-							// Waits on the default Taskrc alone, since pairing one starts another load. A Debug
-							// build has none to wait on, so it waits for cancellation: nothing yields to this stream.
-							#if DEBUG
-							let never = AsyncStream<Void> { _ in }
-							for await _ in never {}
-							#else
-							while defaultTaskrc() == nil, !_Concurrency.Task.isCancelled {
-								try? await _Concurrency.Task.sleep(for: missingFilePoll)
-							}
-							#endif
+							// Pairing a Taskrc starts another load.
+							await defaultTaskrcAppears()
 							continue
 						}
 
@@ -139,15 +131,24 @@ extension DependencyValues {
 	}
 }
 
+#if DEBUG
+// A Debug build never reads the CLI's default Taskrc, so a development session can't pick up real
+// settings by accident. It runs on TW's defaults until a Taskrc is paired.
+
+private func defaultTaskrc() -> URL? {
+	nil
+}
+
+/// Returns once cancelled: nothing yields to this stream.
+private func defaultTaskrcAppears() async {
+	let never = AsyncStream<Void> { _ in }
+	for await _ in never {}
+}
+#else
 /// The Taskrc the CLI reads when nothing names another, unless there's no file at its path. TW
 /// runs on its defaults without one. One the app can't reach is still returned, so its parse
 /// reports it unreadable rather than dropping the window to the defaults.
-///
-/// Always nil in a Debug build, so a development session can't pick up real settings by accident.
 private func defaultTaskrc() -> URL? {
-	#if DEBUG
-	return nil
-	#else
 	guard let path = Taskrc.Environment.live.taskrcPath else {
 		return nil
 	}
@@ -157,8 +158,15 @@ private func defaultTaskrc() -> URL? {
 		return nil
 	}
 	return URL(filePath: path)
-	#endif
 }
+
+/// Returns once there's a default Taskrc, or once cancelled.
+private func defaultTaskrcAppears() async {
+	while defaultTaskrc() == nil, !_Concurrency.Task.isCancelled {
+		try? await _Concurrency.Task.sleep(for: missingFilePoll)
+	}
+}
+#endif
 
 /// Returns once `changes` yields, or after `timeout` when there is one.
 private func firstChange(in changes: AsyncStream<Void>, orAfter timeout: Duration?) async {
