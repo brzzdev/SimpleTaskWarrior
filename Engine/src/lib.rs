@@ -312,13 +312,19 @@ async fn update(
 	Ok(())
 }
 
+/// A value one task's property must still hold for a commit to go through.
+struct ExpectedValue {
+	property: String,
+	uuid: Uuid,
+	value: Option<String>,
+}
+
 /// What one commit must find in the Replica for it to go through.
 #[derive(Default)]
 struct Checks {
 	/// Tasks the batch creates, which must not exist yet.
 	creates: Vec<Uuid>,
-	/// Each task, property, and the value it must still hold.
-	expectations: Vec<(Uuid, String, Option<String>)>,
+	expectations: Vec<ExpectedValue>,
 }
 
 impl Checks {
@@ -329,18 +335,18 @@ impl Checks {
 		txn: &mut (dyn StorageTxn + Send),
 	) -> Result<Vec<Uuid>, taskchampion::Error> {
 		let mut tasks: HashMap<Uuid, Option<TaskMap>> = HashMap::new();
-		for &uuid in self.expectations.iter().map(|(uuid, ..)| uuid).chain(&self.creates) {
+		for &uuid in self.expectations.iter().map(|expected| &expected.uuid).chain(&self.creates) {
 			if let Entry::Vacant(entry) = tasks.entry(uuid) {
 				entry.insert(txn.get_task(uuid).await?);
 			}
 		}
-		let changed = self.expectations.iter().filter(|(uuid, property, value)| {
-			let current = tasks[uuid].as_ref().and_then(|task| task.get(property));
-			current != value.as_ref()
+		let changed = self.expectations.iter().filter(|expected| {
+			let task = tasks[&expected.uuid].as_ref();
+			task.and_then(|task| task.get(&expected.property)) != expected.value.as_ref()
 		});
 		let existing = self.creates.iter().filter(|uuid| tasks[*uuid].is_some());
 		let mut conflicts = Vec::new();
-		for &uuid in changed.map(|(uuid, ..)| uuid).chain(existing) {
+		for &uuid in changed.map(|expected| &expected.uuid).chain(existing) {
 			if !conflicts.contains(&uuid) {
 				conflicts.push(uuid);
 			}
@@ -351,7 +357,7 @@ impl Checks {
 
 /// Passes `apply`'s checks to the storage that runs them, and their conflicts back.
 #[derive(Default)]
-struct CommitChecks {
+struct CheckChannel {
 	/// The tasks the last checked transaction refused on.
 	conflicts: Vec<Uuid>,
 	/// Checks for the next transaction, which takes them so they run once.
@@ -365,7 +371,7 @@ struct CommitChecks {
 /// commit opens exactly one transaction before it reads or writes anything, and `SqliteStorage`
 /// opens it `Immediate`, so the checks and the write happen under one SQLite write lock.
 struct CheckedStorage {
-	checks: Arc<Mutex<CommitChecks>>,
+	checks: Arc<Mutex<CheckChannel>>,
 	inner: SqliteStorage,
 }
 
@@ -400,8 +406,8 @@ impl Storage for CheckedStorage {
 /// held lock, so nothing here holds one open between calls.
 #[derive(uniffi::Object)]
 pub struct EngineHandle {
-	/// Shared with the replica's storage, which runs `apply`'s checks.
-	checks: Arc<Mutex<CommitChecks>>,
+	/// Shared with the Replica's storage, which runs `apply`'s checks.
+	checks: Arc<Mutex<CheckChannel>>,
 	replica: Mutex<Replica<CheckedStorage>>,
 	/// Its own connection, because `PRAGMA data_version` moves only for other connections' commits.
 	/// The replica's connection counts as another, so the app's own writes move it too.
@@ -430,7 +436,7 @@ impl EngineHandle {
 		}
 		let inner =
 			runtime().block_on(SqliteStorage::new(&directory, AccessMode::ReadWrite, false))?;
-		let checks = Arc::new(Mutex::new(CommitChecks::default()));
+		let checks = Arc::new(Mutex::new(CheckChannel::default()));
 		let storage = CheckedStorage {
 			checks: Arc::clone(&checks),
 			inner,
@@ -470,7 +476,11 @@ impl EngineHandle {
 				if current != value.as_deref() && !conflicts.contains(&raw_uuid) {
 					conflicts.push(raw_uuid);
 				}
-				checks.expectations.push((uuid, property, value));
+				checks.expectations.push(ExpectedValue {
+					property,
+					uuid,
+					value,
+				});
 			}
 			if !conflicts.is_empty() {
 				return Ok(ApplyOutcome::Conflict { uuids: conflicts });
@@ -617,9 +627,37 @@ impl EngineHandle {
 mod tests {
 	use super::*;
 
-	/// Changes a task's description to `cli`, as a `task modify` would.
-	const CLI_MODIFY: &str =
-		"UPDATE tasks SET data = json_set(data, '$.description', 'cli') WHERE uuid = ?1";
+	fn assert_conflict(outcome: ApplyOutcome, uuid: Uuid) {
+		let ApplyOutcome::Conflict { uuids } = outcome else {
+			panic!("expected a conflict");
+		};
+		assert_eq!(uuids, vec![uuid.to_string()]);
+	}
+
+	fn create_task(handle: &EngineHandle, uuid: Uuid) {
+		let create = PlannedOperation::Create {
+			uuid: uuid.to_string(),
+		};
+		handle.apply(vec![create, set_description(uuid, "app")], Vec::new()).unwrap();
+	}
+
+	fn description(handle: &EngineHandle, uuid: Uuid) -> Option<String> {
+		handle
+			.snapshot()
+			.unwrap()
+			.tasks
+			.into_iter()
+			.find(|task| task.uuid == uuid.to_string())
+			.and_then(|task| task.properties.get("description").cloned())
+	}
+
+	fn description_is(uuid: Uuid, value: &str) -> Expectation {
+		Expectation {
+			uuid: uuid.to_string(),
+			property: "description".into(),
+			value: Some(value.into()),
+		}
+	}
 
 	/// An empty Replica in a temporary directory, open in a handle.
 	fn open_replica() -> (tempfile::TempDir, EngineHandle) {
@@ -631,37 +669,12 @@ mod tests {
 		(directory, handle)
 	}
 
-	fn create_task(handle: &EngineHandle, uuid: Uuid) {
-		let create = PlannedOperation::Create {
-			uuid: uuid.to_string(),
-		};
-		handle.apply(vec![create, set_description(uuid, "app")], Vec::new()).unwrap();
-	}
-
 	fn set_description(uuid: Uuid, value: &str) -> PlannedOperation {
 		PlannedOperation::SetValue {
 			uuid: uuid.to_string(),
 			property: "description".into(),
 			value: Some(value.into()),
 		}
-	}
-
-	fn description_is(uuid: Uuid, value: &str) -> Expectation {
-		Expectation {
-			uuid: uuid.to_string(),
-			property: "description".into(),
-			value: Some(value.into()),
-		}
-	}
-
-	fn description(handle: &EngineHandle, uuid: Uuid) -> Option<String> {
-		handle
-			.snapshot()
-			.unwrap()
-			.tasks
-			.into_iter()
-			.find(|task| task.uuid == uuid.to_string())
-			.and_then(|task| task.properties.get("description").cloned())
 	}
 
 	/// Runs `sql` from its own connection, as the CLI would, after `apply`'s fast path passes but
@@ -677,13 +690,6 @@ mod tests {
 			let connection = Connection::open(database).unwrap();
 			connection.execute(sql, [uuid.to_string()]).unwrap();
 		}));
-	}
-
-	fn assert_conflict(outcome: ApplyOutcome, uuid: Uuid) {
-		let ApplyOutcome::Conflict { uuids } = outcome else {
-			panic!("expected a conflict");
-		};
-		assert_eq!(uuids, vec![uuid.to_string()]);
 	}
 
 	#[test]
@@ -712,7 +718,12 @@ mod tests {
 		let (directory, handle) = open_replica();
 		let uuid = Uuid::new_v4();
 		create_task(&handle, uuid);
-		write_before_transaction(&handle, &directory, CLI_MODIFY, uuid);
+		write_before_transaction(
+			&handle,
+			&directory,
+			"UPDATE tasks SET data = json_set(data, '$.description', 'cli') WHERE uuid = ?1",
+			uuid,
+		);
 
 		let outcome = handle
 			.apply(vec![set_description(uuid, "stale")], vec![description_is(uuid, "app")])
