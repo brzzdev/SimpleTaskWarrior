@@ -13,6 +13,7 @@ import Testing
 )
 final class CLIContractTests {
 	let directory = URL.temporaryDirectory.appending(path: UUID().uuidString)
+	let planner = WritePlanner(taskrc: .defaults, timeZone: .current)
 	let replicaClient = ReplicaClient.liveValue
 
 	/// The Replica `task` creates on its first command.
@@ -33,11 +34,10 @@ final class CLIContractTests {
 	@Test
 	func taskReadsAndChangesAnAppWrite() async throws {
 		// The app opens a Replica but never creates one.
-		_ = try addTask("Seed")
+		try addTask("Seed")
 		var tasks = replicaClient.tasks(replica).makeAsyncIterator()
 		_ = try await tasks.next()
 		let uuid = UUID()
-		let planner = WritePlanner(taskrc: .defaults, timeZone: .current)
 		let created = try await apply(
 			planner.plan(.create(uuid, description: "Buy milk"), tasks: [:], at: .now),
 			as: "New Task",
@@ -45,7 +45,7 @@ final class CLIContractTests {
 		try await apply(
 			planner.plan(
 				.edit([uuid], .set("project", .string("Home"))),
-				tasks: properties(created),
+				tasks: properties(of: created.tasks),
 				at: .now,
 			),
 			as: "Set Project",
@@ -58,9 +58,9 @@ final class CLIContractTests {
 		#expect(exported.status == "pending")
 		#expect(exported.id == 2)
 
-		_ = try task(uuid.uuidString.lowercased(), "done")
+		try task(uuid.uuidString.lowercased(), "done")
 
-		let completed = try #require(try await tasks.next()?.get())
+		let completed = try #require(await tasks.next()?.get())
 		#expect(completed.tasks
 			.first { $0.uuid == uuid.uuidString.lowercased() }?
 			.properties["status"] == "completed")
@@ -70,22 +70,25 @@ final class CLIContractTests {
 	func taskUndoRevertsTheAppsWriteAsOneUndoPoint() async throws {
 		let uuid = try addTask("Buy milk")
 		var tasks = replicaClient.tasks(replica).makeAsyncIterator()
-		let read = try #require(try await tasks.next()?.get())
+		let read = try #require(await tasks.next()?.get())
 		let completed = try await apply(
-			WritePlanner(taskrc: .defaults, timeZone: .current)
-				.plan(.complete([uuid], chains: .repair), tasks: properties(read), at: .now),
+			planner.plan(
+				.complete([uuid], chains: .repair),
+				tasks: properties(of: read.tasks),
+				at: .now,
+			),
 			as: "Complete Task",
 		)
 		#expect(completed.undoName == "Complete Task")
 
-		_ = try task("undo")
+		try task("undo")
 
 		#expect(try export(uuid).status == "pending")
-		let undone = try #require(try await tasks.next()?.get())
+		let undone = try #require(await tasks.next()?.get())
 		#expect(undone.undoName == nil)
 		#expect(try await replicaClient.undo(replica).isApplied == false)
 		// One undo took the whole write: the next reverts the CLI's add.
-		_ = try task("undo")
+		try task("undo")
 		#expect(try task("export") == "[\n]")
 	}
 
@@ -93,31 +96,36 @@ final class CLIContractTests {
 	func aConcurrentEditRefusesTheAppsStaleWrite() async throws {
 		let uuid = try addTask("Buy milk")
 		var tasks = replicaClient.tasks(replica).makeAsyncIterator()
-		let read = try #require(try await tasks.next()?.get())
-		let planner = WritePlanner(taskrc: .defaults, timeZone: .current)
+		let read = try #require(await tasks.next()?.get())
 		let stale = try planner.plan(
 			.complete([uuid], chains: .repair),
-			tasks: properties(read),
+			tasks: properties(of: read.tasks),
 			at: .now,
 		)
 
-		_ = try task(uuid.uuidString.lowercased(), "start")
+		try task(uuid.uuidString.lowercased(), "start")
 		let refused = try await replicaClient.apply(stale, "Complete Task", replica)
 
 		#expect(!refused.isCommitted)
-		#expect(try export(uuid).start != nil)
-		#expect(try export(uuid).status == "pending")
+		let started = try export(uuid)
+		#expect(started.start != nil)
+		#expect(started.status == "pending")
 
 		try await apply(
-			planner.plan(.complete([uuid], chains: .repair), tasks: properties(refused.snapshot), at: .now),
+			planner.plan(
+				.complete([uuid], chains: .repair),
+				tasks: properties(of: refused.snapshot.tasks),
+				at: .now,
+			),
 			as: "Complete Task",
 		)
 		#expect(try export(uuid).status == "completed")
 	}
 
 	/// Adds a pending task through `task`, which creates the Replica if it's the first command.
+	@discardableResult
 	private func addTask(_ description: String) throws -> UUID {
-		_ = try task("add", description)
+		try task("add", description)
 		let uuids = try task("_uuids")
 		return try #require(UUID(uuidString: uuids))
 	}
@@ -137,16 +145,9 @@ final class CLIContractTests {
 		return try #require(exported.first)
 	}
 
-	private func properties(_ snapshot: TaskSnapshot) -> [Models.Task.ID: [String: String]] {
-		Dictionary(
-			uniqueKeysWithValues: snapshot.tasks.compactMap { task in
-				UUID(uuidString: task.uuid).map { ($0, task.properties) }
-			},
-		)
-	}
-
 	/// Runs `task` on the Replica with `arguments`, in an environment of its own so neither the
 	/// user's Taskrc nor their hooks take part, and returns what it printed, trimmed.
+	@discardableResult
 	private func task(_ arguments: String...) throws -> String {
 		let process = Process()
 		process.executableURL = try URL(filePath: #require(contractTask))
