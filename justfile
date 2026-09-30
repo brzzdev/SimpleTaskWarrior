@@ -480,9 +480,9 @@ release quit_and_launch="true": archive
 	echo "✅ Released {{ scheme }} → $dest"
 
 # Refuses a version that isn't a clean `main` commit tagged `vX.Y.Z` here and on
-# origin, and newer than every other release tag. Checked before the minutes of
-# archiving and notarizing, rather than left to `gh release create
-# --verify-tag` at the end.
+# origin, and newer than every other release. Checked before the minutes of
+# archiving and notarizing, rather than left to
+# `gh release create --verify-tag` at the end.
 [private]
 check-tag version:
 	#!/usr/bin/env bash
@@ -507,21 +507,32 @@ check-tag version:
 		exit 1
 	fi
 	# Off `main`, the commit count stops ordering releases.
-	git fetch --quiet --tags origin main
+	git fetch --quiet origin main
 	if ! git merge-base --is-ancestor HEAD origin/main; then
 		echo "HEAD isn't on origin/main" >&2
 		exit 1
 	fi
-	# Sparkle upgrades only to a higher build number, which is the commit count
-	# `archive` stamps, so HEAD's must exceed every other release's.
+
+	# Sparkle upgrades only to a higher build number, the commit count `archive`
+	# stamps, so HEAD's must exceed every other release's. Releases are origin's
+	# `vX.Y.Z` tags, each with the commit it peels to, rather than local tags,
+	# which can be stale. Captured first so a failing git stops the check.
 	build="$(git rev-list --count HEAD)"
-	while IFS= read -r other; do
+	releases="$(git ls-remote --tags origin 'refs/tags/v*' | awk '
+		{ name = $2; sub("^refs/tags/", "", name); sub(/\^\{\}$/, "", name); commit[name] = $1 }
+		END { for (name in commit) if (name ~ /^v[0-9]+\.[0-9]+\.[0-9]+$/) print name, commit[name] }
+	')"
+	while read -r other commit; do
+		[ -z "$other" ] && continue
 		[ "$other" = "$tag" ] && continue
-		if [ "$(git rev-list --count "$other")" -ge "$build" ]; then
-			echo "$other is built at or past HEAD's build number $build" >&2
+		# Only a tag on `main` can have been published.
+		git merge-base --is-ancestor "$commit" origin/main || continue
+		count="$(git rev-list --count "$commit")"
+		if [ "$count" -ge "$build" ]; then
+			echo "$other is built at $count, not below HEAD's $build" >&2
 			exit 1
 		fi
-	done < <(git tag --list 'v*')
+	done <<< "$releases"
 
 # Run `just notary-setup` once first, then tag HEAD `v<version>` and push the
 # tag. Never installs, quits or launches the app. The zip is what Sparkle
