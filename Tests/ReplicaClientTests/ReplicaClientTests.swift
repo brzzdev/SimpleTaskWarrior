@@ -84,6 +84,27 @@ final class ReplicaClientTests {
 	}
 
 	@Test
+	func replacedDatabaseEndsTheStreamAndRefusesWrites() async throws {
+		_ = try createReplica()
+		var tasks = replicaClient.tasks(directory).makeAsyncIterator()
+		_ = try await tasks.next()
+		let identity = try #require(replicaClient.identity(directory))
+		let plan = try WritePlanner(taskrc: .defaults, timeZone: .gmt)
+			.plan(.create(UUID(), description: "Buy milk"), tasks: [:], at: .now)
+		// As a restore from backup would: a copy in its place, under a new inode.
+		let copy = directory.appending(path: "copy.sqlite3")
+		try FileManager.default.copyItem(atPath: databasePath, toPath: copy.path(percentEncoded: false))
+		_ = try FileManager.default.replaceItemAt(URL(filePath: databasePath), withItemAt: copy)
+
+		await #expect(throws: ReplicaError.lost(identity)) {
+			try await self.replicaClient.apply(plan, "New Task", self.directory)
+		}
+		await #expect(throws: ReplicaError.lost(identity)) {
+			_ = try await tasks.next()
+		}
+	}
+
+	@Test
 	func redoReappliesTheUndoneChangeUntilAnythingWrites() async throws {
 		let cli = try createReplica()
 		let uuid = try addPendingTask("Buy milk", with: cli)
@@ -173,6 +194,18 @@ final class ReplicaClientTests {
 
 	@Test
 	func validateRefusesAFolderWithoutAReplica() async {
+		await #expect(throws: ReplicaError.notAReplica) {
+			try await self.replicaClient.validate(self.directory)
+		}
+	}
+
+	@Test
+	func validateRefusesAFileThatIsntADatabase() async throws {
+		try #require(FileManager.default.createFile(
+			atPath: databasePath,
+			contents: Data(repeating: 1, count: 4_096),
+		))
+
 		await #expect(throws: ReplicaError.notAReplica) {
 			try await self.replicaClient.validate(self.directory)
 		}

@@ -34,7 +34,7 @@ pub enum EngineError {
 	/// timeout. Nothing was committed, so the call can be made again.
 	Busy,
 	Failed { message: String },
-	/// The folder has no TaskChampion database.
+	/// The folder has no TaskChampion database, or what's in its place isn't one.
 	NotAReplica,
 	/// An undo failed, and so did the log read that would tell whether its reversal landed first, so
 	/// it may have.
@@ -60,22 +60,24 @@ impl std::fmt::Display for EngineError {
 
 impl<E: std::error::Error + 'static> From<E> for EngineError {
 	fn from(error: E) -> Self {
-		if is_busy(&error) {
-			return EngineError::Busy;
+		match sqlite_error_code(&error) {
+			Some(rusqlite::ErrorCode::DatabaseBusy) => EngineError::Busy,
+			// A file where the database should be that isn't one, such as one overwritten.
+			Some(rusqlite::ErrorCode::NotADatabase) => EngineError::NotAReplica,
+			_ => failed(error),
 		}
-		failed(error)
 	}
 }
 
-/// Whether `error` is SQLite giving up on a held lock. TaskChampion wraps SQLite's errors in an
+/// SQLite's code for `error`, where SQLite raised it. TaskChampion wraps SQLite's errors in an
 /// `anyhow::Error`, which `source` skips past, so it's unwrapped by hand.
-fn is_busy(error: &(dyn std::error::Error + 'static)) -> bool {
+fn sqlite_error_code(error: &(dyn std::error::Error + 'static)) -> Option<rusqlite::ErrorCode> {
 	let sqlite = match error.downcast_ref::<taskchampion::Error>() {
 		Some(taskchampion::Error::Other(error)) => error.downcast_ref::<rusqlite::Error>(),
 		Some(_) => None,
 		None => error.downcast_ref::<rusqlite::Error>(),
 	};
-	sqlite.and_then(rusqlite::Error::sqlite_error_code) == Some(rusqlite::ErrorCode::DatabaseBusy)
+	sqlite.and_then(rusqlite::Error::sqlite_error_code)
 }
 
 fn failed(message: impl ToString) -> EngineError {

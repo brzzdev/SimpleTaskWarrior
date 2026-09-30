@@ -13,8 +13,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
 {
 	/// Where the next new window goes, just below and right of the last.
 	private var cascadePoint = NSPoint.zero
-	/// Each window's controller, by its Replica's resolved folder, kept until the window closes.
-	private var controllers: [URL: ReplicaWindowController] = [:]
+	/// Each window's controller, kept until the window closes.
+	private var controllers: [ReplicaWindowController] = []
 	#if DEBUG
 	/// None, so a Debug build never checks the production feed or installs the Release product over
 	/// itself.
@@ -35,12 +35,15 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
 		// swiftlint:disable:next unneeded_escaping
 		completionHandler: @escaping (NSWindow?, (any Error)?) -> Void,
 	) {
+		@Dependency(\.bookmarkClient) var bookmarkClient
 		// A Replica already restored gets no second window, since AppKit expects a window per request.
+		// One that's gone still gets its window, which says so, at the path it was last at.
 		guard
 			let delegate = NSApp.delegate as? AppDelegate,
 			let bookmark = ReplicaWindowController.bookmark(restoredFrom: state),
-			let folder = try? folder(of: bookmark),
-			delegate.controllers[folder] == nil
+			let folder = (try? folder(of: bookmark)) ?? bookmarkClient.path(bookmark)
+				.map(standardizedFolder),
+			delegate.controller(on: folder) == nil
 		else {
 			completionHandler(nil, CocoaError(.userCancelled))
 			return
@@ -110,18 +113,30 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
 		}
 	}
 
+	/// The window on the Replica in `folder`, standardized, if any.
+	private func controller(on folder: URL) -> ReplicaWindowController? {
+		controllers.first { $0.folder == folder }
+	}
+
 	private func makeController(bookmark: Data, folder: URL) -> ReplicaWindowController {
 		// Unique per window, as restoration requires, and the same for a Replica each time, so its
 		// window reopens where it last was, laid out as it was.
 		let name = "replica:" + folder.path(percentEncoded: false)
-		let controller = ReplicaWindowController(autosaveName: name, bookmark: bookmark) {
-			[weak self] in
-			self?.controllers[folder] = nil
-		}
+		let controller = ReplicaWindowController(
+			autosaveName: name,
+			bookmark: bookmark,
+			folder: folder,
+			onClose: { [weak self] closed in
+				self?.controllers.removeAll { $0 === closed }
+			},
+			windowOnReplica: { [weak self] folder in
+				self?.controller(on: folder)
+			},
+		)
 		controller.window?.identifier = NSUserInterfaceItemIdentifier(name)
 		controller.window?.restorationClass = Self.self
 		controller.window?.setFrameAutosaveName(name)
-		controllers[folder] = controller
+		controllers.append(controller)
 		return controller
 	}
 
@@ -137,7 +152,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
 				let bookmark = try bookmarkClient.create(directory)
 				let folder = try folder(of: bookmark)
 				NSDocumentController.shared.noteNewRecentDocumentURL(folder)
-				if let controller = controllers[folder] {
+				if let controller = controller(on: folder) {
 					controller.showWindow(nil)
 					return
 				}
@@ -170,5 +185,5 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
 /// The Replica folder `bookmark` resolves to.
 private func folder(of bookmark: Data) throws -> URL {
 	@Dependency(\.bookmarkClient) var bookmarkClient
-	return try standardizedFolder(bookmarkClient.resolve(bookmark))
+	return try standardizedFolder(bookmarkClient.resolve(bookmark).url)
 }

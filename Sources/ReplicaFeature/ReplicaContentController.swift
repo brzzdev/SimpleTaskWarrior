@@ -1,19 +1,35 @@
-// The Replica's content: banners over the task table, or why the Replica can't open.
+// The Replica's content: banners over the task table, or why the window has no Replica.
 import AppKit
 import ComposableArchitecture
 import SwiftNavigation
 import Taskrc
 import TaskrcClient
 
-/// Stacks the banners over the task table, and shows why the Replica can't open in place of both.
+/// Stacks the banners over the task table, and shows why the window has no Replica in place of
+/// both.
 final class ReplicaContentController: NSViewController {
 	private let bannerStack = NSStackView()
-	private let failureView = EmptyStateView(
-		symbolName: "exclamationmark.triangle",
-		title: String(localized: "Can't Open Replica"),
+	/// Down the responder chain to the window.
+	private let closeWindowButton = NSButton(
+		title: String(localized: "Close Window"),
+		target: nil,
+		action: #selector(NSWindow.performClose(_:)),
+	)
+	/// Down the responder chain to the window's controller, which opens the panel.
+	private let locateButton = NSButton(
+		title: String(localized: "Locate…"),
+		target: nil,
+		action: #selector(ReplicaWindowController.locateReplica(_:)),
+	)
+	/// Down the responder chain to this controller.
+	private let openReplacementButton = NSButton(
+		title: String(localized: "Open Replacement"),
+		target: nil,
+		action: #selector(openReplacementButtonClicked(_:)),
 	)
 	private let store: StoreOf<ReplicaFeature>
 	private let table: TaskTableController
+	private let unavailableView = EmptyStateView(symbolName: "exclamationmark.triangle", title: "")
 
 	init(autosaveName: String, store: StoreOf<ReplicaFeature>) {
 		self.store = store
@@ -32,7 +48,7 @@ final class ReplicaContentController: NSViewController {
 		bannerStack.alignment = .width
 		bannerStack.orientation = .vertical
 		bannerStack.spacing = 0
-		for subview in [bannerStack, table.view, failureView] {
+		for subview in [bannerStack, table.view, unavailableView] {
 			subview.translatesAutoresizingMaskIntoConstraints = false
 			view.addSubview(subview)
 		}
@@ -42,14 +58,14 @@ final class ReplicaContentController: NSViewController {
 			bannerStack.leadingAnchor.constraint(equalTo: view.leadingAnchor),
 			bannerStack.topAnchor.constraint(equalTo: safeArea.topAnchor),
 			bannerStack.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-			failureView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-			failureView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-			failureView.topAnchor.constraint(equalTo: safeArea.topAnchor),
-			failureView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
 			table.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
 			table.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
 			table.view.topAnchor.constraint(equalTo: bannerStack.bottomAnchor),
 			table.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+			unavailableView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+			unavailableView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+			unavailableView.topAnchor.constraint(equalTo: safeArea.topAnchor),
+			unavailableView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
 		])
 		self.view = view
 	}
@@ -66,10 +82,29 @@ final class ReplicaContentController: NSViewController {
 			guard let self else {
 				return
 			}
-			let failure = store.failure
-			bannerStack.isHidden = failure != nil
-			failureView.isHidden = failure == nil
-			failureView.message = failure
+			let unavailable = store.unavailable
+			bannerStack.isHidden = unavailable != nil
+			unavailableView.isHidden = unavailable == nil
+			guard let unavailable else {
+				return
+			}
+			let path = store.directory?.path(percentEncoded: false)
+			switch unavailable {
+			case let .cantOpen(reason):
+				unavailableView.title = String(localized: "Can't Open Replica")
+				unavailableView.message = reason
+				unavailableView.actions = [locateButton, closeWindowButton]
+
+			case .notFound:
+				unavailableView.title = String(localized: "Replica Not Found")
+				unavailableView.message = path.map { String(localized: "It was last at \($0).") }
+				unavailableView.actions = [locateButton, closeWindowButton]
+
+			case .replaced:
+				unavailableView.title = String(localized: "This Replica Was Replaced")
+				unavailableView.message = path.map { String(localized: "A different Replica is now at \($0).") }
+				unavailableView.actions = [openReplacementButton, locateButton, closeWindowButton]
+			}
 		}
 	}
 
@@ -155,6 +190,11 @@ final class ReplicaContentController: NSViewController {
 	@objc
 	func chooseTaskrcButtonClicked(_: Any?) {
 		store.send(.chooseTaskrcButtonTapped)
+	}
+
+	@objc
+	func openReplacementButtonClicked(_: Any?) {
+		store.send(.openReplacementButtonTapped)
 	}
 
 	@objc
@@ -256,8 +296,17 @@ final class WrappingLabel: NSTextField {
 	}
 }
 
-/// A symbol, a title and an optional message, centred in the space it's given.
+/// A symbol, a title, an optional message and the buttons that act on it, centred in the space it's
+/// given.
 final class EmptyStateView: NSView {
+	/// In a row under the message.
+	var actions: [NSButton] = [] {
+		didSet {
+			actionStack.setViews(actions, in: .center)
+			actionStack.isHidden = actions.isEmpty
+		}
+	}
+
 	/// Under the title, where there's something to explain.
 	var message: String? {
 		didSet {
@@ -266,7 +315,14 @@ final class EmptyStateView: NSView {
 		}
 	}
 
+	private let actionStack = NSStackView()
 	private let messageLabel = WrappingLabel(wrappingLabelWithString: "")
+	private let titleLabel = NSTextField(labelWithString: "")
+
+	var title: String {
+		get { titleLabel.stringValue }
+		set { titleLabel.stringValue = newValue }
+	}
 
 	init(symbolName: String, title: String) {
 		super.init(frame: .zero)
@@ -274,14 +330,16 @@ final class EmptyStateView: NSView {
 		symbol.contentTintColor = .tertiaryLabelColor
 		symbol.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)
 		symbol.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 40, weight: .regular)
-		let titleLabel = NSTextField(labelWithString: title)
+		titleLabel.stringValue = title
 		titleLabel.font = .boldSystemFont(ofSize: NSFont.preferredFont(forTextStyle: .title2).pointSize)
 		titleLabel.textColor = .secondaryLabelColor
 		messageLabel.alignment = .center
 		messageLabel.isHidden = true
 		messageLabel.textColor = .secondaryLabelColor
-		let stack = NSStackView(views: [symbol, titleLabel, messageLabel])
+		actionStack.isHidden = true
+		let stack = NSStackView(views: [symbol, titleLabel, messageLabel, actionStack])
 		stack.orientation = .vertical
+		stack.setCustomSpacing(16, after: messageLabel)
 		stack.spacing = 8
 		stack.translatesAutoresizingMaskIntoConstraints = false
 		addSubview(stack)

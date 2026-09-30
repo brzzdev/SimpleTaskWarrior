@@ -351,9 +351,10 @@ final class TaskTableController: NSViewController, NSMenuDelegate, NSTableViewDa
 	}
 
 	/// Shows the table once its layout is restored, so the default never draws first, and while the
-	/// Replica is open, since a failure takes its place.
+	/// window has a Replica, since why it hasn't takes its place.
 	private func updateVisibility() {
-		view.isHidden = table.autosaveName == nil || store.failure != nil
+		// The store first, so observation tracks it however the other reads.
+		view.isHidden = store.unavailable != nil || table.autosaveName == nil
 	}
 }
 

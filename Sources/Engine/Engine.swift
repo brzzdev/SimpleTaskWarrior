@@ -1119,7 +1119,7 @@ enum EngineError: Swift.Error, Equatable, Hashable, Foundation.LocalizedError {
     case Failed(message: String
     )
     /**
-     * The folder has no TaskChampion database.
+     * The folder has no TaskChampion database, or what's in its place isn't one.
      */
     case NotAReplica
     /**

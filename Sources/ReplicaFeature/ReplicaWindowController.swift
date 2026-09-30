@@ -1,7 +1,9 @@
 // The window over one Replica: a sidebar, the task table and an inspector, under a toolbar.
 public import AppKit
+import BookmarkClient
 import ComposableArchitecture
 public import Foundation
+import ReplicaClient
 import SwiftNavigation
 import Taskrc
 import UniformTypeIdentifiers
@@ -37,27 +39,39 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 		label: newTaskTitle,
 		symbolName: "square.and.pencil",
 	)
-	private let onClose: @MainActor () -> Void
+	private let onClose: @MainActor (ReplicaWindowController) -> Void
 	/// The file panel on screen, so a store change while it's up doesn't open a second.
 	private var openPanel: NSOpenPanel?
 	private let searchItem = NSSearchToolbarItem(itemIdentifier: searchIdentifier)
 	/// The controls of the sheet asking whether a write takes each Series, while it's up.
 	private var seriesPromptAccessory: SeriesPromptAccessory?
+	/// The window already on the Replica in a folder, if any.
+	private let windowOnReplica: @MainActor (_ folder: URL) -> ReplicaWindowController?
+
+	/// The Replica's folder, standardized, or where it last was while the window can't open it.
+	public var folder: URL? {
+		store.directory.map(standardizedFolder)
+	}
 
 	/// Every tag any selected task has, which Remove Tag lists.
 	fileprivate var selectedTags: [String] {
 		store.selectedTags
 	}
 
-	/// A controller for the Replica `bookmark` locates, which autosaves the layout of its split
-	/// view and table under `autosaveName`. It calls `onClose` as its window closes.
+	/// A controller for the Replica `bookmark` locates, last in `folder` where known, which
+	/// autosaves the layout of its split view and table under `autosaveName`. It calls `onClose` as
+	/// its window closes, and asks `windowOnReplica` for the window already on a folder Locate…
+	/// chooses.
 	public init(
 		autosaveName: String,
 		bookmark: Data,
-		onClose: @escaping @MainActor () -> Void,
+		folder: URL?,
+		onClose: @escaping @MainActor (ReplicaWindowController) -> Void,
+		windowOnReplica: @escaping @MainActor (_ folder: URL) -> ReplicaWindowController?,
 	) {
 		self.onClose = onClose
-		store = Store(initialState: ReplicaFeature.State(bookmark: bookmark)) {
+		self.windowOnReplica = windowOnReplica
+		store = Store(initialState: ReplicaFeature.State(bookmark: bookmark, directory: folder)) {
 			ReplicaFeature()
 		}
 		inspector = InspectorController(store: store)
@@ -114,6 +128,14 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 		}
 		observe { [weak self] in
 			self?.updateCommandItems()
+		}
+		// A bookmark re-saved or pointed elsewhere is the one to restore.
+		observe { [weak self] in
+			guard let self else {
+				return
+			}
+			_ = store.bookmark
+			self.window?.invalidateRestorableState()
 		}
 		observe { [weak self] in
 			guard let self, store.isTaskrcPanelPresented else {
@@ -211,6 +233,31 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 	@objc
 	public func find(_: Any?) {
 		searchItem.beginSearchInteraction()
+	}
+
+	/// Asks for the folder the Replica is in now, and points the window at it.
+	@objc
+	public func locateReplica(_: Any?) {
+		guard openPanel == nil, let window else {
+			return
+		}
+		let panel = NSOpenPanel()
+		panel.canChooseDirectories = true
+		panel.canChooseFiles = false
+		panel.directoryURL = store.directory?.deletingLastPathComponent()
+		panel.message = String(localized: "Choose the folder this Replica is in now.")
+		panel.prompt = String(localized: "Choose")
+		openPanel = panel
+		panel.beginSheetModal(for: window) { [weak self] response in
+			guard let self else {
+				return
+			}
+			openPanel = nil
+			guard response == .OK, let directory = panel.url else {
+				return
+			}
+			locate(directory)
+		}
 	}
 
 	@objc
@@ -371,12 +418,38 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 
 	public func windowWillClose(_: Notification) {
 		fetch?.cancel()
-		onClose()
+		onClose(self)
 	}
 
 	@objc
 	func searchFieldChanged(_ searchField: NSSearchField) {
 		store.send(.binding(.set(\.searchText, searchField.stringValue)))
+	}
+
+	/// Points the window at the Replica in `directory`, unless another window shows it, which comes
+	/// forward instead, or it can't be opened, which an alert explains.
+	private func locate(_ directory: URL) {
+		@Dependency(\.replicaClient) var replicaClient
+		if let other = windowOnReplica(standardizedFolder(directory)), other !== self {
+			other.showWindow(nil)
+			return
+		}
+		_Concurrency.Task { [weak self] in
+			do {
+				try await replicaClient.validate(directory)
+				self?.store.send(.replicaFolderChosen(directory))
+			} catch {
+				guard let self, alert == nil, let window else {
+					return
+				}
+				let alert = NSAlert()
+				alert.messageText = error.localizedDescription
+				self.alert = alert
+				alert.beginSheetModal(for: window) { [weak self] _ in
+					self?.alert = nil
+				}
+			}
+		}
 	}
 
 	/// Sends `action`, which selects another task, first ending the edit in progress, which writes it

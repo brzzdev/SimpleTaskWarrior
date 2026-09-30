@@ -9,8 +9,15 @@ public struct BookmarkClient: Sendable {
 	/// count, since it resolves where it did before.
 	public var changes: @Sendable () -> AsyncStream<Void> = { .finished }
 	public var create: @Sendable (_ url: URL) throws -> Data
-	/// The bookmarked URL, which follows a folder that moved.
-	public var resolve: @Sendable (_ bookmark: Data) throws -> URL
+	/// Pairs the Taskrc paired with the Replica last in `replica` with the one in `newReplica`
+	/// instead, dropping any the latter had. The first may be gone, so where its bookmark no longer
+	/// resolves, it's found by the path the bookmark was made at.
+	public var movePairing: @Sendable (_ replica: URL, _ newReplica: URL) throws -> Void
+	/// The path `bookmark` was made at, which it records even once it no longer resolves.
+	public var path: @Sendable (_ bookmark: Data) -> URL?
+	/// The bookmarked URL, which follows a folder that moved, and a fresh bookmark to keep in place
+	/// of `bookmark` where it's stale.
+	public var resolve: @Sendable (_ bookmark: Data) throws -> (url: URL, refreshed: Data?)
 	/// Pairs `taskrc` with the Replica in `replica`, or detaches the Replica's Taskrc when nil.
 	public var saveTaskrc: @Sendable (_ taskrc: URL?, _ replica: URL) throws -> Void
 	/// The Taskrc paired with the Replica in `replica`, re-saving a stale bookmark. Where the
@@ -32,10 +39,31 @@ extension BookmarkClient: DependencyKey {
 		create: { url in
 			try url.bookmarkData()
 		},
+		movePairing: { replica, newReplica in
+			let bookmark = try newReplica.bookmarkData()
+			update { stored in
+				guard
+					let index = pairingIndex(of: replica, in: &stored)
+					?? lostPairingIndex(of: replica, in: stored)
+				else {
+					return
+				}
+				var pairing = stored.pairings.remove(at: index)
+				pairing.replica = bookmark
+				if let replaced = pairingIndex(of: newReplica, in: &stored) {
+					stored.pairings.remove(at: replaced)
+				}
+				stored.pairings.append(pairing)
+			}
+			notifyChanges()
+		},
+		path: { bookmark in
+			recordedPath(of: bookmark)
+		},
 		resolve: { bookmark in
-			// A stale bookmark still resolves, to where the folder moved. Re-saving it is part of
-			// handling a lost Replica.
-			try resolved(bookmark).url
+			// A stale bookmark still resolves, to where the folder moved, or to one made at its path since.
+			let (url, isStale) = try resolved(bookmark)
+			return (url, isStale ? try? url.bookmarkData() : nil)
 		},
 		saveTaskrc: { taskrc, replica in
 			let pairing = try taskrc.map { try Pairing(
@@ -65,10 +93,7 @@ extension BookmarkClient: DependencyKey {
 					return nil
 				}
 				let bookmark = stored.pairings[index].taskrc
-				return url(of: bookmark) { stored.pairings[index].taskrc = $0 }
-					?? URL.resourceValues(forKeys: [.pathKey], fromBookmarkData: bookmark)?
-					.path
-					.map { URL(filePath: $0) }
+				return url(of: bookmark) { stored.pairings[index].taskrc = $0 } ?? recordedPath(of: bookmark)
 			}
 		},
 	)
@@ -102,6 +127,16 @@ private struct Pairing: Codable, Equatable {
 	var taskrc: Data
 }
 
+/// The index of the pairing whose Replica bookmark no longer resolves, but was made at the folder
+/// `replica`. Only moving a pairing looks for one, so a Replica later made at that path doesn't
+/// inherit it.
+private func lostPairingIndex(of replica: URL, in stored: Stored) -> Int? {
+	stored.pairings.firstIndex { pairing in
+		(try? resolved(pairing.replica)) == nil
+			&& recordedPath(of: pairing.replica).map(standardizedFolder) == standardizedFolder(replica)
+	}
+}
+
 /// The index of the pairing whose Replica bookmark resolves to the folder `replica`, re-saving any
 /// stale Replica bookmark it resolves on the way.
 private func pairingIndex(of replica: URL, in stored: inout Stored) -> Int? {
@@ -109,6 +144,11 @@ private func pairingIndex(of replica: URL, in stored: inout Stored) -> Int? {
 		url(of: stored.pairings[index].replica) { stored.pairings[index].replica = $0 }
 			.map(standardizedFolder) == standardizedFolder(replica)
 	}
+}
+
+/// The path `bookmark` was made at, which it records even once it no longer resolves.
+private func recordedPath(of bookmark: Data) -> URL? {
+	URL.resourceValues(forKeys: [.pathKey], fromBookmarkData: bookmark)?.path.map { URL(filePath: $0) }
 }
 
 /// The folder at `url`, standardized so two spellings of it compare equal: how the app tells

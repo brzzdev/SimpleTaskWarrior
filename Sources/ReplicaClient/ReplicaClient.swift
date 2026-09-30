@@ -1,5 +1,6 @@
 // The only importer of the engine: one actor per open Replica.
 public import ComposableArchitecture
+import Darwin
 import Dispatch
 import Engine
 public import Foundation
@@ -11,9 +12,13 @@ public struct ReplicaClient: Sendable {
 	/// Commits `plan` as one Undo point to the Replica a `tasks` stream has open in `directory`,
 	/// unless a value it read has changed since, then reads every task again. That read doesn't
 	/// reach the stream, which yields only what changes after it. The window can undo the Undo
-	/// point by `name`, which the Edit menu shows.
+	/// point by `name`, which the Edit menu shows. Throws `lost` where the Replica's database is no
+	/// longer the one the stream opened, as `undo` and `redo` do.
 	public var apply: @Sendable (_ plan: WritePlan, _ name: String, _ directory: URL) async throws
 		-> ApplyOutcome
+
+	/// The database of the Replica in `directory` as it is now, nil where there's none.
+	public var identity: @Sendable (_ directory: URL) -> ReplicaIdentity? = { _ in nil }
 
 	/// Re-applies the Undo point the window last undid, as a new one it can undo again, provided
 	/// nothing has written since. Reads every task again, as `apply` does.
@@ -21,7 +26,8 @@ public struct ReplicaClient: Sendable {
 
 	/// Opens the Replica in `directory` for one window, yielding its tasks at once and again
 	/// whenever anything, the CLI included, commits to it. Each read that fails yields its error,
-	/// and the first to succeed after one yields the tasks whether or not they changed. Ending
+	/// and the first to succeed after one yields the tasks whether or not they changed. Throws
+	/// `lost` and closes the Replica once its database is no longer the one opened. Ending
 	/// iteration closes the Replica once any open or read in flight returns.
 	public var tasks: @Sendable (_ directory: URL)
 		-> AsyncThrowingStream<Result<TaskSnapshot, ReplicaError>, any Error> = { _ in .finished() }
@@ -88,11 +94,37 @@ public struct UndoOutcome: Equatable, Sendable {
 	}
 }
 
+/// Which file a Replica's database is: its device and inode, which a move keeps and a replacement,
+/// such as a recreation or a restore from backup, doesn't.
+public struct ReplicaIdentity: Equatable, Sendable {
+	public var device: Int
+	public var inode: Int
+
+	public init(device: Int, inode: Int) {
+		self.device = device
+		self.inode = inode
+	}
+
+	/// The database in `directory`, nil where there's none. Found by `stat`, never by opening it:
+	/// closing any descriptor on the file drops every SQLite POSIX lock the process holds on it.
+	init?(directory: URL) {
+		var info = stat()
+		let database = directory.appending(path: databaseFile).path(percentEncoded: false)
+		guard stat(database, &info) == 0 else {
+			return nil
+		}
+		self.init(device: Int(info.st_dev), inode: Int(info.st_ino))
+	}
+}
+
 public enum ReplicaError: Equatable, LocalizedError {
 	/// Another connection, such as a `task` command, held the Replica's lock past the 5 s it's
 	/// waited for. Nothing was written, so the call can be made again.
 	case busy
 	case failed(String)
+	/// The Replica's database is no longer the one opened, `identity`: it moved, was replaced or is
+	/// gone. Nothing was written, and nothing more will be, until a window opens it again.
+	case lost(ReplicaIdentity)
 	case notAReplica
 	/// No window has the Replica open.
 	case notOpen
@@ -109,6 +141,9 @@ public enum ReplicaError: Equatable, LocalizedError {
 		case let .failed(message):
 			message
 
+		case .lost:
+			"The Replica moved, was replaced or is gone"
+
 		case .notAReplica:
 			"This folder isn't a Taskwarrior 3 Replica"
 
@@ -124,6 +159,9 @@ public enum ReplicaError: Equatable, LocalizedError {
 	}
 }
 
+/// The Replica's database in its folder, as TaskChampion names it.
+private let databaseFile = "taskchampion.sqlite3"
+
 /// Each window's Replica, by the folder its `tasks` stream opened, which `apply` writes through.
 private let openReplicas = Mutex<[URL: Replica]>([:])
 
@@ -134,6 +172,9 @@ extension ReplicaClient: DependencyKey {
 	public static let liveValue = Self(
 		apply: { plan, name, directory in
 			try await replicaErrors { try await openReplica(directory).apply(plan, name: name) }
+		},
+		identity: { directory in
+			ReplicaIdentity(directory: directory)
 		},
 		redo: { directory in
 			try await replicaErrors { try await openReplica(directory).redo() }
@@ -168,6 +209,7 @@ extension ReplicaClient: DependencyKey {
 							// Before every read too: cancelling doesn't interrupt a blocked `open`, and
 							// once it returns, a read would start a fresh wait on the lock.
 							try _Concurrency.Task.checkCancellation()
+							try await replica.checkIdentity()
 							// A failed read retries next tick, leaving the window its last tasks.
 							await replica.publishTasksIfChanged(to: continuation)
 							try await _Concurrency.Task.sleep(for: pollInterval)
@@ -250,7 +292,10 @@ actor Replica {
 		}
 	}
 
+	private let directory: URL
 	private let engine: EngineHandle
+	/// The database as it was opened, which every write checks it still is.
+	private let identity: ReplicaIdentity
 	private let queue: DispatchSerialQueue
 	private var readCount = 0
 	/// The `data_version` the last tasks were read at, nil before the first read.
@@ -270,12 +315,18 @@ actor Replica {
 	isolated deinit {}
 
 	private init(directory: URL, queue: DispatchSerialQueue) throws(ReplicaError) {
+		self.directory = directory
 		self.queue = queue
 		do {
 			engine = try EngineHandle.open(directory: directory.path(percentEncoded: false))
 		} catch {
 			throw ReplicaError(error)
 		}
+		// Gone as soon as it opened, so no longer the database that did.
+		guard let identity = ReplicaIdentity(directory: directory) else {
+			throw .notAReplica
+		}
+		self.identity = identity
 	}
 
 	/// Opens on the actor's queue, since opening waits on a held lock like any other call. The
@@ -294,6 +345,7 @@ actor Replica {
 
 	/// Commits `plan` unless the engine refuses it as stale, then reads every task again.
 	func apply(_ plan: WritePlan, name: String) throws -> ApplyOutcome {
+		try checkIdentity()
 		let outcome = try engine.apply(
 			operations: plan.operations.map(PlannedOperation.init),
 			expectations: plan.expectations.map(Expectation.init),
@@ -315,6 +367,7 @@ actor Replica {
 	/// still gets through, since TaskChampion can't make a commit conditional. One attempt only: a
 	/// redo that fails isn't offered again.
 	func redo() throws -> UndoOutcome {
+		try checkIdentity()
 		guard let redoPoint, try engine.dataVersion() == redoPoint.dataVersion else {
 			return try notApplied()
 		}
@@ -338,6 +391,7 @@ actor Replica {
 	/// held, is thrown, and the point stays for another try. So is `undoUnconfirmed`, where the
 	/// engine can't tell whether it landed, and the next read settles the point.
 	func undo() throws -> UndoOutcome {
+		try checkIdentity()
 		guard
 			let point = undoPoints.last,
 			case let .applied(error) = try engine.commitReversedOperations(operations: point.operations)
@@ -373,6 +427,15 @@ actor Replica {
 		} catch {
 			readVersion = nil
 			continuation.yield(.failure(ReplicaError(error)))
+		}
+	}
+
+	/// Throws `lost` where the database in the Replica's folder is no longer the one opened, before a
+	/// write reaches it. A replacement landing between the check and the write can't be prevented,
+	/// only found on the next check.
+	func checkIdentity() throws(ReplicaError) {
+		guard ReplicaIdentity(directory: directory) == identity else {
+			throw .lost(identity)
 		}
 	}
 
