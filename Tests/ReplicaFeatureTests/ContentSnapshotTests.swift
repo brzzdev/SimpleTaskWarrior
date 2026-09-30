@@ -170,6 +170,7 @@ private func render(_ view: NSView, size: CGSize, appearance: NSAppearance.Name)
 	container.fillColor = .windowBackgroundColor
 	container.titlePosition = .noTitle
 	container.contentView = view
+	useOverlayScrollers(in: view)
 	container.layoutSubtreeIfNeeded()
 	let bitmap = NSBitmapImageRep(
 		bitmapDataPlanes: nil,
@@ -189,6 +190,18 @@ private func render(_ view: NSView, size: CGSize, appearance: NSAppearance.Name)
 	let image = NSImage(size: size)
 	image.addRepresentation(bitmap)
 	return image
+}
+
+/// Gives every scroll view under `view` overlay scrollers. A new scroll view takes its style from
+/// the "Show scroll bars" setting, which on Automatic depends on whether a mouse is connected, and
+/// CI runners differ in that. A legacy scroller takes up width the content would otherwise use,
+/// which moves where text wraps.
+@MainActor
+private func useOverlayScrollers(in view: NSView) {
+	(view as? NSScrollView)?.scrollerStyle = .overlay
+	for subview in view.subviews {
+		useOverlayScrollers(in: subview)
+	}
 }
 
 private let bannerWidth: CGFloat = 640
