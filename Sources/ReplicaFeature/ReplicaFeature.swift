@@ -291,8 +291,8 @@ struct ReplicaFeature {
 		var canRetry: Bool
 	}
 
-	/// A write, undo or redo that failed, having changed nothing, except an undo the engine couldn't
-	/// confirm, which may have landed.
+	/// A write, undo or redo that failed. It changed nothing, unless it was an undo the engine
+	/// couldn't confirm.
 	struct WriteFailure: Equatable {
 		/// What Try Again does.
 		enum Retry: Equatable {
@@ -800,7 +800,7 @@ struct ReplicaFeature {
 			await send(.undoOrRedoFinished(outcome))
 		} catch: { error, send in
 			// The engine lets go of a redo that fails, so there's nothing to try again. Nor for an undo
-			// that may have landed, where trying again could revert the change before it: the next
+			// that may have landed, where trying again could revert the Undo point before it: the next
 			// read shows what happened, and Undo stays available if it didn't land.
 			let unconfirmed = error as? ReplicaError == .undoUnconfirmed
 			let retry: WriteFailure.Retry? = direction == .undo && !unconfirmed ? .undo : nil

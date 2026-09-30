@@ -97,7 +97,7 @@ public enum ReplicaError: Equatable, LocalizedError {
 	/// No window has the Replica open.
 	case notOpen
 	/// An undo failed, and the Replica couldn't be read to tell whether its reversal landed first.
-	/// Undoing again could revert the change before it.
+	/// Undoing again could revert the Undo point before it.
 	case undoUnconfirmed
 	case unsupportedSchema
 
