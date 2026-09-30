@@ -59,7 +59,6 @@ public struct WritePlanner: Sendable {
 			}
 			let apply = { (draft: inout Draft) throws(WritePlanError) in
 				try draft.apply(edit, at: now, resolving: self)
-				try draft.refuseRemovingSeriesDue()
 			}
 			guard case let .addDependency(dependency) = edit else {
 				return try plan(ids, tasks: tasks, at: now, change: apply)
@@ -217,9 +216,10 @@ public struct WritePlanner: Sendable {
 				repairedChains.append(chain)
 			}
 		}
-		// Over the drafts so far, which a template the mask update drafts doesn't join: it has no
-		// `parent` to update.
+		// The indices are taken before the mask update drafts any template, which needs no pass of its
+		// own: it has no `parent`.
 		for index in drafts.all.indices {
+			try drafts[index].refuseRemovingSeriesDue()
 			drafts[index].rewriteLegacyWaiting()
 			updateRecurrenceMask(of: index, in: &drafts, at: now)
 		}
@@ -276,30 +276,31 @@ public struct WritePlanner: Sendable {
 	/// deleted. Only the instance's character changes, so the mask never shortens, and a missing,
 	/// invalid or out-of-range `imask` leaves it alone, where the CLI would rebuild it.
 	private func updateRecurrenceMask(of index: Int, in drafts: inout Drafts, at now: Date) {
-		guard drafts[index].isChanged else {
-			return
-		}
-		let instance = drafts[index].properties
 		guard
-			let parent = instance["parent"].flatMap(UUID.init(uuidString:)),
-			let imask = instance["imask"].flatMap(Int.init),
-			let template = drafts.index(parent)
-		else {
-			return
-		}
-		guard
-			let status = drafts[index].read("status").flatMap(Status.init(rawValue:)),
+			let parent = drafts[index].properties["parent"].flatMap(UUID.init(uuidString:)),
+			let imask = drafts[index].properties["imask"].flatMap(Int.init),
+			drafts[index].isChanged,
+			let template = drafts.index(parent),
 			var mask = drafts[template].read("mask").map(Array.init),
-			mask.indices.contains(imask)
+			mask.indices.contains(imask),
+			let status = drafts[index].read("status").flatMap(Status.init(rawValue:))
 		else {
 			return
 		}
 		let symbol: Character =
 			switch status {
-			case .completed: "+"
-			case .deleted: "X"
-			case .pending: isWaiting(drafts[index].read("wait"), at: now) ? "W" : "-"
-			case .recurring: "?"
+			case .completed:
+				"+"
+
+			case .deleted:
+				"X"
+
+			// `Task.isWaiting`, over the stored `wait`.
+			case .pending:
+				drafts[index].read("wait").flatMap { Date(epoch: $0) }.map { $0 > now } == true ? "W" : "-"
+
+			case .recurring:
+				"?"
 			}
 		mask[imask] = symbol
 		drafts[template].set("mask", String(mask))
@@ -479,11 +480,6 @@ private let dateAttributes: Set = [
 /// `Status.isOpen` reads it, a Recurrence template and a legacy `waiting` included.
 private func isOpen(_ status: String?) -> Bool {
 	status.flatMap(Status.init(rawValue:))?.isOpen ?? true
-}
-
-/// Whether a pending task with `wait` is waiting at `now`, as `Task::is_waiting` reads it.
-private func isWaiting(_ wait: String?, at now: Date) -> Bool {
-	wait.flatMap { Date(epoch: $0) }.map { $0 > now } ?? false
 }
 
 /// The status TW 2 stored for a waiting task, which `Status` doesn't decode. TW 3 reads it as
@@ -762,7 +758,8 @@ private struct Draft {
 		return properties[property]
 	}
 
-	/// Refuses removing `due` from a task with `recur`, as `task modify due:` does.
+	/// Refuses removing `due` from a task with `recur`, as `task modify due:` does, whichever change
+	/// removed it.
 	func refuseRemovingSeriesDue() throws(WritePlanError) {
 		guard original["due"] != nil, properties["due"] == nil, original["recur"] != nil else {
 			return

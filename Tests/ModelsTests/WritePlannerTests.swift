@@ -565,7 +565,7 @@ struct WritePlannerTests {
 			at: recording.now,
 		)
 
-		#expect(!plan.operations.contains { $0.property == "mask" })
+		#expect(plan.operations.allSatisfy { $0.id == instance })
 	}
 
 	/// `task modify due:` refuses it with "You cannot remove the due date from a recurring task."
@@ -762,13 +762,6 @@ extension WritePlan.Operation {
 		switch self {
 		case let .create(id), let .setStatus(id, _), let .setValue(id, _, _): id
 		}
-	}
-
-	fileprivate var property: String? {
-		if case let .setValue(_, property, _) = self {
-			return property
-		}
-		return nil
 	}
 
 	fileprivate var isStatus: Bool {
