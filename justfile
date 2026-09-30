@@ -523,7 +523,11 @@ publish version: (check-tag version) (archive version)
 	app="{{ release_app }}"
 	dmg="{{ release_dir }}/{{ scheme }}.dmg"
 	staging="{{ release_dir }}/dmg"
+	unzipped="{{ release_dir }}/unzipped"
 	zip="{{ release_zip }}"
+	# The staged `/Applications` link would lead SwiftLint's build phase, which
+	# walks the tree, through every installed app.
+	trap 'rm -rf "$staging" "$unzipped"' EXIT
 
 	echo "==> Building the DMG"
 	mkdir "$staging"
@@ -550,7 +554,6 @@ publish version: (check-tag version) (archive version)
 	# Zipped after stapling, so the ticket travels with the app for offline use,
 	# and checked as it comes back out.
 	ditto -c -k --keepParent "$app" "$zip"
-	unzipped="{{ release_dir }}/unzipped"
 	ditto -x -k "$zip" "$unzipped"
 	xcrun stapler validate "$unzipped/{{ scheme }}.app"
 	spctl -a -vv -t exec "$unzipped/{{ scheme }}.app"
