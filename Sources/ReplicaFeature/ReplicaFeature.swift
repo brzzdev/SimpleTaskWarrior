@@ -112,6 +112,12 @@ struct ReplicaFeature {
 			undoName != nil && canWrite
 		}
 
+		/// The folder the window claims as its Replica's, which no other window opens: none once another
+		/// window has the Replica.
+		var claimedDirectory: URL? {
+			unavailable == .openElsewhere ? nil : directory
+		}
+
 		/// The commands that apply to every selected task. None applies while a write would queue, or
 		/// while the new-task row is open, whose Return would find the write in the way. Read once for
 		/// all of them, since the selection is looked up for each read.
@@ -895,15 +901,16 @@ struct ReplicaFeature {
 				}
 			}
 		} catch: { error, send in
-			if let identity = lostReplica(error) {
+			switch error as? ReplicaError {
+			case let .lost(identity):
 				await send(.replicaLost(identity))
-				return
-			}
-			if error as? ReplicaError == .openElsewhere {
+
+			case .openElsewhere:
 				await send(.replicaOpenElsewhere)
-				return
+
+			default:
+				await send(.openFailed(error.localizedDescription))
 			}
-			await send(.openFailed(error.localizedDescription))
 		}
 		.cancellable(id: CancelID.replica, cancelInFlight: true)
 	}

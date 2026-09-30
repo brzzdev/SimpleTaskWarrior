@@ -1750,8 +1750,8 @@ struct ReplicaFeatureTests {
 			$0.continuousClock = TestClock()
 			$0.date.now = now
 			$0.replicaClient.identity = { _ in identity }
-			$0.replicaClient.tasks = { _, identity in
-				expected.withValue { $0.append(identity) }
+			$0.replicaClient.tasks = { _, only in
+				expected.withValue { $0.append(only) }
 				return streams.make()
 			}
 			$0.taskrcClient.load = { _, _ in .finished }

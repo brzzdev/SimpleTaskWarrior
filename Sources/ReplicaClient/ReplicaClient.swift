@@ -345,9 +345,9 @@ actor Replica {
 		}
 	}
 
-	/// Opens on the actor's queue, since opening waits on a held lock like any other call. The
-	/// whole actor is built there, so only it crosses back to the caller, never the engine handle.
-	/// Opens the Replica in `directory`, only where its database is `expected`, if given.
+	/// Opens the Replica in `directory`, only where its database is `expected`, if given. Opens on the
+	/// actor's queue, since opening waits on a held lock like any other call. The whole actor is
+	/// built there, so only it crosses back to the caller, never the engine handle.
 	static func open(
 		directory: URL,
 		expected: ReplicaIdentity?,

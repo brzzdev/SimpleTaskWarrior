@@ -46,13 +46,9 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 	/// The controls of the sheet asking whether a write takes each Series, while it's up.
 	private var seriesPromptAccessory: SeriesPromptAccessory?
 
-	/// The Replica's folder, standardized, or where it last was while the window can't open it.
-	/// Nil once another window has the Replica, so opening its folder brings that window forward.
+	/// The folder the window claims as its Replica's, standardized.
 	public var folder: URL? {
-		guard store.unavailable != .openElsewhere else {
-			return nil
-		}
-		return store.directory.map(standardizedFolder)
+		store.claimedDirectory.map(standardizedFolder)
 	}
 
 	/// Every tag any selected task has, which Remove Tag lists.
