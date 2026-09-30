@@ -699,6 +699,31 @@ struct ReplicaFeatureTests {
 		await store.finish()
 	}
 
+	/// A sibling can't depend on itself, so the Series can't take the edit, but it's still offered
+	/// rather than quietly dropped.
+	@Test
+	func editOfAnInstanceTheSeriesCantTakeStillAsks() async throws {
+		let plants = series(0, "Water plants", instances: [1, 2])
+		var initialState = try loadedState(plants.instances, selection: [UUID(1)])
+		initialState.storedTasks.append(plants.template)
+		let store = TestStore(initialState: initialState) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.date.now = now
+			$0.timeZone = .gmt
+		}
+		let edit = TaskEdit.addDependency(UUID(2))
+
+		await store.send(.inspectorFieldSubmitted([UUID(1)], edit)) {
+			$0.keptTasks = [UUID(1)]
+			$0.seriesPrompt = ReplicaFeature.SeriesPrompt(
+				choices: [ReplicaFeature.SeriesPrompt.Choice(description: "Water plants", id: UUID(0))],
+				command: .edit(edit),
+				ids: [UUID(1)],
+			)
+		}
+	}
+
 	/// Asked as it starts, so an edit queued behind a running write asks once that write ends, and
 	/// the edits queued behind the question wait for the answer.
 	@Test

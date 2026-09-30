@@ -1038,20 +1038,23 @@ struct ReplicaFeature {
 		let planner = WritePlanner(taskrc: state.runningTaskrc, timeZone: timeZone)
 		let tasks = properties(of: state.storedTasks)
 		let every = seriesChoices(ids, tasks: tasks)
-		// Planned only where it might ask. A plan that can't be made asks nothing, and the write
-		// reports why.
-		guard
-			planner.cascadesToSeries(edit),
-			!every.isEmpty,
-			let plan = try? planner.plan(
-				.edit(ids, edit, series: Set(every.ids)),
-				tasks: tasks,
-				at: now,
-			),
-			case let changed = changedSeries(plan.applied(to: tasks), tasks: tasks),
-			case let choices = every.filter({ changed.contains($0.id) }),
-			!choices.isEmpty
-		else {
+		// Planned only where it might ask.
+		guard planner.cascadesToSeries(edit), !every.isEmpty else {
+			return startWrite(.edit(ids, edit), at: now, &state)
+		}
+		let choices: IdentifiedArrayOf<SeriesPrompt.Choice>
+		do {
+			let plan = try planner.plan(.edit(ids, edit, series: Set(every.ids)), tasks: tasks, at: now)
+			let changed = changedSeries(plan.applied(to: tasks), tasks: tasks)
+			choices = every.filter { changed.contains($0.id) }
+		} catch {
+			// Where only a Series can't take the edit, as a sibling can't depend on itself, each is
+			// still offered, and its write reports why. Where the tasks themselves can't, the write
+			// reports why without asking.
+			let plansAlone = (try? planner.plan(.edit(ids, edit), tasks: tasks, at: now)) != nil
+			choices = plansAlone ? every : []
+		}
+		guard !choices.isEmpty else {
 			return startWrite(.edit(ids, edit), at: now, &state)
 		}
 		guard state.runningTaskrc[recurrenceConfirmation] == askingConfirmation else {

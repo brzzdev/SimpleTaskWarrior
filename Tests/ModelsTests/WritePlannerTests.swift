@@ -693,6 +693,37 @@ struct WritePlannerTests {
 		#expect(plan.applied(to: recording.before) == recording.after)
 	}
 
+	/// So an instance the CLI generates from the old template before the plan commits fails it, even
+	/// where the edit changes no instance.
+	@Test
+	func editingOnlyATemplateExpectsItsMask() throws {
+		let planner = WritePlanner(taskrc: .defaults, timeZone: .gmt)
+		let (template, instance) = (UUID(), UUID())
+		let tasks = [
+			instance: [
+				"imask": "0",
+				"parent": template.uuidString.lowercased(),
+				"status": "pending",
+				"tag_garden": "x",
+				"tags": "garden",
+			],
+			template: ["mask": "-", "status": "recurring"],
+		]
+
+		let plan = try planner.plan(
+			.edit([instance], .addTags(["garden"]), series: [template]),
+			tasks: tasks,
+			at: .now,
+		)
+
+		#expect(plan.operations.allSatisfy { $0.id == template })
+		#expect(plan.expectations.contains(WritePlan.Expectation(
+			property: "mask",
+			uuid: template,
+			value: "-",
+		)))
+	}
+
 	/// The CLI sets the date on every task in the Series, collapsing it onto one date.
 	@Test(arguments: ["due", "scheduled", "wait"])
 	func editingADateOfAnInstanceLeavesItsSeries(property: String) throws {

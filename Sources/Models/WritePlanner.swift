@@ -281,6 +281,7 @@ public struct WritePlanner: Sendable {
 		for index in drafts.all.indices {
 			try drafts[index].refuseRemovingSeriesDue()
 			drafts[index].rewriteLegacyWaiting()
+			drafts[index].expectMaskOfChangedTemplate()
 			updateRecurrenceMask(of: index, in: &drafts, at: now)
 		}
 		var plan = WritePlan(drafts.all, epoch: String(now.epoch))
@@ -793,6 +794,16 @@ private struct Draft {
 		}
 		stampEnd(at: epoch)
 		set("status", Status.deleted.rawValue)
+	}
+
+	/// A template the plan changes expects its `mask`, which generating an instance grows. So an
+	/// instance the CLI generates from the old template before the plan commits fails it, and the
+	/// plan made again takes the new instance too, even where no instance changes.
+	mutating func expectMaskOfChangedTemplate() {
+		guard isChanged, original["mask"] != nil else {
+			return
+		}
+		_ = read("mask")
 	}
 
 	/// `modify status:pending`, where `Task::validate` removes `end` from a pending task. A legacy
