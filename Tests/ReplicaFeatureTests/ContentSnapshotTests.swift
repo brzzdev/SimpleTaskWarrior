@@ -194,8 +194,8 @@ private func render(_ view: NSView, size: CGSize, appearance: NSAppearance.Name)
 
 /// Gives every scroll view under `view` overlay scrollers. A new scroll view takes its style from
 /// the "Show scroll bars" setting, which on Automatic depends on whether a mouse is connected, and
-/// CI runners differ in that. A legacy scroller takes its width from the content beside it, so
-/// the inspector's Replica path wrapped at two widths.
+/// CI runners differ in that. A legacy scroller takes its width from the content beside it, which
+/// moves where text wraps.
 @MainActor
 private func useOverlayScrollers(in view: NSView) {
 	(view as? NSScrollView)?.scrollerStyle = .overlay
