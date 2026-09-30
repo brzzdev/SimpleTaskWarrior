@@ -2,7 +2,7 @@
 
 The Release build updates in place through Sparkle 2. This is the app's first explicit network feature, and a second way to install it besides downloading the DMG. There's one channel. The feed is `https://github.com/brzzdev/SimpleTaskWarrior/releases/latest/download/appcast.xml`, which GitHub redirects to the `appcast.xml` attached to the release marked latest. `just publish` generates that appcast from the notarised zip it uploads, so no Pages site or committed appcast is needed. It holds only its own release, which is enough while there's one platform and one channel. The release is published as a draft and marked latest only once the zip, DMG and appcast are all attached, so the feed never points at a release with missing assets.
 
-Sparkle checks each update archive's EdDSA signature against the `SUPublicEDKey` in the Info.plist. The private key lives in the publisher's login keychain, where Sparkle's `generate_keys` put it and `generate_appcast` reads it. It's backed up in 1Password as the file `generate_keys -x` exports, which `generate_keys -f` imports onto another Mac.
+Sparkle checks each update archive's EdDSA signature against the `SUPublicEDKey` in the Info.plist. The private key lives in the publisher's login keychain, where Sparkle's `generate_keys` put it and `generate_appcast` reads it. It's backed up in 1Password, as the "SimpleTaskWarrior Sparkle EdDSA private key" document in the Dev vault. That's the file `generate_keys -x` exports, which `generate_keys -f` imports onto another Mac.
 
 ## Consequences
 
