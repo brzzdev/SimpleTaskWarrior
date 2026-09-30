@@ -1800,6 +1800,39 @@ struct ReplicaFeatureTests {
 	}
 
 	@Test
+	func movedReplicaAnotherWindowHasOpenStaysThatWindows() async throws {
+		let milk = storedTask(0, "Buy milk", workingSetID: 1)
+		let identity = ReplicaIdentity(device: 1, inode: 2)
+		let streams = TaskStreams()
+		let initialState = try loadedState([milk])
+		let store = TestStore(initialState: initialState) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.bookmarkClient.changes = { .finished }
+			$0.bookmarkClient.resolve = { _ in (replicaDirectory, nil) }
+			$0.continuousClock = TestClock()
+			$0.date.now = now
+			$0.replicaClient.identity = { _ in identity }
+			$0.replicaClient.tasks = { _, _ in streams.make() }
+			$0.taskrcClient.load = { _, _ in .finished }
+			$0.timeZone = .gmt
+		}
+
+		await store.send(.replicaLost(identity)) {
+			$0.isReplicaOpen = false
+		}
+		await store.receive(\.directoryResolved)
+		streams[0].finish(throwing: ReplicaError.openElsewhere)
+		await store.receive(\.replicaOpenElsewhere) {
+			$0.allRows = []
+			$0.rows = []
+			$0.storedTasks = []
+			$0.unavailable = .openElsewhere
+		}
+		await store.finish()
+	}
+
+	@Test
 	func replacedReplicaShowsWhyUntilOpenReplacementOpensIt() async throws {
 		let milk = storedTask(0, "Buy milk", workingSetID: 1)
 		let moves = LockIsolated<[[URL]]>([])

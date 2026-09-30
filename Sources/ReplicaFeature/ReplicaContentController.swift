@@ -100,6 +100,12 @@ final class ReplicaContentController: NSViewController {
 				unavailableView.message = path.map { String(localized: "It was last at \($0).") }
 				unavailableView.actions = [locateButton, closeWindowButton]
 
+			case .openElsewhere:
+				unavailableView.title = String(localized: "Replica Open in Another Window")
+				unavailableView.message = path
+					.map { String(localized: "It moved to \($0), which another window has open.") }
+				unavailableView.actions = [closeWindowButton]
+
 			case .replaced:
 				unavailableView.title = String(localized: "This Replica Was Replaced")
 				unavailableView.message = path.map { String(localized: "A different Replica is now at \($0).") }

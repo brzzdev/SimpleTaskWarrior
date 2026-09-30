@@ -128,6 +128,19 @@ final class ReplicaClientTests {
 	}
 
 	@Test
+	func tasksLeavesAMovedReplicaToTheWindowAlreadyOnItsFolder() async throws {
+		_ = try createReplica()
+		var open = replicaClient.tasks(directory, nil).makeAsyncIterator()
+		_ = try await open.next()
+		let identity = try #require(replicaClient.identity(directory))
+		var moved = replicaClient.tasks(directory, identity).makeAsyncIterator()
+
+		await #expect(throws: ReplicaError.openElsewhere) {
+			_ = try await moved.next()
+		}
+	}
+
+	@Test
 	func tasksOpensOnlyTheDatabaseExpected() async throws {
 		_ = try createReplica()
 		let other = ReplicaIdentity(device: 0, inode: 0)

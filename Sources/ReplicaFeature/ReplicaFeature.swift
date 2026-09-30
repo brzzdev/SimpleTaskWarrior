@@ -348,6 +348,8 @@ struct ReplicaFeature {
 		case cantOpen(String)
 		/// The bookmark no longer resolves, or nothing's where it does.
 		case notFound
+		/// The Replica moved to a folder another window already has open.
+		case openElsewhere
 		/// A Replica other than the one the window had open is where its bookmark resolves, now its
 		/// `directory`, which Open Replacement opens.
 		case replaced
@@ -429,6 +431,8 @@ struct ReplicaFeature {
 		case replicaLost(ReplicaIdentity)
 		/// Where the window's bookmark resolves, there's no Replica.
 		case replicaNotFound
+		/// The Replica lost moved to a folder another window already has open.
+		case replicaOpenElsewhere
 		/// Another Replica is where the lost one's bookmark resolves, in the folder given.
 		case replicaReplaced(URL)
 		case repairChainButtonTapped
@@ -680,6 +684,10 @@ struct ReplicaFeature {
 				showUnavailable(.notFound, &state)
 				return .none
 
+			case .replicaOpenElsewhere:
+				showUnavailable(.openElsewhere, &state)
+				return .none
+
 			case let .replicaReplaced(directory):
 				state.directory = directory
 				showUnavailable(.replaced, &state)
@@ -889,6 +897,10 @@ struct ReplicaFeature {
 		} catch: { error, send in
 			if let identity = lostReplica(error) {
 				await send(.replicaLost(identity))
+				return
+			}
+			if error as? ReplicaError == .openElsewhere {
+				await send(.replicaOpenElsewhere)
 				return
 			}
 			await send(.openFailed(error.localizedDescription))

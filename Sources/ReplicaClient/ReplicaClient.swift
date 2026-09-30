@@ -28,8 +28,8 @@ public struct ReplicaClient: Sendable {
 	/// and the first to succeed after one yields the tasks whether or not they changed. Throws
 	/// `lost` and closes the Replica once its database is no longer the one opened. Where `expected`
 	/// is given, opens only that database, throwing `lost(expected)` where another is there, as for
-	/// a Replica that moved. Ending iteration closes the Replica once any open or read in flight
-	/// returns.
+	/// a Replica that moved, or `openElsewhere` where another window has its new folder open.
+	/// Ending iteration closes the Replica once any open or read in flight returns.
 	public var tasks: @Sendable (_ directory: URL, _ expected: ReplicaIdentity?)
 		-> AsyncThrowingStream<Result<TaskSnapshot, ReplicaError>, any Error> = { _, _ in .finished() }
 
@@ -126,6 +126,8 @@ public enum ReplicaError: Equatable, LocalizedError {
 	case notAReplica
 	/// No window has the Replica open.
 	case notOpen
+	/// A moved Replica, which another window opened at its new folder first.
+	case openElsewhere
 	/// An undo failed, and the Replica couldn't be read to tell whether its reversal landed first.
 	/// Undoing again could revert the Undo point before it.
 	case undoUnconfirmed
@@ -147,6 +149,9 @@ public enum ReplicaError: Equatable, LocalizedError {
 
 		case .notOpen:
 			"The Replica isn't open"
+
+		case .openElsewhere:
+			"The Replica is open in another window"
 
 		case .undoUnconfirmed:
 			"The change may have been undone. A `task` command may be holding the Replica."
@@ -182,9 +187,15 @@ extension ReplicaClient: DependencyKey {
 						// Cancelled while `open` waited, the window has closed, and one reopened on the
 						// folder may have registered its own already. Checked under the lock, since a
 						// window can only reopen once this one is cancelled.
-						let isRegistered = openReplicas.withLock { replicas in
+						let isRegistered = try openReplicas.withLock { replicas throws(ReplicaError) in
 							guard !_Concurrency.Task.isCancelled else {
 								return false
+							}
+							// A moved Replica that another window opened at its new folder first stays that
+							// window's, so no two actors write to it. Only then: a window closed and reopened on
+							// a folder can find its old one still registered, as it's let go of on the way out.
+							if expected != nil, replicas[directory] != nil {
+								throw .openElsewhere
 							}
 							replicas[directory] = replica
 							return true

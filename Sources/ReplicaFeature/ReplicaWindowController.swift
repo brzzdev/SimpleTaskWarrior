@@ -47,8 +47,12 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 	private var seriesPromptAccessory: SeriesPromptAccessory?
 
 	/// The Replica's folder, standardized, or where it last was while the window can't open it.
+	/// Nil once another window has the Replica, so opening its folder brings that window forward.
 	public var folder: URL? {
-		store.directory.map(standardizedFolder)
+		guard store.unavailable != .openElsewhere else {
+			return nil
+		}
+		return store.directory.map(standardizedFolder)
 	}
 
 	/// Every tag any selected task has, which Remove Tag lists.
