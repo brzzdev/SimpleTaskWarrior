@@ -88,6 +88,11 @@ let project = Project(
 				"NSNetworkVolumesUsageDescription": .string(fileAccessReason),
 				"NSPrincipalClass": "NSApplication",
 				"NSRemovableVolumesUsageDescription": .string(fileAccessReason),
+				// GitHub redirects this to the appcast on the release marked latest; see ADR-0004.
+				"SUFeedURL":
+					"https://github.com/brzzdev/SimpleTaskWarrior/releases/latest/download/appcast.xml",
+				// The private key is in the publisher's keychain, from Sparkle's `generate_keys`.
+				"SUPublicEDKey": "lKYYqEr4IfkOiNCNz6DAgZcWRDgf4t/zGjFxud4PEFQ=",
 			]),
 			sources: ["AppHost/**"],
 			// Globbed, not bare: Tuist keeps a bare directory resource only if

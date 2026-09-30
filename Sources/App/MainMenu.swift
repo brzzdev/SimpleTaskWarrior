@@ -1,6 +1,7 @@
 // The menu bar, built in code since the app has no nib or storyboard.
 import AppKit
 import ReplicaFeature
+import Sparkle
 
 func menuItem(
 	_ title: String,
@@ -14,16 +15,27 @@ func menuItem(
 }
 
 /// The app's menu bar. Commands go to the first responder that handles them: the Taskrc and task
-/// commands to the Replica window in front, and Open Replica… to the app delegate.
+/// commands to the Replica window in front, and Open Replica… to the app delegate. Check for
+/// Updates… goes to `updater`, and is disabled without one.
 @MainActor
-func mainMenu(openRecent openRecentDelegate: any NSMenuDelegate) -> NSMenu {
+func mainMenu(
+	openRecent openRecentDelegate: any NSMenuDelegate,
+	updater: SPUStandardUpdaterController?,
+) -> NSMenu {
 	let name = ProcessInfo.processInfo.processName
+
+	let checkForUpdates = menuItem(
+		"Check for Updates…",
+		#selector(SPUStandardUpdaterController.checkForUpdates(_:)),
+	)
+	checkForUpdates.target = updater
 
 	let services = NSMenu(title: "Services")
 	NSApp.servicesMenu = services
 	let app = NSMenu(title: name)
 	app.items = [
 		menuItem("About \(name)", #selector(NSApplication.orderFrontStandardAboutPanel(_:))),
+		checkForUpdates,
 		.separator(),
 		submenu(services),
 		.separator(),

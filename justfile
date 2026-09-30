@@ -20,8 +20,13 @@ destination := "platform=macOS"
 # Xcode.app keeps its own DerivedData under ~/Library, so a CLI build and an
 # Xcode build do not share one; the first after switching cold-compiles.
 # `archive` deliberately does not pin it — a notarised build has no business
-# reusing an incremental dev cache.
+# reusing an incremental dev cache. It shares only the package checkouts.
 derived_data := ".build/xcode"
+# Where the builds above check out the packages, and `archive` too, by name, so
+# `publish` runs the `generate_appcast` of the Sparkle `.package.resolved` pins.
+source_packages := derived_data / "SourcePackages"
+sparkle_bin := source_packages / "artifacts/sparkle/Sparkle/bin"
+releases_url := "https://github.com/brzzdev/SimpleTaskWarrior/releases"
 # Repo-scoped because a path shared across repos lets two checkouts on different
 # config revisions fight over one file, each overwriting the other's mid-commit.
 swiftformat_base := "/tmp/swiftformat-base-SimpleTaskWarrior"
@@ -417,6 +422,7 @@ archive version="": ensure-generated
 		-workspace {{ workspace }} -scheme {{ scheme }} \
 		-destination 'generic/platform=macOS' \
 		-archivePath "$archive" \
+		-clonedSourcePackagesDirPath {{ source_packages }} \
 		-allowProvisioningUpdates "${versioning[@]}" | xcbeautify
 
 	echo "==> Exporting (Developer ID)"
@@ -553,17 +559,32 @@ check-tag version:
 # Run `just notary-setup` once first, then tag HEAD `v<version>` and push the
 # tag. Never installs, quits or launches the app. The zip is what Sparkle
 # updates from; the DMG is for downloading by hand.
-# Archive, notarize, and publish a zip and DMG as release `v<version>`
+# Archive, notarize, and publish a zip, DMG and appcast as release `v<version>`
 publish version: (check-tag version) (archive version)
 	#!/usr/bin/env bash
 	set -euo pipefail
 
 	tag="v{{ version }}"
 	app="{{ release_app }}"
+	appcast="{{ release_dir }}/appcast"
 	dmg="{{ release_dir }}/{{ scheme }}.dmg"
 	staging="{{ release_dir }}/dmg"
 	unzipped="{{ release_dir }}/unzipped"
 	zip="{{ release_zip }}"
+
+	# `generate_appcast` signs with the keychain's key, and where that isn't the key the app trusts
+	# it only warns and leaves the item unsigned, which every installed app rejects. Checked first,
+	# since notarizing takes minutes. `generate_keys` reports a failure on stdout, which the
+	# assignment captures, so its own message never shows.
+	key="$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$app/Contents/Info.plist")"
+	if ! keychain_key="$("{{ sparkle_bin }}/generate_keys" -p)"; then
+		echo "can't read the Sparkle signing key from the keychain; see ADR-0004 to restore it" >&2
+		exit 1
+	fi
+	if [ "$keychain_key" != "$key" ]; then
+		echo "the keychain's Sparkle key isn't the SUPublicEDKey $app trusts" >&2
+		exit 1
+	fi
 
 	echo "==> Building the DMG"
 	mkdir "$staging"
@@ -598,8 +619,26 @@ publish version: (check-tag version) (archive version)
 	xcrun stapler validate "$unzipped/{{ scheme }}.app"
 	spctl -a -vv -t exec "$unzipped/{{ scheme }}.app"
 
+	# From the final zip, so its item's length and EdDSA signature match the upload. Alone in its
+	# folder, since `generate_appcast` takes in every archive there, so the appcast holds only this
+	# release.
+	echo "==> Generating the appcast"
+	mkdir "$appcast"
+	cp "$zip" "$appcast/"
+	"{{ sparkle_bin }}/generate_appcast" --maximum-deltas 0 \
+		--download-url-prefix "{{ releases_url }}/download/$tag/" "$appcast"
+	# `sign_update` verifies with the keychain's key, which the first check proved is the app's.
+	signature="$(sed -n 's/.*sparkle:edSignature="\([^"]*\)".*/\1/p' "$appcast/appcast.xml")"
+	if [ -z "$signature" ] || ! "{{ sparkle_bin }}/sign_update" --verify "$zip" "$signature"; then
+		echo "the appcast's signature doesn't verify against $zip" >&2
+		exit 1
+	fi
+
+	# The feed follows the release marked latest, so it's marked only once all three are attached.
 	echo "==> Publishing $tag"
-	gh release create "$tag" --verify-tag --generate-notes "$zip" "$dmg"
+	gh release create "$tag" --verify-tag --generate-notes --draft \
+		"$zip" "$dmg" "$appcast/appcast.xml"
+	gh release edit "$tag" --draft=false --latest
 
 	echo "✅ Published {{ scheme }} $tag"
 
