@@ -103,7 +103,7 @@ struct ReplicaFeature {
 		/// new-task row is open, whose editing moving the cursor would end. Their edits queue behind a
 		/// write in progress, as the inspector's do.
 		var canEditSelection: Bool {
-			!selection.isEmpty && !isNewTaskRowPresented
+			isReplicaOpen && !selection.isEmpty && !isNewTaskRowPresented
 		}
 
 		/// Whether Undo applies: while the window's newest Undo point is the Replica's newest, and
@@ -204,7 +204,7 @@ struct ReplicaFeature {
 		/// Whether a write can start now, rather than queue: not while one is in progress, nor while a
 		/// write asks a question, whose answer writes against the tasks it asked about.
 		var canWrite: Bool {
-			writeProgress == nil && chainRepairPrompt == nil && seriesPrompt == nil
+			isReplicaOpen && writeProgress == nil && chainRepairPrompt == nil && seriesPrompt == nil
 		}
 
 		/// A window on the Replica `bookmark` locates, which was last in `directory`, where known.
@@ -659,8 +659,11 @@ struct ReplicaFeature {
 			case let .replicaLost(identity):
 				// A write and the stream can each find it lost, and finding it again is harmless.
 				state.chainRepairPrompt = nil
+				state.isReadFailureBannerPresented = false
 				state.isReplicaOpen = false
 				state.queuedWrites = []
+				// Whatever reads failed, they were of the Replica lost.
+				state.readFailure = nil
 				// A Replica opened again counts its reads from 0.
 				state.readIndex = 0
 				state.redoName = nil
@@ -669,6 +672,7 @@ struct ReplicaFeature {
 				return .merge(
 					// With nothing queued, this starts nothing.
 					finishWrite(&state),
+					.cancel(id: CancelID.readFailure),
 					.cancel(id: CancelID.write),
 					// Replaces the stream, closing the Replica.
 					openReplica(state, lost: identity),
@@ -921,6 +925,11 @@ struct ReplicaFeature {
 
 	/// The one path every write takes. Every other write queues until it finishes.
 	private func write(_ action: WriteAction, _ state: inout State) -> Effect<Action> {
+		// Dropped while the window has no Replica to write to, such as once it's lost, rather than
+		// queued for one opened later.
+		guard state.isReplicaOpen else {
+			return .none
+		}
 		guard state.canWrite else {
 			state.queuedWrites.append(action)
 			return .none

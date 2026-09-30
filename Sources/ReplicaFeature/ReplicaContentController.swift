@@ -92,7 +92,7 @@ final class ReplicaContentController: NSViewController {
 			switch unavailable {
 			case let .cantOpen(reason):
 				unavailableView.title = String(localized: "Can't Open Replica")
-				unavailableView.message = reason
+				unavailableView.message = [reason, path].compactMap(\.self).joined(separator: "\n")
 				unavailableView.actions = [locateButton, closeWindowButton]
 
 			case .notFound:

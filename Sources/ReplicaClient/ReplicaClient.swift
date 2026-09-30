@@ -96,10 +96,10 @@ public struct UndoOutcome: Equatable, Sendable {
 /// Which file a Replica's database is: its device and inode, which a move keeps and a replacement,
 /// such as a recreation or a restore from backup, doesn't.
 public struct ReplicaIdentity: Equatable, Sendable {
-	public var device: Int
-	public var inode: Int
+	public var device: UInt64
+	public var inode: UInt64
 
-	public init(device: Int, inode: Int) {
+	public init(device: UInt64, inode: UInt64) {
 		self.device = device
 		self.inode = inode
 	}
@@ -109,7 +109,7 @@ public struct ReplicaIdentity: Equatable, Sendable {
 		guard let identity = databaseIdentity(directory: directory.path(percentEncoded: false)) else {
 			return nil
 		}
-		self.init(device: Int(identity.device), inode: Int(identity.inode))
+		self.init(device: identity.device, inode: identity.inode)
 	}
 }
 
@@ -427,7 +427,7 @@ actor Replica {
 	/// Throws `lost` where the database in the Replica's folder is no longer the one opened, before a
 	/// write reaches it. A replacement landing between the check and the write can't be prevented,
 	/// only found on the next check.
-	func checkIdentity() throws(ReplicaError) {
+	private func checkIdentity() throws(ReplicaError) {
 		guard ReplicaIdentity(directory: directory) == identity else {
 			throw .lost(identity)
 		}

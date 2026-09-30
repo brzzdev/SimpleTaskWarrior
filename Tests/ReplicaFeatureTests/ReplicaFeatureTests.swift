@@ -1936,6 +1936,8 @@ struct ReplicaFeatureTests {
 			$0.storedTasks = []
 			$0.unavailable = .notFound
 		}
+		// Nor does an edit queue for a Replica opened later.
+		await store.send(.inspectorFieldSubmitted([UUID(0)], .set("project", .string("Home"))))
 		await store.finish()
 	}
 
@@ -2491,7 +2493,7 @@ struct ReplicaFeatureTests {
 }
 
 /// The `tasks` streams a test's window opens, in the order it opens them.
-private final class TaskStreams: Sendable {
+private struct TaskStreams {
 	typealias Stream = AsyncThrowingStream<Result<TaskSnapshot, ReplicaError>, any Error>
 
 	private let continuations = LockIsolated<[Stream.Continuation]>([])

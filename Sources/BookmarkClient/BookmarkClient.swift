@@ -120,6 +120,11 @@ private struct Pairing: Codable, Equatable {
 	var taskrc: Data
 }
 
+/// The path `bookmark` was made at, which it records even once it no longer resolves.
+public func bookmarkPath(_ bookmark: Data) -> URL? {
+	URL.resourceValues(forKeys: [.pathKey], fromBookmarkData: bookmark)?.path.map { URL(filePath: $0) }
+}
+
 /// The index of the pairing whose Replica bookmark no longer resolves, but was made at the folder
 /// `replica`. Only moving a pairing looks for one, so a Replica later made at that path doesn't
 /// inherit it.
@@ -139,15 +144,16 @@ private func pairingIndex(of replica: URL, in stored: inout Stored) -> Int? {
 	}
 }
 
-/// The path `bookmark` was made at, which it records even once it no longer resolves.
-public func bookmarkPath(_ bookmark: Data) -> URL? {
-	URL.resourceValues(forKeys: [.pathKey], fromBookmarkData: bookmark)?.path.map { URL(filePath: $0) }
-}
-
 /// The folder at `url`, standardized so two spellings of it compare equal: how the app tells
 /// whether two URLs name the same Replica.
 public func standardizedFolder(_ url: URL) -> URL {
 	URL(filePath: url.path(percentEncoded: false), directoryHint: .isDirectory).standardizedFileURL
+}
+
+/// The URL `bookmark` resolves to, and a fresh bookmark to keep in its place where it's stale.
+private func refreshed(_ bookmark: Data) throws -> (url: URL, refreshed: Data?) {
+	let (url, isStale) = try resolved(bookmark)
+	return (url, isStale ? try? url.bookmarkData() : nil)
 }
 
 /// The URL `bookmark` resolves to, and whether the bookmark is stale and wants saving again.
@@ -180,12 +186,6 @@ private func update<Result>(_ body: (inout Stored) -> Result) -> Result {
 		}
 		return result
 	}
-}
-
-/// The URL `bookmark` resolves to, and a fresh bookmark to keep in its place where it's stale.
-private func refreshed(_ bookmark: Data) throws -> (url: URL, refreshed: Data?) {
-	let (url, isStale) = try resolved(bookmark)
-	return (url, isStale ? try? url.bookmarkData() : nil)
 }
 
 /// The URL `bookmark` resolves to, passing `resave` a fresh bookmark when it's stale.
