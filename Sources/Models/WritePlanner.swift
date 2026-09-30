@@ -765,9 +765,9 @@ private struct Draft {
 	}
 
 	/// Refuses removing `due` from a task with `recur`, as `task modify due:` does, whichever change
-	/// removed it.
-	func refuseRemovingSeriesDue() throws(WritePlanError) {
-		guard original["due"] != nil, properties["due"] == nil, original["recur"] != nil else {
+	/// removed it. A removal reads `recur` either way, so a CLI write that adds one fails the plan.
+	mutating func refuseRemovingSeriesDue() throws(WritePlanError) {
+		guard original["due"] != nil, properties["due"] == nil, read("recur") != nil else {
 			return
 		}
 		throw .removedSeriesDue

@@ -588,6 +588,23 @@ struct WritePlannerTests {
 		}
 	}
 
+	/// So a `task modify recur:` that lands first fails the plan, rather than leaving a Series without
+	/// its `due`.
+	@Test
+	func removingDueExpectsNoRecur() throws {
+		let planner = WritePlanner(taskrc: .defaults, timeZone: .gmt)
+		let id = UUID()
+		let properties = ["due": "1893456000", "status": "pending"]
+
+		let plan = try planner.plan(.edit([id], .set("due", nil)), tasks: [id: properties], at: .now)
+
+		#expect(plan.expectations.contains(WritePlan.Expectation(
+			property: "recur",
+			uuid: id,
+			value: nil,
+		)))
+	}
+
 	@Test
 	func addingATagExpectsTheOtherTags() throws {
 		let planner = WritePlanner(taskrc: .defaults, timeZone: .gmt)
