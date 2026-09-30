@@ -1195,6 +1195,33 @@ struct ReplicaFeatureTests {
 	}
 
 	@Test
+	func undoTheEngineCantConfirmSaysItMayHaveLandedAndOffersNoRetry() async throws {
+		var initialState = try loadedState([storedTask(0, "Buy milk", workingSetID: 1)])
+		initialState.undoName = "Complete Task"
+		let store = TestStore(initialState: initialState) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.date.now = now
+			$0.replicaClient.undo = { _ in throw ReplicaError.undoUnconfirmed }
+			$0.timeZone = .gmt
+		}
+
+		await store.send(.undoButtonTapped) {
+			$0.writeProgress = .running
+		}
+		await store.receive(\.writeFailed) {
+			$0.writeProgress = .failed(
+				ReplicaFeature.WriteFailure(
+					reason: "The change may have been undone. A `task` command may be holding the Replica.",
+					retry: nil,
+					title: "Couldn't Confirm Undo",
+				),
+			)
+		}
+		await store.finish()
+	}
+
+	@Test
 	func readFailureShowsABannerAfterThirtySecondsUntilAReadSucceeds() async throws {
 		let clock = TestClock()
 		var initialState = try loadedState([])
