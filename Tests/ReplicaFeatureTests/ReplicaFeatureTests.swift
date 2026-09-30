@@ -1733,6 +1733,251 @@ struct ReplicaFeatureTests {
 	}
 
 	@Test
+	func movedReplicaReopensSilentlyWithoutItsUndoOrRedo() async {
+		let moved = URL(filePath: "/Users/paul/Sync/task", directoryHint: .isDirectory)
+		let identity = ReplicaIdentity(device: 1, inode: 2)
+		let location = LockIsolated(replicaDirectory)
+		let streams = TaskStreams()
+		let expected = LockIsolated<[ReplicaIdentity?]>([])
+		let store = TestStore(initialState: ReplicaFeature.State(bookmark: Data())) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.bookmarkClient.changes = { .finished }
+			// Stale once the folder has moved.
+			$0.bookmarkClient.resolve = { _ in
+				(location.value, location.value == moved ? Data([1]) : nil)
+			}
+			$0.continuousClock = TestClock()
+			$0.date.now = now
+			$0.replicaClient.identity = { _ in identity }
+			$0.replicaClient.tasks = { _, only in
+				expected.withValue { $0.append(only) }
+				return streams.make()
+			}
+			$0.taskrcClient.load = { _, _ in .finished }
+			$0.timeZone = .gmt
+		}
+		let milk = storedTask(0, "Buy milk", workingSetID: 1)
+
+		let task = await store.send(.fetchRequested)
+		await store.receive(\.directoryResolved) {
+			$0.directory = replicaDirectory
+		}
+		streams[0].yield(.success(snapshot([milk], readIndex: 3, redoName: "Complete Task")))
+		await store.receive(\.readSucceeded) {
+			$0.allRows = try [row(milk)]
+			$0.isReplicaOpen = true
+			$0.readIndex = 3
+			$0.redoName = "Complete Task"
+			$0.rows = try [row(milk)]
+			$0.storedTasks = [milk]
+		}
+
+		location.setValue(moved)
+		streams[0].finish(throwing: ReplicaError.lost(identity))
+		await store.receive(\.replicaLost) {
+			$0.isReplicaOpen = false
+			$0.readIndex = 0
+			$0.redoName = nil
+		}
+		await store.receive(\.bookmarkRefreshed) {
+			$0.bookmark = Data([1])
+		}
+		await store.receive(\.directoryResolved) {
+			$0.directory = moved
+		}
+		// Only the Replica lost, should another replace it before it opens.
+		#expect(expected.value == [nil, identity])
+		// The Replica opened again counts its reads from 0.
+		streams[1].yield(.success(snapshot([milk])))
+		await store.receive(\.readSucceeded) {
+			$0.isReplicaOpen = true
+		}
+
+		streams[1].finish()
+		await task.cancel()
+		await store.finish()
+	}
+
+	@Test
+	func movedReplicaAnotherWindowHasOpenStaysThatWindows() async throws {
+		let milk = storedTask(0, "Buy milk", workingSetID: 1)
+		let identity = ReplicaIdentity(device: 1, inode: 2)
+		let streams = TaskStreams()
+		let initialState = try loadedState([milk])
+		let store = TestStore(initialState: initialState) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.bookmarkClient.changes = { .finished }
+			$0.bookmarkClient.resolve = { _ in (replicaDirectory, nil) }
+			$0.continuousClock = TestClock()
+			$0.date.now = now
+			$0.replicaClient.identity = { _ in identity }
+			$0.replicaClient.tasks = { _, _ in streams.make() }
+			$0.taskrcClient.load = { _, _ in .finished }
+			$0.timeZone = .gmt
+		}
+
+		await store.send(.replicaLost(identity)) {
+			$0.isReplicaOpen = false
+		}
+		await store.receive(\.directoryResolved)
+		streams[0].finish(throwing: ReplicaError.openElsewhere)
+		await store.receive(\.replicaOpenElsewhere) {
+			$0.allRows = []
+			$0.rows = []
+			$0.storedTasks = []
+			$0.unavailable = .openElsewhere
+		}
+		await store.finish()
+	}
+
+	@Test
+	func replacedReplicaShowsWhyUntilOpenReplacementOpensIt() async throws {
+		let milk = storedTask(0, "Buy milk", workingSetID: 1)
+		let moves = LockIsolated<[[URL]]>([])
+		let streams = TaskStreams()
+		var initialState = try loadedState([milk])
+		initialState.undoName = "Complete Task"
+		let store = TestStore(initialState: initialState) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.bookmarkClient.changes = { .finished }
+			$0.bookmarkClient.create = { _ in Data([2]) }
+			$0.bookmarkClient.movePairing = { replica, newReplica, _ in
+				moves.withValue { $0.append([replica, newReplica]) }
+			}
+			$0.bookmarkClient.resolve = { _ in (replicaDirectory, nil) }
+			$0.continuousClock = TestClock()
+			$0.date.now = now
+			$0.replicaClient.identity = { _ in ReplicaIdentity(device: 1, inode: 3) }
+			$0.replicaClient.tasks = { _, _ in streams.make() }
+			$0.taskrcClient.load = { _, _ in .finished }
+			$0.timeZone = .gmt
+		}
+
+		await store.send(.replicaLost(ReplicaIdentity(device: 1, inode: 2))) {
+			$0.isReplicaOpen = false
+			$0.undoName = nil
+		}
+		await store.receive(\.replicaReplaced) {
+			$0.allRows = []
+			$0.rows = []
+			$0.storedTasks = []
+			$0.unavailable = .replaced
+		}
+
+		await store.send(.openReplacementButtonTapped) {
+			$0.bookmark = Data([2])
+			$0.unavailable = nil
+		}
+		await store.receive(\.directoryResolved)
+		#expect(moves.value == [[replicaDirectory, replicaDirectory]])
+
+		streams[0].finish()
+		await store.finish()
+	}
+
+	@Test
+	func missingReplicaOpensAtItsLastPathUntilLocateFindsIt() async {
+		let located = URL(filePath: "/Users/paul/Sync/task", directoryHint: .isDirectory)
+		let moves = LockIsolated<[[URL]]>([])
+		let streams = TaskStreams()
+		let store = TestStore(
+			initialState: ReplicaFeature.State(bookmark: Data(), directory: replicaDirectory),
+		) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.bookmarkClient.changes = { .finished }
+			$0.bookmarkClient.create = { _ in Data([2]) }
+			$0.bookmarkClient.movePairing = { replica, newReplica, _ in
+				moves.withValue { $0.append([replica, newReplica]) }
+			}
+			$0.bookmarkClient.resolve = { bookmark in
+				guard bookmark == Data([2]) else {
+					throw CocoaError(.fileNoSuchFile)
+				}
+				return (located, nil)
+			}
+			$0.continuousClock = TestClock()
+			$0.date.now = now
+			$0.replicaClient.tasks = { _, _ in streams.make() }
+			$0.taskrcClient.load = { _, _ in .finished }
+			$0.timeZone = .gmt
+		}
+
+		let task = await store.send(.fetchRequested)
+		await store.receive(\.replicaNotFound) {
+			$0.unavailable = .notFound
+		}
+
+		// Keeping the Taskrc paired with the Replica last at its old path.
+		await store.send(.replicaFolderChosen(located)) {
+			$0.bookmark = Data([2])
+			$0.directory = located
+			$0.unavailable = nil
+		}
+		await store.receive(\.directoryResolved)
+		#expect(moves.value == [[replicaDirectory, located]])
+
+		streams[0].finish()
+		await task.cancel()
+		await store.finish()
+	}
+
+	@Test
+	func writeThatFindsTheReplicaLostDropsEveryWriteWithoutAnAlert() async throws {
+		let milk = storedTask(0, "Buy milk", workingSetID: 1)
+		let identity = ReplicaIdentity(device: 1, inode: 2)
+		let clock = TestClock()
+		let initialState = try loadedState([milk], selection: [UUID(0)])
+		let store = TestStore(initialState: initialState) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.bookmarkClient.resolve = { _ in throw CocoaError(.fileNoSuchFile) }
+			$0.continuousClock = clock
+			$0.date.now = now
+			// Long enough for an edit to queue behind it.
+			$0.replicaClient.apply = { _, _, _ in
+				try await clock.sleep(for: .seconds(1))
+				throw ReplicaError.lost(identity)
+			}
+			$0.timeZone = .gmt
+		}
+
+		await store.send(.doneButtonTapped) {
+			$0.leavingTasks = [UUID(0)]
+			$0.rows = []
+			$0.selection = []
+			$0.writeProgress = .running
+		}
+		// Queued behind the Done, and dropped with it.
+		await store.send(.inspectorFieldSubmitted([UUID(0)], .set("project", .string("Home")))) {
+			$0.queuedWrites = [.edit([UUID(0)], .set("project", .string("Home")))]
+		}
+		await clock.advance(by: .seconds(1))
+		await store.receive(\.savingDelayElapsed) {
+			$0.writeProgress = .saving
+		}
+		await store.receive(\.replicaLost) {
+			$0.isReplicaOpen = false
+			$0.leavingTasks = []
+			$0.queuedWrites = []
+			$0.rows = try [row(milk)]
+			$0.writeProgress = nil
+		}
+		await store.receive(\.replicaNotFound) {
+			$0.allRows = []
+			$0.rows = []
+			$0.storedTasks = []
+			$0.unavailable = .notFound
+		}
+		// Nor does an edit queue for a Replica opened later.
+		await store.send(.inspectorFieldSubmitted([UUID(0)], .set("project", .string("Home"))))
+		await store.finish()
+	}
+
+	@Test
 	func writeToATaskThatNoLongerExistsOffersOnlyOK() async throws {
 		let milk = storedTask(0, "Buy milk", workingSetID: 1)
 		let initialState = try loadedState([milk], selection: [UUID(0)])
@@ -1918,10 +2163,10 @@ struct ReplicaFeatureTests {
 			ReplicaFeature()
 		} withDependencies: {
 			$0.bookmarkClient.changes = { .finished }
-			$0.bookmarkClient.resolve = { _ in directory }
+			$0.bookmarkClient.resolve = { _ in (directory, nil) }
 			$0.continuousClock = TestClock()
 			$0.date.now = now
-			$0.replicaClient.tasks = { _ in tasks }
+			$0.replicaClient.tasks = { _, _ in tasks }
 			$0.taskrcClient.load = { _, _ in .finished }
 			$0.timeZone = .gmt
 		}
@@ -1976,10 +2221,10 @@ struct ReplicaFeatureTests {
 			ReplicaFeature()
 		} withDependencies: {
 			$0.bookmarkClient.changes = { .finished }
-			$0.bookmarkClient.resolve = { _ in replicaDirectory }
+			$0.bookmarkClient.resolve = { _ in (replicaDirectory, nil) }
 			$0.continuousClock = clock
 			$0.date = DateGenerator { time.value }
-			$0.replicaClient.tasks = { _ in tasks }
+			$0.replicaClient.tasks = { _, _ in tasks }
 			$0.taskrcClient.load = { _, _ in .finished }
 			$0.timeZone = .gmt
 		}
@@ -2231,10 +2476,10 @@ struct ReplicaFeatureTests {
 			ReplicaFeature()
 		} withDependencies: {
 			$0.bookmarkClient.changes = { .finished }
-			$0.bookmarkClient.resolve = { _ in replicaDirectory }
+			$0.bookmarkClient.resolve = { _ in (replicaDirectory, nil) }
 			$0.continuousClock = clock
 			$0.date = DateGenerator { time.value }
-			$0.replicaClient.tasks = { _ in tasks }
+			$0.replicaClient.tasks = { _, _ in tasks }
 			$0.taskrcClient.load = { _, _ in .finished }
 			$0.timeZone = .gmt
 		}
@@ -2280,6 +2525,23 @@ struct ReplicaFeatureTests {
 
 		state.taskrc?.url = nil
 		#expect(state.otherDataLocation == nil)
+	}
+}
+
+/// The `tasks` streams a test's window opens, in the order it opens them.
+private struct TaskStreams {
+	typealias Stream = AsyncThrowingStream<Result<TaskSnapshot, ReplicaError>, any Error>
+
+	private let continuations = LockIsolated<[Stream.Continuation]>([])
+
+	subscript(index: Int) -> Stream.Continuation {
+		continuations.value[index]
+	}
+
+	func make() -> Stream {
+		let (stream, continuation) = Stream.makeStream()
+		continuations.withValue { $0.append(continuation) }
+		return stream
 	}
 }
 

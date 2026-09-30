@@ -34,7 +34,7 @@ final class CLIContractTests {
 	@Test
 	func aCLIEditSinceTheAppsReadRefusesItsWrite() async throws {
 		let uuid = try addTask("Buy milk")
-		var tasks = replicaClient.tasks(replica).makeAsyncIterator()
+		var tasks = replicaClient.tasks(replica, nil).makeAsyncIterator()
 		let read = try #require(await tasks.next()?.get())
 		let stale = try planner.plan(
 			.complete([uuid], chains: .repair),
@@ -67,7 +67,7 @@ final class CLIContractTests {
 	func taskReadsAndChangesAnAppWrite() async throws {
 		// The app opens a Replica but never creates one.
 		try addTask("Seed")
-		var tasks = replicaClient.tasks(replica).makeAsyncIterator()
+		var tasks = replicaClient.tasks(replica, nil).makeAsyncIterator()
 		_ = try await tasks.next()
 		let uuid = UUID()
 		let created = try await apply(
@@ -102,7 +102,7 @@ final class CLIContractTests {
 	@Test
 	func taskUndoRevertsTheAppsWriteAsOneUndoPoint() async throws {
 		let uuid = try addTask("Buy milk")
-		var tasks = replicaClient.tasks(replica).makeAsyncIterator()
+		var tasks = replicaClient.tasks(replica, nil).makeAsyncIterator()
 		let read = try #require(await tasks.next()?.get())
 		let completed = try await apply(
 			planner.plan(

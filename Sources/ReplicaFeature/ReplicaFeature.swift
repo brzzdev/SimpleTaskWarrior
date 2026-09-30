@@ -16,13 +16,15 @@ struct ReplicaFeature {
 		/// Every task a fixed view shows, ranked and in `sortOrder`, which the sidebar and search narrow
 		/// to `rows`.
 		var allRows: [TaskRow] = []
-		let bookmark: Data
+		/// Locates the Replica, and is re-saved, which the window's restorable state keeps, where it's
+		/// stale or the window is pointed at another folder.
+		var bookmark: Data
 		/// The Done or Delete asking whether to repair the dependency chains it breaks.
 		var chainRepairPrompt: ChainRepairPrompt?
 		/// The task a New Task is creating, which is selected once it commits.
 		var creatingTask: Models.Task.ID?
+		/// The Replica's folder, or where it last was while the window can't open it.
 		var directory: URL?
-		var failure: String?
 		/// Set as New Task selects the task it created, for the inspector to put the cursor in its
 		/// description, until the selection changes.
 		var focusesDescription = false
@@ -73,6 +75,8 @@ struct ReplicaFeature {
 		var taskrcSaveFailure: TaskrcSaveFailure?
 		/// The running Taskrc's UDAs, which the table offers as columns.
 		var udaColumns = UDAColumn.all(in: .defaults)
+		/// Why the window shows no Replica, in place of its tasks.
+		var unavailable: Unavailable?
 		/// The window's Undo point Undo would revert, as of the last read. Nil where the Replica's
 		/// newest isn't the window's own.
 		var undoName: String?
@@ -87,7 +91,7 @@ struct ReplicaFeature {
 		/// Whether New Task applies: once `apply` can reach the Replica and the Taskrc, whose defaults
 		/// and Context a new task takes, has loaded, and while nothing holds writes back.
 		var canCreateTask: Bool {
-			isReplicaOpen && failure == nil && taskrc != nil && canWrite
+			isReplicaOpen && unavailable == nil && taskrc != nil && canWrite
 		}
 
 		/// Whether Redo applies: while nothing has written since the undo, and nothing holds writes back.
@@ -99,13 +103,19 @@ struct ReplicaFeature {
 		/// new-task row is open, whose editing moving the cursor would end. Their edits queue behind a
 		/// write in progress, as the inspector's do.
 		var canEditSelection: Bool {
-			!selection.isEmpty && !isNewTaskRowPresented
+			isReplicaOpen && !selection.isEmpty && !isNewTaskRowPresented
 		}
 
 		/// Whether Undo applies: while the window's newest Undo point is the Replica's newest, and
 		/// nothing holds writes back.
 		var canUndo: Bool {
 			undoName != nil && canWrite
+		}
+
+		/// The folder the window claims as its Replica's, which no other window opens: none once another
+		/// window has the Replica.
+		var claimedDirectory: URL? {
+			unavailable == .openElsewhere ? nil : directory
 		}
 
 		/// The commands that apply to every selected task. None applies while a write would queue, or
@@ -200,11 +210,13 @@ struct ReplicaFeature {
 		/// Whether a write can start now, rather than queue: not while one is in progress, nor while a
 		/// write asks a question, whose answer writes against the tasks it asked about.
 		var canWrite: Bool {
-			writeProgress == nil && chainRepairPrompt == nil && seriesPrompt == nil
+			isReplicaOpen && writeProgress == nil && chainRepairPrompt == nil && seriesPrompt == nil
 		}
 
-		init(bookmark: Data) {
+		/// A window on the Replica `bookmark` locates, which was last in `directory`, where known.
+		init(bookmark: Data, directory: URL? = nil) {
 			self.bookmark = bookmark
+			self.directory = directory
 		}
 
 		/// The task `offset` rows from the inspected one, where the table shows both.
@@ -336,6 +348,19 @@ struct ReplicaFeature {
 		}
 	}
 
+	/// Why the window shows no Replica, which Locate… points it at another folder for.
+	enum Unavailable: Equatable {
+		/// The Replica couldn't be opened, for the reason given.
+		case cantOpen(String)
+		/// The bookmark no longer resolves, or nothing's where it does.
+		case notFound
+		/// Another window has the Replica open, as when it moved to a folder one had just opened.
+		case openElsewhere
+		/// A Replica other than the one the window had open is where its bookmark resolves, now its
+		/// `directory`, which Open Replacement opens.
+		case replaced
+	}
+
 	struct TaskrcSaveFailure: Equatable {
 		var message: String
 		/// Whether Try Again… can open the panel that chose the file: not after a detach, which chose
@@ -376,6 +401,8 @@ struct ReplicaFeature {
 		/// Return in the inspector's new-annotation field, or clicking away from it.
 		case annotationSubmitted(Models.Task.ID, String)
 		case binding(BindingAction<State>)
+		/// The window's bookmark was stale, and one made afresh replaces it.
+		case bookmarkRefreshed(Data)
 		/// Cancel in the sheet asking whether to repair dependency chains.
 		case chainRepairDismissed
 		case chooseTaskrcButtonTapped
@@ -397,12 +424,23 @@ struct ReplicaFeature {
 		case newTaskEditingCancelled
 		case nextTaskButtonTapped
 		case openFailed(String)
+		case openReplacementButtonTapped
 		case pairingChanged
 		case previousTaskButtonTapped
 		case readFailed(String)
 		case readFailureDelayElapsed
 		case readSucceeded(TaskSnapshot)
 		case redoButtonTapped
+		/// A folder chosen in the panel Locate… opened, which is a Replica no other window shows.
+		case replicaFolderChosen(URL)
+		/// The Replica's database is no longer the one opened as `identity`.
+		case replicaLost(ReplicaIdentity)
+		/// Where the window's bookmark resolves, there's no Replica.
+		case replicaNotFound
+		/// Another window has the Replica open.
+		case replicaOpenElsewhere
+		/// Another Replica is where the lost one's bookmark resolves, in the folder given.
+		case replicaReplaced(URL)
 		case repairChainButtonTapped
 		case repairChainsCheckboxChanged(repairsChains: Bool)
 		case savingDelayElapsed
@@ -439,7 +477,10 @@ struct ReplicaFeature {
 	private enum CancelID {
 		case bookmarkChanges
 		case readFailure
+		/// Opening, reading and finding the Replica, one at a time.
+		case replica
 		case taskrc
+		case write
 	}
 
 	private enum UndoDirection {
@@ -476,6 +517,10 @@ struct ReplicaFeature {
 				return .none
 
 			case .binding:
+				return .none
+
+			case let .bookmarkRefreshed(bookmark):
+				state.bookmark = bookmark
 				return .none
 
 			case .chainRepairDismissed:
@@ -520,21 +565,7 @@ struct ReplicaFeature {
 
 			case .fetchRequested:
 				return .merge(
-					.run { [bookmark = state.bookmark, bookmarkClient, replicaClient] send in
-						let directory = try bookmarkClient.resolve(bookmark)
-						await send(.directoryResolved(directory))
-						for try await read in replicaClient.tasks(directory) {
-							switch read {
-							case let .failure(error):
-								await send(.readFailed(error.localizedDescription))
-
-							case let .success(snapshot):
-								await send(.readSucceeded(snapshot))
-							}
-						}
-					} catch: { error, send in
-						await send(.openFailed(error.localizedDescription))
-					},
+					openReplica(state),
 					// Urgency moves with the clock too, as due dates near and `scheduled` and `wait` pass,
 					// while the Replica may not change for hours.
 					.run { [clock] send in
@@ -578,9 +609,16 @@ struct ReplicaFeature {
 				selectAdjacentTask(1, &state)
 				return .none
 
-			case let .openFailed(failure):
-				state.failure = failure
+			case let .openFailed(reason):
+				showUnavailable(.cantOpen(reason), &state)
 				return .none
+
+			case .openReplacementButtonTapped:
+				guard state.unavailable == .replaced, let directory = state.directory else {
+					return .none
+				}
+				// The folder is the same, but the Replica in it isn't the one the bookmark was made for.
+				return rebind(to: directory, &state)
 
 			case .pairingChanged:
 				return loadTaskrc(for: state)
@@ -622,6 +660,44 @@ struct ReplicaFeature {
 
 			case .repairChainButtonTapped:
 				return closePromptedTasks(chains: .repair, &state)
+
+			case let .replicaFolderChosen(directory):
+				return rebind(to: directory, &state)
+
+			case let .replicaLost(identity):
+				// A write and the stream can each find it lost, and finding it again is harmless.
+				state.chainRepairPrompt = nil
+				state.isReadFailureBannerPresented = false
+				state.isReplicaOpen = false
+				state.queuedWrites = []
+				// Whatever reads failed, they were of the Replica lost.
+				state.readFailure = nil
+				// A Replica opened again counts its reads from 0.
+				state.readIndex = 0
+				state.redoName = nil
+				state.seriesPrompt = nil
+				state.undoName = nil
+				return .merge(
+					// With nothing queued, this starts nothing.
+					finishWrite(&state),
+					.cancel(id: CancelID.readFailure),
+					.cancel(id: CancelID.write),
+					// Replaces the stream, closing the Replica.
+					openReplica(state, lost: identity),
+				)
+
+			case .replicaNotFound:
+				showUnavailable(.notFound, &state)
+				return .none
+
+			case .replicaOpenElsewhere:
+				showUnavailable(.openElsewhere, &state)
+				return .none
+
+			case let .replicaReplaced(directory):
+				state.directory = directory
+				showUnavailable(.replaced, &state)
+				return .none
 
 			case let .repairChainsCheckboxChanged(repairsChains):
 				state.seriesPrompt?.repairsChains = repairsChains
@@ -791,8 +867,89 @@ struct ReplicaFeature {
 		.cancellable(id: CancelID.taskrc, cancelInFlight: true)
 	}
 
+	/// Resolves the window's bookmark, re-saving it where it's stale, then opens the Replica it
+	/// resolves to and reads it until the window closes or loses it. After the window lost the
+	/// Replica opened as `lost`, it opens only that one, moved, and otherwise says what's there.
+	private func openReplica(_ state: State, lost: ReplicaIdentity? = nil) -> Effect<Action> {
+		.run { [bookmark = state.bookmark, bookmarkClient, replicaClient] send in
+			guard let (directory, refreshed) = try? bookmarkClient.resolve(bookmark) else {
+				await send(.replicaNotFound)
+				return
+			}
+			if let lost {
+				guard let found = replicaClient.identity(directory) else {
+					await send(.replicaNotFound)
+					return
+				}
+				guard found == lost else {
+					await send(.replicaReplaced(directory))
+					return
+				}
+			}
+			if let refreshed {
+				await send(.bookmarkRefreshed(refreshed))
+			}
+			await send(.directoryResolved(directory))
+			// The Replica lost only, should another replace it before it opens.
+			for try await read in replicaClient.tasks(directory, lost) {
+				switch read {
+				case let .failure(error):
+					await send(.readFailed(error.localizedDescription))
+
+				case let .success(snapshot):
+					await send(.readSucceeded(snapshot))
+				}
+			}
+		} catch: { error, send in
+			switch error as? ReplicaError {
+			case let .lost(identity):
+				await send(.replicaLost(identity))
+
+			case .openElsewhere:
+				await send(.replicaOpenElsewhere)
+
+			default:
+				await send(.openFailed(error.localizedDescription))
+			}
+		}
+		.cancellable(id: CancelID.replica, cancelInFlight: true)
+	}
+
+	/// Points the window at the Replica in `directory`, moving its Taskrc pairing along, then opens
+	/// it. Done at once, so the window claims the folder only once its bookmark exists, and before
+	/// another window can open it.
+	private func rebind(to directory: URL, _ state: inout State) -> Effect<Action> {
+		let bookmark: Data
+		do {
+			bookmark = try bookmarkClient.create(directory)
+		} catch {
+			showUnavailable(.cantOpen(error.localizedDescription), &state)
+			return .none
+		}
+		if let lastDirectory = state.directory {
+			bookmarkClient.movePairing(lastDirectory, directory, bookmark)
+		}
+		state.bookmark = bookmark
+		state.directory = directory
+		state.unavailable = nil
+		// Replaces anything still finding the Replica lost.
+		return openReplica(state)
+	}
+
+	/// Shows why the window has no Replica in place of its tasks, which it drops.
+	private func showUnavailable(_ unavailable: Unavailable, _ state: inout State) {
+		state.unavailable = unavailable
+		state.storedTasks = []
+		updateRows(&state)
+	}
+
 	/// The one path every write takes. Every other write queues until it finishes.
 	private func write(_ action: WriteAction, _ state: inout State) -> Effect<Action> {
+		// Dropped while the window has no Replica to write to, such as once it's lost, rather than
+		// queued for one opened later.
+		guard state.isReplicaOpen else {
+			return .none
+		}
 		guard state.canWrite else {
 			state.queuedWrites.append(action)
 			return .none
@@ -859,12 +1016,17 @@ struct ReplicaFeature {
 				String(localized: "The Replica kept changing while it was written to."),
 			)
 		} catch: { error, send in
+			if let identity = lostReplica(error) {
+				await send(.replicaLost(identity))
+				return
+			}
 			await send(.writeFailed(WriteFailure(
 				error,
 				retry: .write(action, at: date),
 				title: failureTitle,
 			)))
 		}
+		.cancellable(id: CancelID.write)
 	}
 
 	/// Undoes or redoes, holding every write back until it ends as a write would. A change that
@@ -891,6 +1053,10 @@ struct ReplicaFeature {
 			}
 			await send(.undoOrRedoFinished(outcome))
 		} catch: { error, send in
+			if let identity = lostReplica(error) {
+				await send(.replicaLost(identity))
+				return
+			}
 			// The engine lets go of a redo that fails, so there's nothing to try again. Nor for an undo
 			// that may have landed, where trying again could revert the Undo point before it: the next
 			// read shows what happened, and Undo stays available if it didn't land.
@@ -899,6 +1065,7 @@ struct ReplicaFeature {
 			let title = unconfirmed ? String(localized: "Couldn't Confirm Undo") : failureTitle
 			await send(.writeFailed(WriteFailure(error, retry: retry, title: title)))
 		}
+		.cancellable(id: CancelID.write)
 	}
 
 	/// The entry an annotation added to the task `id` now asks for: the second after the latest of
@@ -1410,6 +1577,14 @@ private func attributeName(_ attribute: String, udaColumns: [UDAColumn]) -> Stri
 /// `single` where `ids` is one task, else `multiple`, which counts them.
 private func counted(_ ids: [Models.Task.ID], _ single: String, _ multiple: String) -> String {
 	ids.count == 1 ? single : multiple
+}
+
+/// The Replica `error` says the window lost, as it was opened, where that's what it says.
+private func lostReplica(_ error: any Error) -> ReplicaIdentity? {
+	guard case let .lost(identity)? = error as? ReplicaError else {
+		return nil
+	}
+	return identity
 }
 
 /// The name the Edit menu gives `action`'s Undo point, as in "Undo Change Due Date".

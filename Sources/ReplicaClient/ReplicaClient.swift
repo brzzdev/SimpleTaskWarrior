@@ -11,9 +11,13 @@ public struct ReplicaClient: Sendable {
 	/// Commits `plan` as one Undo point to the Replica a `tasks` stream has open in `directory`,
 	/// unless a value it read has changed since, then reads every task again. That read doesn't
 	/// reach the stream, which yields only what changes after it. The window can undo the Undo
-	/// point by `name`, which the Edit menu shows.
+	/// point by `name`, which the Edit menu shows. Throws `lost` where the Replica's database is no
+	/// longer the one the stream opened, as `undo` and `redo` do.
 	public var apply: @Sendable (_ plan: WritePlan, _ name: String, _ directory: URL) async throws
 		-> ApplyOutcome
+
+	/// The database of the Replica in `directory` as it is now, nil where there's none.
+	public var identity: @Sendable (_ directory: URL) -> ReplicaIdentity? = { _ in nil }
 
 	/// Re-applies the Undo point the window last undid, as a new one it can undo again, provided
 	/// nothing has written since. Reads every task again, as `apply` does.
@@ -21,10 +25,13 @@ public struct ReplicaClient: Sendable {
 
 	/// Opens the Replica in `directory` for one window, yielding its tasks at once and again
 	/// whenever anything, the CLI included, commits to it. Each read that fails yields its error,
-	/// and the first to succeed after one yields the tasks whether or not they changed. Ending
-	/// iteration closes the Replica once any open or read in flight returns.
-	public var tasks: @Sendable (_ directory: URL)
-		-> AsyncThrowingStream<Result<TaskSnapshot, ReplicaError>, any Error> = { _ in .finished() }
+	/// and the first to succeed after one yields the tasks whether or not they changed. Throws
+	/// `lost` and closes the Replica once its database is no longer the one opened. Where `expected`
+	/// is given, opens only that database, throwing `lost(expected)` where another is there, as for
+	/// a Replica that moved. Throws `openElsewhere` where another window's stream, not yet ended, has
+	/// the folder open. Ending iteration closes the Replica once any open or read in flight returns.
+	public var tasks: @Sendable (_ directory: URL, _ expected: ReplicaIdentity?)
+		-> AsyncThrowingStream<Result<TaskSnapshot, ReplicaError>, any Error> = { _, _ in .finished() }
 
 	/// Reverts the window's newest Undo point, provided it's still the Replica's newest, so a CLI
 	/// change is never undone on the CLI's behalf. Reads every task again, as `apply` does.
@@ -88,14 +95,39 @@ public struct UndoOutcome: Equatable, Sendable {
 	}
 }
 
+/// Which file a Replica's database is: its device and inode, which a move keeps and a replacement,
+/// such as a recreation or a restore from backup, doesn't.
+public struct ReplicaIdentity: Equatable, Sendable {
+	public var device: UInt64
+	public var inode: UInt64
+
+	public init(device: UInt64, inode: UInt64) {
+		self.device = device
+		self.inode = inode
+	}
+
+	/// The database in `directory`, nil where there's none.
+	init?(directory: URL) {
+		guard let identity = databaseIdentity(directory: directory.path(percentEncoded: false)) else {
+			return nil
+		}
+		self.init(device: identity.device, inode: identity.inode)
+	}
+}
+
 public enum ReplicaError: Equatable, LocalizedError {
 	/// Another connection, such as a `task` command, held the Replica's lock past the 5 s it's
 	/// waited for. Nothing was written, so the call can be made again.
 	case busy
 	case failed(String)
+	/// The Replica's database is no longer the one opened, `identity`: it moved, was replaced or is
+	/// gone. Nothing was written, and nothing more will be, until a window opens it again.
+	case lost(ReplicaIdentity)
 	case notAReplica
 	/// No window has the Replica open.
 	case notOpen
+	/// Another window has the Replica open.
+	case openElsewhere
 	/// An undo failed, and the Replica couldn't be read to tell whether its reversal landed first.
 	/// Undoing again could revert the Undo point before it.
 	case undoUnconfirmed
@@ -109,11 +141,17 @@ public enum ReplicaError: Equatable, LocalizedError {
 		case let .failed(message):
 			message
 
+		case .lost:
+			"The Replica moved, was replaced or is gone"
+
 		case .notAReplica:
 			"This folder isn't a Taskwarrior 3 Replica"
 
 		case .notOpen:
 			"The Replica isn't open"
+
+		case .openElsewhere:
+			"The Replica is open in another window"
 
 		case .undoUnconfirmed:
 			"The change may have been undone. A `task` command may be holding the Replica."
@@ -125,7 +163,20 @@ public enum ReplicaError: Equatable, LocalizedError {
 }
 
 /// Each window's Replica, by the folder its `tasks` stream opened, which `apply` writes through.
-private let openReplicas = Mutex<[URL: Replica]>([:])
+private let openReplicas = Mutex<[URL: Registration]>([:])
+
+/// A window's `tasks` stream's hold on its Replica.
+private struct Registration {
+	/// Set as the stream ends, when its window closes, before it lets go of the Replica.
+	var end: StreamEnd
+	var replica: Replica
+}
+
+/// Whether a `tasks` stream has ended. Its window may have closed while a read holds its poll, so
+/// a window reopened on the folder takes the Replica over rather than waiting on it.
+private final class StreamEnd: Sendable {
+	let hasEnded = Atomic(false)
+}
 
 /// How often a window checks whether anything has committed to its Replica.
 private let pollInterval = Duration.milliseconds(500)
@@ -135,22 +186,35 @@ extension ReplicaClient: DependencyKey {
 		apply: { plan, name, directory in
 			try await replicaErrors { try await openReplica(directory).apply(plan, name: name) }
 		},
+		identity: { directory in
+			ReplicaIdentity(directory: directory)
+		},
 		redo: { directory in
 			try await replicaErrors { try await openReplica(directory).redo() }
 		},
-		tasks: { directory in
+		tasks: { directory, expected in
 			AsyncThrowingStream { continuation in
+				let end = StreamEnd()
 				let polling = _Concurrency.Task {
 					do {
-						let replica = try await Replica.open(directory: directory)
+						let replica = try await Replica.open(directory: directory, expected: expected)
 						// Cancelled while `open` waited, the window has closed, and one reopened on the
 						// folder may have registered its own already. Checked under the lock, since a
 						// window can only reopen once this one is cancelled.
-						let isRegistered = openReplicas.withLock { replicas in
+						let isRegistered = try openReplicas.withLock { replicas throws(ReplicaError) in
 							guard !_Concurrency.Task.isCancelled else {
 								return false
 							}
-							replicas[directory] = replica
+							// A Replica shows in one window, whichever registered first, as when a moved one's
+							// window recovers it at a folder another has just opened, so no two actors write to
+							// it. A window closing gives way at once.
+							if
+								let owner = replicas[directory],
+								!owner.end.hasEnded.load(ordering: .acquiring)
+							{
+								throw .openElsewhere
+							}
+							replicas[directory] = Registration(end: end, replica: replica)
 							return true
 						}
 						guard isRegistered else {
@@ -159,7 +223,7 @@ extension ReplicaClient: DependencyKey {
 						defer {
 							// A window reopened on the folder may have registered its own by now.
 							openReplicas.withLock { replicas in
-								if replicas[directory] === replica {
+								if replicas[directory]?.end === end {
 									replicas[directory] = nil
 								}
 							}
@@ -169,7 +233,7 @@ extension ReplicaClient: DependencyKey {
 							// once it returns, a read would start a fresh wait on the lock.
 							try _Concurrency.Task.checkCancellation()
 							// A failed read retries next tick, leaving the window its last tasks.
-							await replica.publishTasksIfChanged(to: continuation)
+							try await replica.publishTasksIfChanged(to: continuation)
 							try await _Concurrency.Task.sleep(for: pollInterval)
 						}
 					} catch is CancellationError {
@@ -178,14 +242,17 @@ extension ReplicaClient: DependencyKey {
 						continuation.finish(throwing: error)
 					}
 				}
-				continuation.onTermination = { _ in polling.cancel() }
+				continuation.onTermination = { _ in
+					end.hasEnded.store(true, ordering: .releasing)
+					polling.cancel()
+				}
 			}
 		},
 		undo: { directory in
 			try await replicaErrors { try await openReplica(directory).undo() }
 		},
 		validate: { directory in
-			_ = try await Replica.open(directory: directory)
+			_ = try await Replica.open(directory: directory, expected: nil)
 		},
 	)
 
@@ -205,7 +272,7 @@ private func replicaErrors<Value>(
 
 /// The Replica a window's `tasks` stream has open in `directory`.
 private func openReplica(_ directory: URL) throws(ReplicaError) -> Replica {
-	guard let replica = openReplicas.withLock({ $0[directory] }) else {
+	guard let replica = openReplicas.withLock({ $0[directory]?.replica }) else {
 		throw .notOpen
 	}
 	return replica
@@ -250,7 +317,10 @@ actor Replica {
 		}
 	}
 
+	private let directory: URL
 	private let engine: EngineHandle
+	/// The database as it was opened, which every write checks it still is.
+	private let identity: ReplicaIdentity
 	private let queue: DispatchSerialQueue
 	private var readCount = 0
 	/// The `data_version` the last tasks were read at, nil before the first read.
@@ -269,23 +339,44 @@ actor Replica {
 	/// last reference is dropped on the actor's queue rather than wherever it happens to go.
 	isolated deinit {}
 
-	private init(directory: URL, queue: DispatchSerialQueue) throws(ReplicaError) {
+	private init(
+		directory: URL,
+		expected: ReplicaIdentity?,
+		queue: DispatchSerialQueue,
+	) throws(ReplicaError) {
+		self.directory = directory
 		self.queue = queue
+		// Read before opening, so a replacement landing mid-open fails the check after it, rather than
+		// being recorded as the database the engine has open.
+		guard let identity = ReplicaIdentity(directory: directory) else {
+			throw .notAReplica
+		}
+		if let expected, identity != expected {
+			throw .lost(expected)
+		}
+		self.identity = identity
 		do {
 			engine = try EngineHandle.open(directory: directory.path(percentEncoded: false))
 		} catch {
 			throw ReplicaError(error)
 		}
+		guard ReplicaIdentity(directory: directory) == identity else {
+			throw .lost(identity)
+		}
 	}
 
-	/// Opens on the actor's queue, since opening waits on a held lock like any other call. The
-	/// whole actor is built there, so only it crosses back to the caller, never the engine handle.
-	static func open(directory: URL) async throws(ReplicaError) -> Replica {
+	/// Opens the Replica in `directory`, only where its database is `expected`, if given. Opens on the
+	/// actor's queue, since opening waits on a held lock like any other call. The whole actor is
+	/// built there, so only it crosses back to the caller, never the engine handle.
+	static func open(
+		directory: URL,
+		expected: ReplicaIdentity?,
+	) async throws(ReplicaError) -> Replica {
 		let queue = DispatchSerialQueue(label: "dev.brzz.SimpleTaskWarrior.Replica")
 		let replica = await withCheckedContinuation { continuation in
 			queue.async {
 				continuation.resume(returning: Result { () throws(ReplicaError) in
-					try Replica(directory: directory, queue: queue)
+					try Replica(directory: directory, expected: expected, queue: queue)
 				})
 			}
 		}
@@ -294,6 +385,7 @@ actor Replica {
 
 	/// Commits `plan` unless the engine refuses it as stale, then reads every task again.
 	func apply(_ plan: WritePlan, name: String) throws -> ApplyOutcome {
+		try checkIdentity()
 		let outcome = try engine.apply(
 			operations: plan.operations.map(PlannedOperation.init),
 			expectations: plan.expectations.map(Expectation.init),
@@ -315,6 +407,7 @@ actor Replica {
 	/// still gets through, since TaskChampion can't make a commit conditional. One attempt only: a
 	/// redo that fails isn't offered again.
 	func redo() throws -> UndoOutcome {
+		try checkIdentity()
 		guard let redoPoint, try engine.dataVersion() == redoPoint.dataVersion else {
 			return try notApplied()
 		}
@@ -338,6 +431,7 @@ actor Replica {
 	/// held, is thrown, and the point stays for another try. So is `undoUnconfirmed`, where the
 	/// engine can't tell whether it landed, and the next read settles the point.
 	func undo() throws -> UndoOutcome {
+		try checkIdentity()
 		guard
 			let point = undoPoints.last,
 			case let .applied(error) = try engine.commitReversedOperations(operations: point.operations)
@@ -362,10 +456,12 @@ actor Replica {
 
 	/// Yields every task when anything has committed since the last read, or the error that stopped
 	/// it reading. After an error the next read is in full, so the window learns reads work again.
+	/// Throws `lost`, rather than reading a database that's no longer the one opened.
 	func publishTasksIfChanged(
 		to continuation: AsyncThrowingStream<Result<TaskSnapshot, ReplicaError>, any Error>
 			.Continuation,
-	) {
+	) throws(ReplicaError) {
+		try checkIdentity()
 		do {
 			guard try engine.dataVersion() != readVersion else { return }
 			// Decoded by the window, with its Taskrc's UDAs.
@@ -373,6 +469,15 @@ actor Replica {
 		} catch {
 			readVersion = nil
 			continuation.yield(.failure(ReplicaError(error)))
+		}
+	}
+
+	/// Throws `lost` where the database in the Replica's folder is no longer the one opened, before a
+	/// write reaches it. A replacement landing between the check and the write can't be prevented,
+	/// only found on the next check.
+	private func checkIdentity() throws(ReplicaError) {
+		guard ReplicaIdentity(directory: directory) == identity else {
+			throw .lost(identity)
 		}
 	}
 

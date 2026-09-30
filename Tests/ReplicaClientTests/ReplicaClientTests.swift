@@ -10,6 +10,13 @@ import Testing
 /// handle stands in for the CLI.
 @Suite(.timeLimit(.minutes(1)))
 final class ReplicaClientTests {
+	/// Which of two windows opens a Replica first: one recovering it as it moved there, or one ⌘O
+	/// opened on its folder.
+	enum FirstOpen: CaseIterable {
+		case openPanel
+		case recovery
+	}
+
 	let directory = URL.temporaryDirectory.appending(path: UUID().uuidString)
 	let replicaClient = ReplicaClient.liveValue
 
@@ -28,7 +35,7 @@ final class ReplicaClientTests {
 	@Test
 	func applyCommitsOneActionAsOneUndoPoint() async throws {
 		let cli = try createReplica()
-		var tasks = replicaClient.tasks(directory).makeAsyncIterator()
+		var tasks = replicaClient.tasks(directory, nil).makeAsyncIterator()
 		_ = try await tasks.next()
 		let uuid = UUID()
 		let plan = try WritePlanner(taskrc: .defaults, timeZone: .gmt)
@@ -47,7 +54,7 @@ final class ReplicaClientTests {
 	@Test
 	func applyFailsAsBusyWhileAnotherConnectionHoldsTheLock() async throws {
 		_ = try createReplica()
-		var tasks = replicaClient.tasks(directory).makeAsyncIterator()
+		var tasks = replicaClient.tasks(directory, nil).makeAsyncIterator()
 		_ = try await tasks.next()
 		let plan = try WritePlanner(taskrc: .defaults, timeZone: .gmt)
 			.plan(.create(UUID(), description: "Buy milk"), tasks: [:], at: .now)
@@ -68,7 +75,7 @@ final class ReplicaClientTests {
 	func applyRefusesAStalePlanAndCommitsNothing() async throws {
 		let cli = try createReplica()
 		let uuid = try addPendingTask("Buy milk", with: cli)
-		var tasks = replicaClient.tasks(directory).makeAsyncIterator()
+		var tasks = replicaClient.tasks(directory, nil).makeAsyncIterator()
 		let stored = try #require(try await tasks.next()?.get().tasks.first)
 		let plan = try WritePlanner(taskrc: .defaults, timeZone: .gmt)
 			.plan(.complete([uuid], chains: .repair), tasks: [uuid: stored.properties], at: .now)
@@ -84,10 +91,31 @@ final class ReplicaClientTests {
 	}
 
 	@Test
+	func replacedDatabaseEndsTheStreamAndRefusesWrites() async throws {
+		_ = try createReplica()
+		var tasks = replicaClient.tasks(directory, nil).makeAsyncIterator()
+		_ = try await tasks.next()
+		let identity = try #require(replicaClient.identity(directory))
+		let plan = try WritePlanner(taskrc: .defaults, timeZone: .gmt)
+			.plan(.create(UUID(), description: "Buy milk"), tasks: [:], at: .now)
+		// As a restore from backup would: a copy in its place, under a new inode.
+		let copy = directory.appending(path: "copy.sqlite3")
+		try FileManager.default.copyItem(atPath: databasePath, toPath: copy.path(percentEncoded: false))
+		_ = try FileManager.default.replaceItemAt(URL(filePath: databasePath), withItemAt: copy)
+
+		await #expect(throws: ReplicaError.lost(identity)) {
+			try await self.replicaClient.apply(plan, "New Task", self.directory)
+		}
+		await #expect(throws: ReplicaError.lost(identity)) {
+			_ = try await tasks.next()
+		}
+	}
+
+	@Test
 	func redoReappliesTheUndoneChangeUntilAnythingWrites() async throws {
 		let cli = try createReplica()
 		let uuid = try addPendingTask("Buy milk", with: cli)
-		var tasks = replicaClient.tasks(directory).makeAsyncIterator()
+		var tasks = replicaClient.tasks(directory, nil).makeAsyncIterator()
 		let stored = try #require(try await tasks.next()?.get().tasks.first)
 		try await complete(uuid, stored, as: "Complete Task")
 		_ = try await replicaClient.undo(directory)
@@ -106,10 +134,48 @@ final class ReplicaClientTests {
 		#expect(try await replicaClient.redo(directory).isApplied == false)
 	}
 
+	@Test(arguments: FirstOpen.allCases)
+	func tasksLeavesAReplicaToTheWindowAlreadyOnIt(firstOpen: FirstOpen) async throws {
+		_ = try createReplica()
+		let identity = try #require(replicaClient.identity(directory))
+		let recovering = { self.replicaClient.tasks(self.directory, identity).makeAsyncIterator() }
+		let opening = { self.replicaClient.tasks(self.directory, nil).makeAsyncIterator() }
+		var first = firstOpen == .recovery ? recovering() : opening()
+		_ = try await first.next()
+		var second = firstOpen == .recovery ? opening() : recovering()
+
+		await #expect(throws: ReplicaError.openElsewhere) {
+			_ = try await second.next()
+		}
+	}
+
+	@Test
+	func tasksReopensAReplicaWhoseWindowJustClosed() async throws {
+		_ = try createReplica()
+		var closing = Optional(replicaClient.tasks(directory, nil).makeAsyncIterator())
+		_ = try await closing?.next()
+		// Its stream ends at once, though it lets go of the Replica only as its poll returns.
+		closing = nil
+		var reopened = replicaClient.tasks(directory, nil).makeAsyncIterator()
+
+		#expect(try await reopened.next()?.get().tasks.isEmpty == true)
+	}
+
+	@Test
+	func tasksOpensOnlyTheDatabaseExpected() async throws {
+		_ = try createReplica()
+		let other = ReplicaIdentity(device: 0, inode: 0)
+		var tasks = replicaClient.tasks(directory, other).makeAsyncIterator()
+
+		await #expect(throws: ReplicaError.lost(other)) {
+			_ = try await tasks.next()
+		}
+	}
+
 	@Test
 	func tasksReadsAgainWhenTheCLICommits() async throws {
 		let cli = try createReplica()
-		var tasks = replicaClient.tasks(directory).makeAsyncIterator()
+		var tasks = replicaClient.tasks(directory, nil).makeAsyncIterator()
 		#expect(try await tasks.next()?.get().tasks.isEmpty == true)
 
 		let uuid = try addPendingTask("Buy milk", with: cli)
@@ -126,7 +192,7 @@ final class ReplicaClientTests {
 		let cli = try createReplica()
 		let uuid = try addPendingTask("Buy milk", with: cli)
 
-		var tasks = replicaClient.tasks(directory).makeAsyncIterator()
+		var tasks = replicaClient.tasks(directory, nil).makeAsyncIterator()
 
 		#expect(
 			try await tasks.next()?.get().tasks == [
@@ -139,7 +205,7 @@ final class ReplicaClientTests {
 	func undoRefusesWhenACLIChangeIsNewest() async throws {
 		let cli = try createReplica()
 		let uuid = try addPendingTask("Buy milk", with: cli)
-		var tasks = replicaClient.tasks(directory).makeAsyncIterator()
+		var tasks = replicaClient.tasks(directory, nil).makeAsyncIterator()
 		let stored = try #require(try await tasks.next()?.get().tasks.first)
 		let completed = try await complete(uuid, stored, as: "Complete Task")
 		#expect(completed.undoName == "Complete Task")
@@ -157,7 +223,7 @@ final class ReplicaClientTests {
 	func undoRevertsTheWindowsNewestChange() async throws {
 		let cli = try createReplica()
 		let uuid = try addPendingTask("Buy milk", with: cli)
-		var tasks = replicaClient.tasks(directory).makeAsyncIterator()
+		var tasks = replicaClient.tasks(directory, nil).makeAsyncIterator()
 		let stored = try #require(try await tasks.next()?.get().tasks.first)
 		try await complete(uuid, stored, as: "Complete Task")
 
@@ -173,6 +239,18 @@ final class ReplicaClientTests {
 
 	@Test
 	func validateRefusesAFolderWithoutAReplica() async {
+		await #expect(throws: ReplicaError.notAReplica) {
+			try await self.replicaClient.validate(self.directory)
+		}
+	}
+
+	@Test
+	func validateRefusesAFileThatIsntADatabase() async throws {
+		try #require(FileManager.default.createFile(
+			atPath: databasePath,
+			contents: Data(repeating: 1, count: 4_096),
+		))
+
 		await #expect(throws: ReplicaError.notAReplica) {
 			try await self.replicaClient.validate(self.directory)
 		}

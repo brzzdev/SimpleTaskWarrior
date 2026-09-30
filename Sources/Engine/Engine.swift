@@ -793,6 +793,64 @@ public func FfiConverterTypeEngineHandle_lower(_ value: EngineHandle) -> UInt64 
 
 
 /**
+ * Which file a Replica's database is: its device and inode, which a move keeps and a replacement,
+ * such as a recreation or a restore from backup, doesn't.
+ */
+public struct DatabaseIdentity: Equatable, Hashable {
+    public var device: UInt64
+    public var inode: UInt64
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(device: UInt64, inode: UInt64) {
+        self.device = device
+        self.inode = inode
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension DatabaseIdentity: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeDatabaseIdentity: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DatabaseIdentity {
+        return
+            try DatabaseIdentity(
+                device: FfiConverterUInt64.read(from: &buf), 
+                inode: FfiConverterUInt64.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: DatabaseIdentity, into buf: inout [UInt8]) {
+        FfiConverterUInt64.write(value.device, into: &buf)
+        FfiConverterUInt64.write(value.inode, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDatabaseIdentity_lift(_ buf: RustBuffer) throws -> DatabaseIdentity {
+    return try FfiConverterTypeDatabaseIdentity.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDatabaseIdentity_lower(_ value: DatabaseIdentity) -> RustBuffer {
+    return FfiConverterTypeDatabaseIdentity.lower(value)
+}
+
+
+/**
  * A value the planner read, which must still hold for its plan to commit. A missing task reads
  * every property as `None`.
  */
@@ -1119,7 +1177,7 @@ enum EngineError: Swift.Error, Equatable, Hashable, Foundation.LocalizedError {
     case Failed(message: String
     )
     /**
-     * The folder has no TaskChampion database.
+     * The folder has no TaskChampion database, or what's in its place isn't one.
      */
     case NotAReplica
     /**
@@ -1610,6 +1668,30 @@ fileprivate struct FfiConverterOptionString: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionTypeDatabaseIdentity: FfiConverterRustBuffer {
+    typealias SwiftType = DatabaseIdentity?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeDatabaseIdentity.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeDatabaseIdentity.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceString: FfiConverterRustBuffer {
     typealias SwiftType = [String]
 
@@ -1782,6 +1864,18 @@ fileprivate struct FfiConverterDictionaryStringString: FfiConverterRustBuffer {
         return dict
     }
 }
+/**
+ * The database in `directory`, None where there's none. Found by `stat`, never by opening it:
+ * closing any descriptor on the file drops every SQLite POSIX lock the process holds on it.
+ */
+public func databaseIdentity(directory: String) -> DatabaseIdentity?  {
+    return try!  FfiConverterOptionTypeDatabaseIdentity.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_engine_fn_func_database_identity(
+        FfiConverterString.lower(directory),uniffiCallStatus
+    )
+})
+}
 
 private enum InitializationResult {
     case ok
@@ -1797,6 +1891,9 @@ private let initializationResult: InitializationResult = {
     let scaffolding_contract_version = ffi_engine_uniffi_contract_version()
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
+    }
+    if (uniffi_engine_checksum_func_database_identity() != 30517) {
+        return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_engine_checksum_method_enginehandle_apply() != 27128) {
         return InitializationResult.apiChecksumMismatch

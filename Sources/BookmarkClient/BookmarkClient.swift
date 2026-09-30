@@ -9,8 +9,13 @@ public struct BookmarkClient: Sendable {
 	/// count, since it resolves where it did before.
 	public var changes: @Sendable () -> AsyncStream<Void> = { .finished }
 	public var create: @Sendable (_ url: URL) throws -> Data
-	/// The bookmarked URL, which follows a folder that moved.
-	public var resolve: @Sendable (_ bookmark: Data) throws -> URL
+	/// Pairs the Taskrc paired with the Replica last in `replica` with the one in `newReplica`, which
+	/// `bookmark` locates, instead, dropping any the latter had. The first may be gone, so where its
+	/// bookmark no longer resolves, it's found by the path the bookmark was made at.
+	public var movePairing: @Sendable (_ replica: URL, _ newReplica: URL, _ bookmark: Data) -> Void
+	/// The bookmarked URL, which follows a folder that moved, and a fresh bookmark to keep in place
+	/// of `bookmark` where it's stale.
+	public var resolve: @Sendable (_ bookmark: Data) throws -> (url: URL, refreshed: Data?)
 	/// Pairs `taskrc` with the Replica in `replica`, or detaches the Replica's Taskrc when nil.
 	public var saveTaskrc: @Sendable (_ taskrc: URL?, _ replica: URL) throws -> Void
 	/// The Taskrc paired with the Replica in `replica`, re-saving a stale bookmark. Where the
@@ -32,10 +37,26 @@ extension BookmarkClient: DependencyKey {
 		create: { url in
 			try url.bookmarkData()
 		},
+		movePairing: { replica, newReplica, bookmark in
+			update { stored in
+				guard
+					let index = pairingIndex(of: replica, in: &stored)
+					?? lostPairingIndex(of: replica, in: stored)
+				else {
+					return
+				}
+				var pairing = stored.pairings.remove(at: index)
+				pairing.replica = bookmark
+				if let replaced = pairingIndex(of: newReplica, in: &stored) {
+					stored.pairings.remove(at: replaced)
+				}
+				stored.pairings.append(pairing)
+			}
+			notifyChanges()
+		},
 		resolve: { bookmark in
-			// A stale bookmark still resolves, to where the folder moved. Re-saving it is part of
-			// handling a lost Replica.
-			try resolved(bookmark).url
+			// A stale bookmark still resolves, to where the folder moved, or to one made at its path since.
+			try refreshed(bookmark)
 		},
 		saveTaskrc: { taskrc, replica in
 			let pairing = try taskrc.map { try Pairing(
@@ -65,10 +86,7 @@ extension BookmarkClient: DependencyKey {
 					return nil
 				}
 				let bookmark = stored.pairings[index].taskrc
-				return url(of: bookmark) { stored.pairings[index].taskrc = $0 }
-					?? URL.resourceValues(forKeys: [.pathKey], fromBookmarkData: bookmark)?
-					.path
-					.map { URL(filePath: $0) }
+				return url(of: bookmark) { stored.pairings[index].taskrc = $0 } ?? bookmarkPath(bookmark)
 			}
 		},
 	)
@@ -102,6 +120,21 @@ private struct Pairing: Codable, Equatable {
 	var taskrc: Data
 }
 
+/// The path `bookmark` was made at, which it records even once it no longer resolves.
+public func bookmarkPath(_ bookmark: Data) -> URL? {
+	URL.resourceValues(forKeys: [.pathKey], fromBookmarkData: bookmark)?.path.map { URL(filePath: $0) }
+}
+
+/// The index of the pairing whose Replica bookmark no longer resolves, but was made at the folder
+/// `replica`. Only moving a pairing looks for one, so a Replica later made at that path doesn't
+/// inherit it.
+private func lostPairingIndex(of replica: URL, in stored: Stored) -> Int? {
+	stored.pairings.firstIndex { pairing in
+		(try? resolved(pairing.replica)) == nil
+			&& bookmarkPath(pairing.replica).map(standardizedFolder) == standardizedFolder(replica)
+	}
+}
+
 /// The index of the pairing whose Replica bookmark resolves to the folder `replica`, re-saving any
 /// stale Replica bookmark it resolves on the way.
 private func pairingIndex(of replica: URL, in stored: inout Stored) -> Int? {
@@ -115,6 +148,12 @@ private func pairingIndex(of replica: URL, in stored: inout Stored) -> Int? {
 /// whether two URLs name the same Replica.
 public func standardizedFolder(_ url: URL) -> URL {
 	URL(filePath: url.path(percentEncoded: false), directoryHint: .isDirectory).standardizedFileURL
+}
+
+/// The URL `bookmark` resolves to, and a fresh bookmark to keep in its place where it's stale.
+private func refreshed(_ bookmark: Data) throws -> (url: URL, refreshed: Data?) {
+	let (url, isStale) = try resolved(bookmark)
+	return (url, isStale ? try? url.bookmarkData() : nil)
 }
 
 /// The URL `bookmark` resolves to, and whether the bookmark is stale and wants saving again.
@@ -151,10 +190,10 @@ private func update<Result>(_ body: (inout Stored) -> Result) -> Result {
 
 /// The URL `bookmark` resolves to, passing `resave` a fresh bookmark when it's stale.
 private func url(of bookmark: Data, resave: (Data) -> Void) -> URL? {
-	guard let (url, isStale) = try? resolved(bookmark) else {
+	guard let (url, fresh) = try? refreshed(bookmark) else {
 		return nil
 	}
-	if isStale, let fresh = try? url.bookmarkData() {
+	if let fresh {
 		resave(fresh)
 	}
 	return url
