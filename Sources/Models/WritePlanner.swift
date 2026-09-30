@@ -15,6 +15,47 @@ public struct WritePlanner: Sendable {
 		self.taskrc = taskrc
 	}
 
+	/// `ids`, each instance of a template in `series` followed by the rest of its Series: its pending
+	/// siblings, waiting ones included, in `imask` order, then the template, as a confirmed `task
+	/// delete` takes them. Found by scanning, so an instance the CLI generates before the plan commits
+	/// is missed, but generating it grows the template's `mask`, which the plan expects, so the plan
+	/// is made again.
+	public static func withSeries(
+		_ ids: [Task.ID],
+		series: Set<Task.ID>,
+		tasks: [Task.ID: [String: String]],
+	) -> [Task.ID] {
+		guard !series.isEmpty else {
+			return ids
+		}
+		let templateOf = { (id: Task.ID) in tasks[id]?["parent"].flatMap(UUID.init(uuidString:)) }
+		var pending: [Task.ID: [Task.ID]] = [:]
+		for (id, properties) in tasks where isPending(properties["status"]) {
+			guard let template = templateOf(id), series.contains(template) else {
+				continue
+			}
+			pending[template, default: []].append(id)
+		}
+		let index = { (id: Task.ID) in tasks[id]?["imask"].flatMap(Int.init) ?? .max }
+		var expanded: [Task.ID] = []
+		var expandedSeries: Set<Task.ID> = []
+		for id in ids {
+			expanded.append(id)
+			guard
+				let template = templateOf(id),
+				series.contains(template),
+				expandedSeries.insert(template).inserted
+			else {
+				continue
+			}
+			expanded += pending[template, default: []].sorted { (index($0), $0) < (index($1), $1) }
+			if tasks[template] != nil {
+				expanded.append(template)
+			}
+		}
+		return expanded
+	}
+
 	/// Plans `action` against `tasks`, every task's properties as the snapshot holds them.
 	public func plan(
 		_ action: WriteAction,
@@ -46,7 +87,8 @@ public struct WritePlanner: Sendable {
 			}
 			return plan
 
-		case let .delete(ids, chains):
+		case let .delete(ids, chains, series):
+			let ids = Self.withSeries(ids, series: series, tasks: tasks)
 			return try plan(ids, tasks: tasks, at: now, chains: chains) { $0.delete(at: epoch) }
 
 		case let .edit(ids, edit):
@@ -390,8 +432,9 @@ public enum WriteAction: Equatable, Sendable {
 	/// `task done`, which leaves a task that isn't pending as it is.
 	case complete([Task.ID], chains: ChainRepair)
 	case create(Task.ID, description: String)
-	/// `task delete`, which keeps `start`.
-	case delete([Task.ID], chains: ChainRepair)
+	/// `task delete`, which keeps `start`. An instance of a template in `series` takes the rest of its
+	/// Series with it, as `task delete` does under `recurrence.confirmation`.
+	case delete([Task.ID], chains: ChainRepair, series: Set<Task.ID> = [])
 	case edit([Task.ID], TaskEdit)
 	/// `task modify status:pending` on a completed or deleted task.
 	case markPending([Task.ID])
@@ -479,6 +522,11 @@ extension String {
 private let dateAttributes: Set = [
 	"due", "end", "entry", "modified", "scheduled", "start", "until", "wait",
 ]
+
+/// Whether a task with `status` is pending, as TW 3 reads a legacy `waiting` too.
+private func isPending(_ status: String?) -> Bool {
+	status == Status.pending.rawValue || status == legacyWaiting
+}
 
 /// Whether a task with `status` blocks or is blocked: any status but completed or deleted, as
 /// `Status.isOpen` reads it, a Recurrence template and a legacy `waiting` included.
@@ -710,8 +758,7 @@ private struct Draft {
 
 	/// `task done`: only from pending, removing `start`. A legacy stored `waiting` is pending too.
 	mutating func complete(at epoch: String) {
-		let status = read("status")
-		guard status == Status.pending.rawValue || status == legacyWaiting else {
+		guard isPending(read("status")) else {
 			return
 		}
 		stampEnd(at: epoch)

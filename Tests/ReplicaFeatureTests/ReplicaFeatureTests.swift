@@ -73,6 +73,33 @@ struct ReplicaFeatureTests {
 	}
 
 	@Test
+	func bulkDeleteOfInstancesAsksOnceForEachSeries() async throws {
+		let plants = series(0, "Water plants", instances: [1, 2])
+		let bins = series(3, "Take out bins", instances: [4])
+		var initialState = try loadedState(
+			plants.instances + bins.instances,
+			selection: [UUID(1), UUID(2), UUID(4)],
+		)
+		initialState.storedTasks += [plants.template, bins.template]
+		let store = TestStore(initialState: initialState) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.date.now = now
+			$0.timeZone = .gmt
+		}
+
+		await store.send(.deleteButtonTapped) {
+			$0.seriesDeletePrompt = ReplicaFeature.SeriesDeletePrompt(
+				choices: [
+					ReplicaFeature.SeriesDeletePrompt.Choice(description: "Water plants", id: UUID(0)),
+					ReplicaFeature.SeriesDeletePrompt.Choice(description: "Take out bins", id: UUID(3)),
+				],
+				ids: [UUID(1), UUID(2), UUID(4)],
+			)
+		}
+	}
+
+	@Test
 	func bulkEditsNameTheirUndoPointAfterTheTasksTheyChange() async throws {
 		let milk = storedTask(0, "Buy milk", workingSetID: 1, ["tag_home": "x"])
 		let dog = storedTask(1, "Walk the dog", workingSetID: 2)
@@ -329,6 +356,161 @@ struct ReplicaFeatureTests {
 						UUID(1): tasks[1].properties,
 						UUID(2): tasks[2].properties,
 					],
+					at: now,
+				),
+			],
+		)
+		await store.finish()
+	}
+
+	@Test
+	func deleteOfAnInstanceAsksWhetherToTakeItsSeries() async throws {
+		let plants = series(0, "Water plants", instances: [1, 2])
+		let plans = LockIsolated<[WritePlan]>([])
+		let undoNames = LockIsolated<[String]>([])
+		var initialState = try loadedState(plants.instances, selection: [UUID(1)])
+		initialState.storedTasks.append(plants.template)
+		let stored = initialState.storedTasks
+		let store = TestStore(initialState: initialState) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.continuousClock = TestClock()
+			$0.date.now = now
+			$0.replicaClient.apply = { plan, name, _ in
+				plans.withValue { $0.append(plan) }
+				undoNames.withValue { $0.append(name) }
+				return ApplyOutcome(isCommitted: true, snapshot: snapshot(stored))
+			}
+			$0.timeZone = .gmt
+		}
+
+		await store.send(.deleteButtonTapped) {
+			$0.seriesDeletePrompt = ReplicaFeature.SeriesDeletePrompt(
+				choices: [ReplicaFeature.SeriesDeletePrompt.Choice(description: "Water plants", id: UUID(0))],
+				ids: [UUID(1)],
+			)
+		}
+		await store.send(.seriesChoiceChanged(UUID(0), deletesSeries: true)) {
+			$0.seriesDeletePrompt?.choices[id: UUID(0)]?.deletesSeries = true
+		}
+		await store.send(.seriesDeleteButtonTapped) {
+			// Everything the Delete takes, the hidden template included.
+			$0.leavingTasks = [UUID(0), UUID(1), UUID(2)]
+			$0.rows = []
+			$0.selection = []
+			$0.seriesDeletePrompt = nil
+			$0.writeProgress = .running
+		}
+		// The table's reads are other tests' business: this one is about the plan.
+		store.exhaustivity = .off(showSkippedAssertions: false)
+		await store.receive(\.writeCommitted)
+		#expect(
+			try plans.value == [
+				planner.plan(
+					.delete([UUID(1)], chains: .leave, series: [UUID(0)]),
+					tasks: properties(of: stored),
+					at: now,
+				),
+			],
+		)
+		#expect(undoNames.value == ["Delete Series"])
+		await store.finish()
+	}
+
+	/// `task delete` asks only under `prompt`, and reads anything else as a boolean.
+	@Test(arguments: [("no", false), ("yes", true)])
+	func deleteOfAnInstanceFollowsTheTaskrcWithoutAsking(
+		confirmation: String,
+		deletesSeries: Bool,
+	) async throws {
+		let plants = series(0, "Water plants", instances: [1, 2])
+		let taskrc = Taskrc(path: taskrcFile.path(), environment: .fixture) { path in
+			Taskrc.File(contents: "recurrence.confirmation=\(confirmation)", realPath: path)
+		}
+		let plans = LockIsolated<[WritePlan]>([])
+		var initialState = try loadedState(plants.instances, selection: [UUID(1)])
+		initialState.storedTasks.append(plants.template)
+		let stored = initialState.storedTasks
+		initialState.taskrc = TaskrcClient.Loaded(taskrc: taskrc, url: taskrcFile)
+		let store = TestStore(initialState: initialState) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.continuousClock = TestClock()
+			$0.date.now = now
+			$0.replicaClient.apply = { plan, _, _ in
+				plans.withValue { $0.append(plan) }
+				return ApplyOutcome(isCommitted: true, snapshot: snapshot(stored))
+			}
+			$0.timeZone = .gmt
+		}
+		// The table's reads are other tests' business: this one is about the plan.
+		store.exhaustivity = .off(showSkippedAssertions: false)
+
+		await store.send(.deleteButtonTapped)
+		await store.receive(\.writeCommitted)
+
+		#expect(
+			try plans.value == [
+				WritePlanner(taskrc: taskrc, timeZone: .gmt).plan(
+					.delete([UUID(1)], chains: .leave, series: deletesSeries ? [UUID(0)] : []),
+					tasks: properties(of: stored),
+					at: now,
+				),
+			],
+		)
+		await store.finish()
+	}
+
+	@Test
+	func deletingASeriesAsksAboutTheChainsItsSiblingsBreak() async throws {
+		let plants = series(0, "Water plants", instances: [1, 2])
+		let uuid = { (seed: Int) in UUID(seed).uuidString.lowercased() }
+		// Alpha depends on the sibling, which depends on Gamma.
+		var instances = plants.instances
+		instances[1].properties.merge(["dep_\(uuid(4))": "x", "depends": uuid(4)]) { $1 }
+		let alpha = storedTask(3, "Alpha", workingSetID: 4, ["dep_\(uuid(2))": "x", "depends": uuid(2)])
+		let gamma = storedTask(4, "Gamma", workingSetID: 5)
+		let plans = LockIsolated<[WritePlan]>([])
+		var initialState = try loadedState(instances + [alpha, gamma], selection: [UUID(1)])
+		initialState.storedTasks.append(plants.template)
+		let stored = initialState.storedTasks
+		let store = TestStore(initialState: initialState) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.continuousClock = TestClock()
+			$0.date.now = now
+			$0.replicaClient.apply = { plan, _, _ in
+				plans.withValue { $0.append(plan) }
+				return ApplyOutcome(isCommitted: true, snapshot: snapshot(stored))
+			}
+			$0.timeZone = .gmt
+		}
+
+		// Deleting only the instance breaks no chain.
+		await store.send(.deleteButtonTapped) {
+			$0.seriesDeletePrompt = ReplicaFeature.SeriesDeletePrompt(
+				choices: [ReplicaFeature.SeriesDeletePrompt.Choice(description: "Water plants", id: UUID(0))],
+				ids: [UUID(1)],
+			)
+		}
+		await store.send(.seriesChoiceChanged(UUID(0), deletesSeries: true)) {
+			$0.seriesDeletePrompt?.chainRepairMessage =
+				"“Alpha” would depend on “Gamma” instead of “Water plants”."
+			$0.seriesDeletePrompt?.choices[id: UUID(0)]?.deletesSeries = true
+		}
+		await store.send(.repairChainsCheckboxChanged(repairsChains: false)) {
+			$0.seriesDeletePrompt?.repairsChains = false
+		}
+		// The table's reads are other tests' business: this one is about the plan.
+		store.exhaustivity = .off(showSkippedAssertions: false)
+		await store.send(.seriesDeleteButtonTapped)
+		await store.receive(\.writeCommitted)
+
+		#expect(
+			try plans.value == [
+				planner.plan(
+					.delete([UUID(1)], chains: .leave, series: [UUID(0)]),
+					tasks: properties(of: stored),
 					at: now,
 				),
 			],
@@ -1866,6 +2048,34 @@ private func chain(from first: Int = 0, suffix: String = "") -> [StoredTask] {
 		storedTask(first + 1, "Beta" + suffix, workingSetID: first + 2, dependingOn(first + 2)),
 		storedTask(first + 2, "Gamma" + suffix, workingSetID: first + 3),
 	]
+}
+
+/// A weekly Series named `description`: its template, seeded `template`, and a pending instance
+/// seeded with each of `instances`, in `imask` order.
+private func series(
+	_ template: Int,
+	_ description: String,
+	instances: [Int],
+) -> (instances: [StoredTask], template: StoredTask) {
+	let recurrence = ["due": "1790600000", "recur": "weekly"]
+	let parent = UUID(template).uuidString.lowercased()
+	return (
+		instances.enumerated().map { imask, seed in
+			storedTask(
+				seed,
+				description,
+				workingSetID: seed + 1,
+				recurrence.merging(["imask": String(imask), "parent": parent]) { $1 },
+			)
+		},
+		storedTask(
+			template,
+			description,
+			status: "recurring",
+			workingSetID: nil,
+			recurrence.merging(["mask": String(repeating: "-", count: instances.count)]) { $1 },
+		),
+	)
 }
 
 /// The planner a window on TW's defaults writes with.

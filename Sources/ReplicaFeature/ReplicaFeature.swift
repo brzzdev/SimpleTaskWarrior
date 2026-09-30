@@ -45,7 +45,7 @@ struct ReplicaFeature {
 		/// The tasks a Done or Delete in progress is writing, which the table drops as the write
 		/// starts rather than once it commits, since that can wait seconds on the Replica's lock.
 		var leavingTasks: Set<Models.Task.ID> = []
-		/// Writes asked for while another was in progress or a Done or Delete asked about chains, written
+		/// Writes asked for while another was in progress or a Done or Delete asked a question, written
 		/// in order once that ends. Only edits get here: every other write is disabled then.
 		var queuedWrites: [WriteAction] = []
 		/// Why reading the Replica fails, while it does. The window keeps the last tasks it read.
@@ -61,6 +61,8 @@ struct ReplicaFeature {
 		var searchText = ""
 		/// Kept by UUID, so it survives the CLI renumbering tasks.
 		var selection: Set<Models.Task.ID> = []
+		/// The Delete asking whether to take the Series of each Recurrence instance it deletes.
+		var seriesDeletePrompt: SeriesDeletePrompt?
 		var sidebarSelection: Set<SidebarItem> = []
 		/// The table's sort, which the table autosaves per Replica and reports once it restores.
 		var sortOrder = [TaskSort(.urgency, order: .reverse)]
@@ -196,9 +198,9 @@ struct ReplicaFeature {
 		}
 
 		/// Whether a write can start now, rather than queue: not while one is in progress, nor while a
-		/// Done or Delete asks about chains, whose answer writes against the tasks it asked about.
+		/// Done or Delete asks a question, whose answer writes against the tasks it asked about.
 		var canWrite: Bool {
-			writeProgress == nil && chainRepairPrompt == nil
+			writeProgress == nil && chainRepairPrompt == nil && seriesDeletePrompt == nil
 		}
 
 		init(bookmark: Data) {
@@ -248,12 +250,21 @@ struct ReplicaFeature {
 		var ids: [Models.Task.ID]
 		/// What repairing would do, as planned when the command was chosen: a line for each dependent.
 		var message: String
+		/// The templates whose Series a Delete takes with it.
+		var series: Set<Models.Task.ID>
 		var title: String
 
-		init(command: TaskCommand, ids: [Models.Task.ID], message: String, title: String) {
+		init(
+			command: TaskCommand,
+			ids: [Models.Task.ID],
+			message: String,
+			series: Set<Models.Task.ID> = [],
+			title: String,
+		) {
 			self.command = command
 			self.ids = ids
 			self.message = message
+			self.series = series
 			self.title = title
 		}
 
@@ -262,8 +273,25 @@ struct ReplicaFeature {
 			chains: [WritePlan.RepairedChain],
 			command: TaskCommand,
 			ids: [Models.Task.ID],
+			series: Set<Models.Task.ID>,
 			tasks: [Models.Task.ID: [String: String]],
 		) {
+			self.init(
+				command: command,
+				ids: ids,
+				message: Self.message(for: chains, tasks: tasks),
+				series: series,
+				title: chains.count == 1
+					? String(localized: "Repair the Dependency Chain?")
+					: String(localized: "Repair \(chains.count) Dependency Chains?"),
+			)
+		}
+
+		/// A line for each dependent `chains` move, naming each task by its description in `tasks`.
+		static func message(
+			for chains: [WritePlan.RepairedChain],
+			tasks: [Models.Task.ID: [String: String]],
+		) -> String {
 			let quoted = { (id: Models.Task.ID) in "“\(tasks[id]?["description"] ?? "")”" }
 			let lines = chains.flatMap { chain in
 				let blocking = ListFormatter.localizedString(byJoining: chain.blocking.map(quoted))
@@ -273,14 +301,32 @@ struct ReplicaFeature {
 					)
 				}
 			}
-			self.init(
-				command: command,
-				ids: ids,
-				message: lines.joined(separator: "\n"),
-				title: chains.count == 1
-					? String(localized: "Repair the Dependency Chain?")
-					: String(localized: "Repair \(chains.count) Dependency Chains?"),
-			)
+			return lines.joined(separator: "\n")
+		}
+	}
+
+	/// A Delete of Recurrence instances, asking for each Series whether to take it whole, as
+	/// `recurrence.confirmation=prompt` asks. It asks about the chains the answer breaks too, so the
+	/// whole Delete is one Undo point.
+	struct SeriesDeletePrompt: Equatable {
+		/// One Series the Delete touches, by its template.
+		struct Choice: Equatable, Identifiable {
+			/// Whether the Delete takes every pending task in the Series and the template.
+			var deletesSeries = false
+			var description: String
+			var id: Models.Task.ID
+		}
+
+		/// What repairing would do under the choices made: a line for each dependent, nil where
+		/// nothing needs asking.
+		var chainRepairMessage: String?
+		var choices: IdentifiedArrayOf<Choice>
+		var ids: [Models.Task.ID]
+		var repairsChains = true
+
+		/// The templates whose Series the Delete takes with it.
+		var series: Set<Models.Task.ID> {
+			Set(choices.filter(\.deletesSeries).map(\.id))
 		}
 	}
 
@@ -352,7 +398,13 @@ struct ReplicaFeature {
 		case readSucceeded(TaskSnapshot)
 		case redoButtonTapped
 		case repairChainButtonTapped
+		case repairChainsCheckboxChanged(repairsChains: Bool)
 		case savingDelayElapsed
+		/// A Series' pop-up in the sheet asking whether a Delete takes each Series.
+		case seriesChoiceChanged(Models.Task.ID, deletesSeries: Bool)
+		case seriesDeleteButtonTapped
+		/// Cancel in the sheet asking whether a Delete takes each Series.
+		case seriesDeleteDismissed
 		/// A column header was clicked, or the table restored the Replica's sort.
 		case sortOrderChanged([TaskSort])
 		case startStopButtonTapped
@@ -564,12 +616,51 @@ struct ReplicaFeature {
 			case .repairChainButtonTapped:
 				return closePromptedTasks(chains: .repair, &state)
 
+			case let .repairChainsCheckboxChanged(repairsChains):
+				state.seriesDeletePrompt?.repairsChains = repairsChains
+				return .none
+
 			case .savingDelayElapsed:
 				// The delay can elapse just as the write ends, or fails.
 				if state.writeProgress == .running {
 					state.writeProgress = .saving
 				}
 				return .none
+
+			case let .seriesChoiceChanged(template, deletesSeries):
+				guard var prompt = state.seriesDeletePrompt else {
+					return .none
+				}
+				prompt.choices[id: template]?.deletesSeries = deletesSeries
+				prompt.chainRepairMessage = chainRepairMessage(
+					prompt.ids,
+					series: prompt.series,
+					tasks: properties(of: state.storedTasks),
+					state,
+				)
+				state.seriesDeletePrompt = prompt
+				return .none
+
+			case .seriesDeleteButtonTapped:
+				guard let prompt = state.seriesDeletePrompt else {
+					return .none
+				}
+				state.seriesDeletePrompt = nil
+				// Repaired unasked where the Taskrc says not to ask, and left where there was nothing to ask.
+				let repairs = !state.runningTaskrc.boolean(dependencyConfirmation)
+					|| prompt.chainRepairMessage != nil && prompt.repairsChains
+				return close(
+					prompt.ids,
+					.delete,
+					chains: repairs ? .repair : .leave,
+					series: prompt.series,
+					&state,
+				)
+
+			case .seriesDeleteDismissed:
+				state.seriesDeletePrompt = nil
+				// Starts any edit that queued behind the question.
+				return finishWrite(&state)
 
 			case let .sortOrderChanged(sortOrder):
 				state.sortOrder = sortOrder
@@ -825,29 +916,77 @@ struct ReplicaFeature {
 		return taken.max().map { $0.addingTimeInterval(annotationSpacing) } ?? now
 	}
 
-	/// Completes or deletes the tasks `ids`, as `command` says, which the table drops while it writes.
+	/// What repairing would do to the chains a Delete of `ids` and `series` breaks, nil where
+	/// `dependency.confirmation` doesn't ask or it breaks none.
+	private func chainRepairMessage(
+		_ ids: [Models.Task.ID],
+		series: Set<Models.Task.ID>,
+		tasks: [Models.Task.ID: [String: String]],
+		_ state: State,
+	) -> String? {
+		guard state.runningTaskrc.boolean(dependencyConfirmation) else {
+			return nil
+		}
+		let chains = repairedChains(.delete(ids, chains: .repair, series: series), tasks: tasks, state)
+		return chains.isEmpty ? nil : ChainRepairPrompt.message(for: chains, tasks: tasks)
+	}
+
+	/// Completes or deletes the tasks `ids`, and a Delete the rest of each Series in `series`, as
+	/// `command` says, which the table drops while it writes.
 	private func close(
 		_ ids: [Models.Task.ID],
 		_ command: TaskCommand,
 		chains: ChainRepair,
+		series: Set<Models.Task.ID>,
 		_ state: inout State,
 	) -> Effect<Action> {
-		let effect = write(closeAction(ids, command, chains: chains), &state)
+		let effect = write(closeAction(ids, command, chains: chains, series: series), &state)
 		// Only once the write has started, since only its end brings them back.
 		if state.writeProgress != nil {
-			state.leavingTasks = Set(ids)
+			let tasks = series.isEmpty ? [:] : properties(of: state.storedTasks)
+			state.leavingTasks = Set(WritePlanner.withSeries(ids, series: series, tasks: tasks))
 			filterRows(&state)
 		}
 		return effect
 	}
 
-	/// The Done or Delete `command` over `ids`.
+	/// The Done or Delete `command` over `ids`, a Delete taking the rest of each Series in `series`.
 	private func closeAction(
 		_ ids: [Models.Task.ID],
 		_ command: TaskCommand,
 		chains: ChainRepair,
+		series: Set<Models.Task.ID>,
 	) -> WriteAction {
-		command == .delete ? .delete(ids, chains: chains) : .complete(ids, chains: chains)
+		command == .delete
+			? .delete(ids, chains: chains, series: series)
+			: .complete(ids, chains: chains)
+	}
+
+	/// Closes `ids` as `command` says, first asking about the chains it breaks where
+	/// `dependency.confirmation` says to.
+	private func closeAskingAboutChains(
+		_ ids: [Models.Task.ID],
+		_ command: TaskCommand,
+		series: Set<Models.Task.ID>,
+		tasks: [Models.Task.ID: [String: String]],
+		_ state: inout State,
+	) -> Effect<Action> {
+		guard state.runningTaskrc.boolean(dependencyConfirmation) else {
+			return close(ids, command, chains: .repair, series: series, &state)
+		}
+		let action = closeAction(ids, command, chains: .repair, series: series)
+		let chains = repairedChains(action, tasks: tasks, state)
+		guard !chains.isEmpty else {
+			return close(ids, command, chains: .leave, series: series, &state)
+		}
+		state.chainRepairPrompt = ChainRepairPrompt(
+			chains: chains,
+			command: command,
+			ids: ids,
+			series: series,
+			tasks: tasks,
+		)
+		return .none
 	}
 
 	/// Writes the Done or Delete that asked about chains, with the user's answer.
@@ -856,7 +995,7 @@ struct ReplicaFeature {
 			return .none
 		}
 		state.chainRepairPrompt = nil
-		return close(prompt.ids, prompt.command, chains: chains, &state)
+		return close(prompt.ids, prompt.command, chains: chains, series: prompt.series, &state)
 	}
 
 	/// Writes an inspector edit, of one task or several, to the tasks `ids`, keeping them in the table
@@ -916,22 +1055,22 @@ struct ReplicaFeature {
 				let rank = { (id: Models.Task.ID) in rows[id: id]?.task.workingSetID ?? .max }
 				return (rank(lhs), lhs) < (rank(rhs), rhs)
 			}
-			guard state.runningTaskrc.boolean("dependency.confirmation") else {
-				return close(ids, command, chains: .repair, &state)
-			}
 			let tasks = properties(of: state.storedTasks)
-			// A plan that can't be made asks nothing, and the write reports why.
-			let chains = try? WritePlanner(taskrc: state.runningTaskrc, timeZone: timeZone)
-				.plan(closeAction(ids, command, chains: .repair), tasks: tasks, at: now)
-				.repairedChains
-			guard let chains, !chains.isEmpty else {
-				return close(ids, command, chains: .leave, &state)
+			let choices = command == .delete ? seriesChoices(ids, tasks: tasks) : []
+			guard !choices.isEmpty else {
+				return closeAskingAboutChains(ids, command, series: [], tasks: tasks, &state)
 			}
-			state.chainRepairPrompt = ChainRepairPrompt(
-				chains: chains,
-				command: command,
+			// As `task delete` reads it: `prompt` asks, else it's a boolean.
+			guard state.runningTaskrc[recurrenceConfirmation] == askingConfirmation else {
+				let series = state.runningTaskrc.boolean(recurrenceConfirmation)
+					? Set(choices.ids)
+					: []
+				return closeAskingAboutChains(ids, command, series: series, tasks: tasks, &state)
+			}
+			state.seriesDeletePrompt = SeriesDeletePrompt(
+				chainRepairMessage: chainRepairMessage(ids, series: [], tasks: tasks, state),
+				choices: choices,
 				ids: ids,
-				tasks: tasks,
 			)
 			return .none
 
@@ -941,6 +1080,17 @@ struct ReplicaFeature {
 		case .startStop:
 			return write(state.isStopping ? .stop(ids) : .start(ids), &state)
 		}
+	}
+
+	/// The chains `action` repairs, planned against `tasks`. A plan that can't be made repairs none,
+	/// so asks nothing, and its write reports why.
+	private func repairedChains(
+		_ action: WriteAction,
+		tasks: [Models.Task.ID: [String: String]],
+		_ state: State,
+	) -> [WritePlan.RepairedChain] {
+		let planner = WritePlanner(taskrc: state.runningTaskrc, timeZone: timeZone)
+		return (try? planner.plan(action, tasks: tasks, at: now).repairedChains) ?? []
 	}
 
 	/// Selects the task `offset` rows from the inspected one, as ⌘⌥↑ and ⌘⌥↓ do.
@@ -968,6 +1118,24 @@ struct ReplicaFeature {
 		state.selection = [created]
 		inspectSelection(&state)
 		state.focusesDescription = true
+	}
+
+	/// A choice for each Series the tasks `ids` are Recurrence instances of, in the order of the first
+	/// of each, named by its template's description, or the instance's where the template is gone,
+	/// since `task delete` still takes the siblings then.
+	private func seriesChoices(
+		_ ids: [Models.Task.ID],
+		tasks: [Models.Task.ID: [String: String]],
+	) -> IdentifiedArrayOf<SeriesDeletePrompt.Choice> {
+		var choices: IdentifiedArrayOf<SeriesDeletePrompt.Choice> = []
+		for id in ids {
+			guard let template = tasks[id]?["parent"].flatMap(UUID.init(uuidString:)) else {
+				continue
+			}
+			let description = (tasks[template] ?? tasks[id])?["description"] ?? ""
+			choices.append(SeriesDeletePrompt.Choice(description: description, id: template))
+		}
+		return choices
 	}
 
 	/// Resets the sidebar to Pending where it wouldn't show a task New Task would create now.
@@ -1117,12 +1285,21 @@ private let annotationSpacing: TimeInterval = 1
 /// of notes a person can add, and short enough that a clock set back soon stops mattering.
 private let annotationWindow: TimeInterval = 60
 
+/// The `recurrence.confirmation` value that asks, where any other reads as a boolean.
+private let askingConfirmation = "prompt"
+
+/// Whether a Done or Delete asks before repairing the dependency chains it breaks.
+private let dependencyConfirmation = "dependency.confirmation"
+
 /// How many times a write is planned before a plan the engine keeps refusing as stale fails it.
 private let planAttempts = 3
 
 /// How long reads of the Replica fail before the window says so, which rides out a `task` command
 /// holding the lock for its 5 s.
 private let readFailureDelay = Duration.seconds(30)
+
+/// Whether a Delete of a Recurrence instance takes its Series, or asks.
+private let recurrenceConfirmation = "recurrence.confirmation"
 
 /// How long a write runs before the subtitle says it's saving.
 private let savingDelay = Duration.milliseconds(500)
@@ -1149,7 +1326,7 @@ private func counted(_ ids: [Models.Task.ID], _ single: String, _ multiple: Stri
 }
 
 /// Every task's properties, as the planner reads them.
-private func properties(of tasks: [StoredTask]) -> [Models.Task.ID: [String: String]] {
+func properties(of tasks: [StoredTask]) -> [Models.Task.ID: [String: String]] {
 	Dictionary(
 		tasks.compactMap { task in UUID(uuidString: task.uuid).map { ($0, task.properties) } },
 		uniquingKeysWith: { first, _ in first },
@@ -1165,7 +1342,14 @@ private func undoName(for action: WriteAction, udaColumns: [UDAColumn]) -> Strin
 	case .create:
 		newTaskTitle
 
-	case let .delete(ids, _):
+	case let .delete(_, _, series) where !series.isEmpty:
+		counted(
+			Array(series),
+			String(localized: "Delete Series"),
+			String(localized: "Delete \(series.count) Series"),
+		)
+
+	case let .delete(ids, _, _):
 		counted(ids, String(localized: "Delete Task"), String(localized: "Delete \(ids.count) Tasks"))
 
 	case .edit(_, .addAnnotation):

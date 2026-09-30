@@ -1,0 +1,2 @@
+# Yes, so deleting a Recurrence instance deletes its Series too, as the app does when asked to.
+recurrence.confirmation=yes
