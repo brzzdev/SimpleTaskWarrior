@@ -338,8 +338,8 @@ impl Checks {
 		txn: &mut (dyn StorageTxn + Send),
 	) -> Result<Vec<Uuid>, taskchampion::Error> {
 		let mut tasks: HashMap<Uuid, Option<TaskMap>> = HashMap::new();
-		let expected = self.expectations.iter().map(|expected| &expected.uuid);
-		for &uuid in expected.chain(&self.creates).chain(&self.updates) {
+		let expected_uuids = self.expectations.iter().map(|expected| &expected.uuid);
+		for &uuid in expected_uuids.chain(&self.creates).chain(&self.updates) {
 			if let Entry::Vacant(entry) = tasks.entry(uuid) {
 				entry.insert(txn.get_task(uuid).await?);
 			}
@@ -453,11 +453,11 @@ impl EngineHandle {
 		})
 	}
 
-	/// Commits `operations` as one Undo point, but only if every expectation still holds and no
-	/// created task exists. TaskChampion's commit never checks an update's old value, so without
-	/// this a plan made from a stale snapshot would overwrite whatever changed since. The checks run
-	/// first as a fast path, then again inside the commit's transaction, so no write lands between
-	/// them and the commit.
+	/// Commits `operations` as one Undo point, but only if every expectation still holds, no
+	/// created task exists yet, and every updated task still does. TaskChampion's commit never
+	/// checks an update's old value, so without this a plan made from a stale snapshot would
+	/// overwrite whatever changed since. The checks run first as a fast path, then again inside the
+	/// commit's transaction, so no write lands between them and the commit.
 	pub fn apply(
 		&self,
 		operations: Vec<PlannedOperation>,
@@ -526,7 +526,7 @@ impl EngineHandle {
 				let Operation::Update { uuid, .. } = operation else {
 					continue;
 				};
-				if checks.creates.contains(uuid) || checks.updates.contains(uuid) {
+				if checks.creates.contains(uuid) {
 					continue;
 				}
 				checks.updates.push(*uuid);
