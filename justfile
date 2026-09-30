@@ -28,6 +28,13 @@ swiftformat_base := "/tmp/swiftformat-base-SimpleTaskWarrior"
 swiftformat_url := "https://raw.githubusercontent.com/brzzdev/Configs/main/Configs/swiftformat"
 notary_profile := "SimpleTaskWarrior"
 release_dir := ".release"
+# The engine's one target. The `engine` build and the `engine-test` build both
+# write into `Engine/target/` under it, which CI caches.
+engine_target := "aarch64-apple-darwin"
+# The Brewfile's rustup is keg-only, so it is off PATH unless the shell put it
+# there. Recipes prepend it, because Homebrew's `rust` formula puts a cargo in
+# /opt/homebrew/bin that ignores rust-toolchain.toml; rustup's proxies honour it.
+rustup_bin := "/opt/homebrew/opt/rustup/bin"
 
 # List available recipes
 default:
@@ -42,12 +49,9 @@ engine:
 	#!/usr/bin/env bash
 	set -euo pipefail
 
-	# The Brewfile's rustup is keg-only, so it is off PATH unless the shell put it
-	# there. Prepended, because Homebrew's `rust` formula puts a cargo in
-	# /opt/homebrew/bin that ignores rust-toolchain.toml; rustup's proxies honour it.
-	export PATH="/opt/homebrew/opt/rustup/bin:$PATH"
+	export PATH="{{ rustup_bin }}:$PATH"
 	cd Engine
-	target=aarch64-apple-darwin
+	target={{ engine_target }}
 	cargo build --locked --release --target "$target" --package engine
 	library="target/$target/release/libengine.a"
 
@@ -81,12 +85,11 @@ engine:
 		xcodebuild -create-xcframework -library "$library" -headers build/headers -output "$xcframework"
 	fi
 
-# rustup's proxies go first on PATH for the reason `engine` gives, and the target
-# matches its, so the test build shares `Engine/target` and CI's Rust cache.
+# `Engine/` is the working directory so rustup finds `rust-toolchain.toml`.
 # Run the Rust engine's tests
+[working-directory: "Engine"]
 engine-test:
-	export PATH="/opt/homebrew/opt/rustup/bin:$PATH" && cd Engine && \
-		cargo test --locked --target aarch64-apple-darwin --package engine
+	PATH="{{ rustup_bin }}:$PATH" cargo test --locked --target {{ engine_target }} --package engine
 
 # Generate the Xcode project from Project.swift. The touch stamps the workspace
 # for `ensure-generated`: Tuist leaves unchanged files alone, so without it the
