@@ -69,7 +69,7 @@ Single SPM package, one module per concern, wired with
 | `App` | Scenes, Open Replica… and Choose Taskrc… |
 | `TestSupport` | Fixtures shared by the test targets |
 
-The reasoning behind it is in [`CONTEXT.md`](CONTEXT.md) and
+The reasoning behind it is in [`GLOSSARY.md`](GLOSSARY.md) and
 [`docs/adr/`](docs/adr/).
 
 ## License
