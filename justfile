@@ -318,7 +318,7 @@ test: ensure-generated
 
 # By hand, not in CI, whenever TaskChampion or TW is bumped: `CLIContractTests` skips itself
 # unless `xcodebuild` forwards it a `task` in `TEST_RUNNER_CONTRACT_TASK`.
-# Check the app's writes, undo and a concurrent edit against the real `task` 3.5
+# Check the app's writes, undo and a concurrent edit against the pinned real `task`
 contract: ensure-generated
 	#!/usr/bin/env bash
 	set -euo pipefail

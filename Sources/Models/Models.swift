@@ -186,14 +186,6 @@ public struct StoredTask: Equatable, Sendable {
 	}
 }
 
-/// Every task's properties, as the planner reads them.
-public func properties(of tasks: [StoredTask]) -> [Task.ID: [String: String]] {
-	Dictionary(
-		tasks.compactMap { task in UUID(uuidString: task.uuid).map { ($0, task.properties) } },
-		uniquingKeysWith: { first, _ in first },
-	)
-}
-
 extension Task {
 	/// Decodes `stored`, reading the UDAs in `udaTypes`.
 	public init?(_ stored: StoredTask, udaTypes: [String: UDAType]) {

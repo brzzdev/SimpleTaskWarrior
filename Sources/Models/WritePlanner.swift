@@ -445,6 +445,14 @@ public struct WritePlanner: Sendable {
 	}
 }
 
+/// Every task's properties, as the planner reads them.
+public func properties(of tasks: [StoredTask]) -> [Task.ID: [String: String]] {
+	Dictionary(
+		tasks.compactMap { task in UUID(uuidString: task.uuid).map { ($0, task.properties) } },
+		uniquingKeysWith: { first, _ in first },
+	)
+}
+
 /// What the user did, over the tasks it names, which a re-plan reuses: a created task's UUID and an
 /// annotation's entry are chosen once, when the user acts.
 public enum WriteAction: Equatable, Sendable {
