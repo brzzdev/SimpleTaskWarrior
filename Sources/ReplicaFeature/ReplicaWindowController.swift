@@ -45,8 +45,6 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 	private let searchItem = NSSearchToolbarItem(itemIdentifier: searchIdentifier)
 	/// The controls of the sheet asking whether a write takes each Series, while it's up.
 	private var seriesPromptAccessory: SeriesPromptAccessory?
-	/// The window already on the Replica in a folder, if any.
-	private let windowOnReplica: @MainActor (_ folder: URL) -> ReplicaWindowController?
 
 	/// The Replica's folder, standardized, or where it last was while the window can't open it.
 	public var folder: URL? {
@@ -60,17 +58,14 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 
 	/// A controller for the Replica `bookmark` locates, last in `folder` where known, which
 	/// autosaves the layout of its split view and table under `autosaveName`. It calls `onClose` as
-	/// its window closes, and asks `windowOnReplica` for the window already on a folder Locate…
-	/// chooses.
+	/// its window closes.
 	public init(
 		autosaveName: String,
 		bookmark: Data,
 		folder: URL?,
 		onClose: @escaping @MainActor (ReplicaWindowController) -> Void,
-		windowOnReplica: @escaping @MainActor (_ folder: URL) -> ReplicaWindowController?,
 	) {
 		self.onClose = onClose
-		self.windowOnReplica = windowOnReplica
 		store = Store(initialState: ReplicaFeature.State(bookmark: bookmark, directory: folder)) {
 			ReplicaFeature()
 		}
@@ -430,7 +425,12 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 	/// forward instead, or it can't be opened, which an alert explains.
 	private func locate(_ directory: URL) {
 		@Dependency(\.replicaClient) var replicaClient
-		if let other = windowOnReplica(standardizedFolder(directory)), other !== self {
+		let folder = standardizedFolder(directory)
+		let other = NSApp.windows
+			.lazy
+			.compactMap { $0.windowController as? ReplicaWindowController }
+			.first { $0 !== self && $0.folder == folder }
+		if let other {
 			other.showWindow(nil)
 			return
 		}

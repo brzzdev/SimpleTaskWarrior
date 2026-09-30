@@ -4,6 +4,7 @@
 
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
+use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -60,30 +61,47 @@ impl std::fmt::Display for EngineError {
 
 impl<E: std::error::Error + 'static> From<E> for EngineError {
 	fn from(error: E) -> Self {
-		match sqlite_error_code(&error) {
-			Some(rusqlite::ErrorCode::DatabaseBusy) => EngineError::Busy,
-			// A file where the database should be that isn't one, such as one overwritten.
-			Some(rusqlite::ErrorCode::NotADatabase) => EngineError::NotAReplica,
-			_ => failed(error),
+		if is_busy(&error) {
+			return EngineError::Busy;
 		}
+		failed(error)
 	}
 }
 
-/// SQLite's code for `error`, where SQLite raised it. TaskChampion wraps SQLite's errors in an
+/// Whether `error` is SQLite giving up on a held lock. TaskChampion wraps SQLite's errors in an
 /// `anyhow::Error`, which `source` skips past, so it's unwrapped by hand.
-fn sqlite_error_code(error: &(dyn std::error::Error + 'static)) -> Option<rusqlite::ErrorCode> {
+fn is_busy(error: &(dyn std::error::Error + 'static)) -> bool {
 	let sqlite = match error.downcast_ref::<taskchampion::Error>() {
 		Some(taskchampion::Error::Other(error)) => error.downcast_ref::<rusqlite::Error>(),
 		Some(_) => None,
 		None => error.downcast_ref::<rusqlite::Error>(),
 	};
-	sqlite.and_then(rusqlite::Error::sqlite_error_code)
+	sqlite.and_then(rusqlite::Error::sqlite_error_code) == Some(rusqlite::ErrorCode::DatabaseBusy)
 }
 
 fn failed(message: impl ToString) -> EngineError {
 	EngineError::Failed {
 		message: message.to_string(),
 	}
+}
+
+/// Which file a Replica's database is: its device and inode, which a move keeps and a replacement,
+/// such as a recreation or a restore from backup, doesn't.
+#[derive(uniffi::Record)]
+pub struct DatabaseIdentity {
+	pub device: u64,
+	pub inode: u64,
+}
+
+/// The database in `directory`, None where there's none. Found by `stat`, never by opening it:
+/// closing any descriptor on the file drops every SQLite POSIX lock the process holds on it.
+#[uniffi::export]
+pub fn database_identity(directory: String) -> Option<DatabaseIdentity> {
+	let metadata = std::fs::metadata(Path::new(&directory).join(DATABASE_FILE)).ok()?;
+	Some(DatabaseIdentity {
+		device: metadata.dev(),
+		inode: metadata.ino(),
+	})
 }
 
 /// A coherent read of a Replica: every task and the working set, as of `data_version`.
@@ -279,7 +297,7 @@ fn data_version(connection: &Connection) -> Result<i64, EngineError> {
 	Ok(connection.query_row("PRAGMA data_version", [], |row| row.get(0))?)
 }
 
-fn schema_version(connection: &Connection) -> Result<(u32, u32), EngineError> {
+fn schema_version(connection: &Connection) -> rusqlite::Result<(u32, u32)> {
 	if !connection.table_exists(None, "version")? {
 		return Ok(UNVERSIONED_SCHEMA);
 	}
@@ -442,7 +460,13 @@ impl EngineHandle {
 		let mut flags = OpenFlags::default();
 		flags.remove(OpenFlags::SQLITE_OPEN_CREATE);
 		let watcher = Connection::open_with_flags(&database, flags)?;
-		let (major, minor) = schema_version(&watcher)?;
+		// The first read, so where a file that isn't a database, such as one overwritten, is found.
+		let (major, minor) = schema_version(&watcher).map_err(|error| {
+			if error.sqlite_error_code() == Some(rusqlite::ErrorCode::NotADatabase) {
+				return EngineError::NotAReplica;
+			}
+			error.into()
+		})?;
 		if major > SUPPORTED_SCHEMA_MAJOR {
 			return Err(EngineError::UnsupportedSchema { major, minor });
 		}

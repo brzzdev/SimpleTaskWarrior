@@ -1,6 +1,5 @@
 // The only importer of the engine: one actor per open Replica.
 public import ComposableArchitecture
-import Darwin
 import Dispatch
 import Engine
 public import Foundation
@@ -105,15 +104,12 @@ public struct ReplicaIdentity: Equatable, Sendable {
 		self.inode = inode
 	}
 
-	/// The database in `directory`, nil where there's none. Found by `stat`, never by opening it:
-	/// closing any descriptor on the file drops every SQLite POSIX lock the process holds on it.
+	/// The database in `directory`, nil where there's none.
 	init?(directory: URL) {
-		var info = stat()
-		let database = directory.appending(path: databaseFile).path(percentEncoded: false)
-		guard stat(database, &info) == 0 else {
+		guard let identity = databaseIdentity(directory: directory.path(percentEncoded: false)) else {
 			return nil
 		}
-		self.init(device: Int(info.st_dev), inode: Int(info.st_ino))
+		self.init(device: Int(identity.device), inode: Int(identity.inode))
 	}
 }
 
@@ -158,9 +154,6 @@ public enum ReplicaError: Equatable, LocalizedError {
 		}
 	}
 }
-
-/// The Replica's database in its folder, as TaskChampion names it.
-private let databaseFile = "taskchampion.sqlite3"
 
 /// Each window's Replica, by the folder its `tasks` stream opened, which `apply` writes through.
 private let openReplicas = Mutex<[URL: Replica]>([:])
@@ -209,9 +202,8 @@ extension ReplicaClient: DependencyKey {
 							// Before every read too: cancelling doesn't interrupt a blocked `open`, and
 							// once it returns, a read would start a fresh wait on the lock.
 							try _Concurrency.Task.checkCancellation()
-							try await replica.checkIdentity()
 							// A failed read retries next tick, leaving the window its last tasks.
-							await replica.publishTasksIfChanged(to: continuation)
+							try await replica.publishTasksIfChanged(to: continuation)
 							try await _Concurrency.Task.sleep(for: pollInterval)
 						}
 					} catch is CancellationError {
@@ -416,10 +408,12 @@ actor Replica {
 
 	/// Yields every task when anything has committed since the last read, or the error that stopped
 	/// it reading. After an error the next read is in full, so the window learns reads work again.
+	/// Throws `lost`, rather than reading a database that's no longer the one opened.
 	func publishTasksIfChanged(
 		to continuation: AsyncThrowingStream<Result<TaskSnapshot, ReplicaError>, any Error>
 			.Continuation,
-	) {
+	) throws(ReplicaError) {
+		try checkIdentity()
 		do {
 			guard try engine.dataVersion() != readVersion else { return }
 			// Decoded by the window, with its Taskrc's UDAs.

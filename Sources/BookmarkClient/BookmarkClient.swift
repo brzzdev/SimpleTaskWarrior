@@ -9,12 +9,10 @@ public struct BookmarkClient: Sendable {
 	/// count, since it resolves where it did before.
 	public var changes: @Sendable () -> AsyncStream<Void> = { .finished }
 	public var create: @Sendable (_ url: URL) throws -> Data
-	/// Pairs the Taskrc paired with the Replica last in `replica` with the one in `newReplica`
-	/// instead, dropping any the latter had. The first may be gone, so where its bookmark no longer
-	/// resolves, it's found by the path the bookmark was made at.
-	public var movePairing: @Sendable (_ replica: URL, _ newReplica: URL) throws -> Void
-	/// The path `bookmark` was made at, which it records even once it no longer resolves.
-	public var path: @Sendable (_ bookmark: Data) -> URL?
+	/// Pairs the Taskrc paired with the Replica last in `replica` with the one in `newReplica`, which
+	/// `bookmark` locates, instead, dropping any the latter had. The first may be gone, so where its
+	/// bookmark no longer resolves, it's found by the path the bookmark was made at.
+	public var movePairing: @Sendable (_ replica: URL, _ newReplica: URL, _ bookmark: Data) -> Void
 	/// The bookmarked URL, which follows a folder that moved, and a fresh bookmark to keep in place
 	/// of `bookmark` where it's stale.
 	public var resolve: @Sendable (_ bookmark: Data) throws -> (url: URL, refreshed: Data?)
@@ -39,8 +37,7 @@ extension BookmarkClient: DependencyKey {
 		create: { url in
 			try url.bookmarkData()
 		},
-		movePairing: { replica, newReplica in
-			let bookmark = try newReplica.bookmarkData()
+		movePairing: { replica, newReplica, bookmark in
 			update { stored in
 				guard
 					let index = pairingIndex(of: replica, in: &stored)
@@ -57,13 +54,9 @@ extension BookmarkClient: DependencyKey {
 			}
 			notifyChanges()
 		},
-		path: { bookmark in
-			recordedPath(of: bookmark)
-		},
 		resolve: { bookmark in
 			// A stale bookmark still resolves, to where the folder moved, or to one made at its path since.
-			let (url, isStale) = try resolved(bookmark)
-			return (url, isStale ? try? url.bookmarkData() : nil)
+			try refreshed(bookmark)
 		},
 		saveTaskrc: { taskrc, replica in
 			let pairing = try taskrc.map { try Pairing(
@@ -93,7 +86,7 @@ extension BookmarkClient: DependencyKey {
 					return nil
 				}
 				let bookmark = stored.pairings[index].taskrc
-				return url(of: bookmark) { stored.pairings[index].taskrc = $0 } ?? recordedPath(of: bookmark)
+				return url(of: bookmark) { stored.pairings[index].taskrc = $0 } ?? bookmarkPath(bookmark)
 			}
 		},
 	)
@@ -133,7 +126,7 @@ private struct Pairing: Codable, Equatable {
 private func lostPairingIndex(of replica: URL, in stored: Stored) -> Int? {
 	stored.pairings.firstIndex { pairing in
 		(try? resolved(pairing.replica)) == nil
-			&& recordedPath(of: pairing.replica).map(standardizedFolder) == standardizedFolder(replica)
+			&& bookmarkPath(pairing.replica).map(standardizedFolder) == standardizedFolder(replica)
 	}
 }
 
@@ -147,7 +140,7 @@ private func pairingIndex(of replica: URL, in stored: inout Stored) -> Int? {
 }
 
 /// The path `bookmark` was made at, which it records even once it no longer resolves.
-private func recordedPath(of bookmark: Data) -> URL? {
+public func bookmarkPath(_ bookmark: Data) -> URL? {
 	URL.resourceValues(forKeys: [.pathKey], fromBookmarkData: bookmark)?.path.map { URL(filePath: $0) }
 }
 
@@ -189,12 +182,18 @@ private func update<Result>(_ body: (inout Stored) -> Result) -> Result {
 	}
 }
 
+/// The URL `bookmark` resolves to, and a fresh bookmark to keep in its place where it's stale.
+private func refreshed(_ bookmark: Data) throws -> (url: URL, refreshed: Data?) {
+	let (url, isStale) = try resolved(bookmark)
+	return (url, isStale ? try? url.bookmarkData() : nil)
+}
+
 /// The URL `bookmark` resolves to, passing `resave` a fresh bookmark when it's stale.
 private func url(of bookmark: Data, resave: (Data) -> Void) -> URL? {
-	guard let (url, isStale) = try? resolved(bookmark) else {
+	guard let (url, fresh) = try? refreshed(bookmark) else {
 		return nil
 	}
-	if isStale, let fresh = try? url.bookmarkData() {
+	if let fresh {
 		resave(fresh)
 	}
 	return url

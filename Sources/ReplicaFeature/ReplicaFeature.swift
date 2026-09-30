@@ -427,14 +427,12 @@ struct ReplicaFeature {
 		case replicaFolderChosen(URL)
 		/// The Replica's database is no longer the one opened as `identity`.
 		case replicaLost(ReplicaIdentity)
-		/// The Replica lost is where its bookmark now resolves.
-		case replicaMoved
 		/// Where the window's bookmark resolves, there's no Replica.
 		case replicaNotFound
 		/// The window's bookmark now locates the Replica it was pointed at by Locate… or Open
 		/// Replacement.
 		case replicaRebound(Data)
-		/// Another Replica is where the one lost's bookmark resolves, in the folder given.
+		/// Another Replica is where the lost one's bookmark resolves, in the folder given.
 		case replicaReplaced(URL)
 		case repairChainButtonTapped
 		case repairChainsCheckboxChanged(repairsChains: Bool)
@@ -660,34 +658,21 @@ struct ReplicaFeature {
 
 			case let .replicaLost(identity):
 				// A write and the stream can each find it lost, and finding it again is harmless.
+				state.chainRepairPrompt = nil
 				state.isReplicaOpen = false
+				state.queuedWrites = []
 				// A Replica opened again counts its reads from 0.
 				state.readIndex = 0
 				state.redoName = nil
-				state.undoName = nil
-				state.chainRepairPrompt = nil
-				state.queuedWrites = []
 				state.seriesPrompt = nil
+				state.undoName = nil
 				return .merge(
 					// With nothing queued, this starts nothing.
 					finishWrite(&state),
 					.cancel(id: CancelID.write),
 					// Replaces the stream, closing the Replica.
-					.run { [bookmark = state.bookmark, bookmarkClient, replicaClient] send in
-						guard
-							let directory = try? bookmarkClient.resolve(bookmark).url,
-							let found = replicaClient.identity(directory)
-						else {
-							await send(.replicaNotFound)
-							return
-						}
-						await send(found == identity ? .replicaMoved : .replicaReplaced(directory))
-					}
-					.cancellable(id: CancelID.replica, cancelInFlight: true),
+					openReplica(state, lost: identity),
 				)
-
-			case .replicaMoved:
-				return openReplica(state)
 
 			case .replicaNotFound:
 				showUnavailable(.notFound, &state)
@@ -872,12 +857,23 @@ struct ReplicaFeature {
 	}
 
 	/// Resolves the window's bookmark, re-saving it where it's stale, then opens the Replica it
-	/// resolves to and reads it until the window closes or loses it.
-	private func openReplica(_ state: State) -> Effect<Action> {
+	/// resolves to and reads it until the window closes or loses it. After the window lost the
+	/// Replica opened as `lost`, it opens only that one, moved, and otherwise says what's there.
+	private func openReplica(_ state: State, lost: ReplicaIdentity? = nil) -> Effect<Action> {
 		.run { [bookmark = state.bookmark, bookmarkClient, replicaClient] send in
 			guard let (directory, refreshed) = try? bookmarkClient.resolve(bookmark) else {
 				await send(.replicaNotFound)
 				return
+			}
+			if let lost {
+				guard let found = replicaClient.identity(directory) else {
+					await send(.replicaNotFound)
+					return
+				}
+				guard found == lost else {
+					await send(.replicaReplaced(directory))
+					return
+				}
 			}
 			if let refreshed {
 				await send(.bookmarkRefreshed(refreshed))
@@ -893,11 +889,11 @@ struct ReplicaFeature {
 				}
 			}
 		} catch: { error, send in
-			guard case let .lost(identity)? = error as? ReplicaError else {
-				await send(.openFailed(error.localizedDescription))
+			if let identity = lostReplica(error) {
+				await send(.replicaLost(identity))
 				return
 			}
-			await send(.replicaLost(identity))
+			await send(.openFailed(error.localizedDescription))
 		}
 		.cancellable(id: CancelID.replica, cancelInFlight: true)
 	}
@@ -908,7 +904,7 @@ struct ReplicaFeature {
 		.run { [bookmarkClient, lastDirectory = state.directory] send in
 			let bookmark = try bookmarkClient.create(directory)
 			if let lastDirectory {
-				try bookmarkClient.movePairing(lastDirectory, directory)
+				bookmarkClient.movePairing(lastDirectory, directory, bookmark)
 			}
 			await send(.replicaRebound(bookmark))
 		} catch: { error, send in
@@ -991,7 +987,7 @@ struct ReplicaFeature {
 				String(localized: "The Replica kept changing while it was written to."),
 			)
 		} catch: { error, send in
-			if case let .lost(identity)? = error as? ReplicaError {
+			if let identity = lostReplica(error) {
 				await send(.replicaLost(identity))
 				return
 			}
@@ -1028,7 +1024,7 @@ struct ReplicaFeature {
 			}
 			await send(.undoOrRedoFinished(outcome))
 		} catch: { error, send in
-			if case let .lost(identity)? = error as? ReplicaError {
+			if let identity = lostReplica(error) {
 				await send(.replicaLost(identity))
 				return
 			}
@@ -1552,6 +1548,14 @@ private func attributeName(_ attribute: String, udaColumns: [UDAColumn]) -> Stri
 /// `single` where `ids` is one task, else `multiple`, which counts them.
 private func counted(_ ids: [Models.Task.ID], _ single: String, _ multiple: String) -> String {
 	ids.count == 1 ? single : multiple
+}
+
+/// The Replica `error` says the window lost, as it was opened, where that's what it says.
+private func lostReplica(_ error: any Error) -> ReplicaIdentity? {
+	guard case let .lost(identity)? = error as? ReplicaError else {
+		return nil
+	}
+	return identity
 }
 
 /// The name the Edit menu gives `action`'s Undo point, as in "Undo Change Due Date".

@@ -1776,7 +1776,6 @@ struct ReplicaFeatureTests {
 			$0.readIndex = 0
 			$0.redoName = nil
 		}
-		await store.receive(\.replicaMoved)
 		await store.receive(\.bookmarkRefreshed) {
 			$0.bookmark = Data([1])
 		}
@@ -1806,7 +1805,7 @@ struct ReplicaFeatureTests {
 		} withDependencies: {
 			$0.bookmarkClient.changes = { .finished }
 			$0.bookmarkClient.create = { _ in Data([2]) }
-			$0.bookmarkClient.movePairing = { replica, newReplica in
+			$0.bookmarkClient.movePairing = { replica, newReplica, _ in
 				moves.withValue { $0.append([replica, newReplica]) }
 			}
 			$0.bookmarkClient.resolve = { _ in (replicaDirectory, nil) }
@@ -1853,7 +1852,7 @@ struct ReplicaFeatureTests {
 		} withDependencies: {
 			$0.bookmarkClient.changes = { .finished }
 			$0.bookmarkClient.create = { _ in Data([2]) }
-			$0.bookmarkClient.movePairing = { replica, newReplica in
+			$0.bookmarkClient.movePairing = { replica, newReplica, _ in
 				moves.withValue { $0.append([replica, newReplica]) }
 			}
 			$0.bookmarkClient.resolve = { bookmark in

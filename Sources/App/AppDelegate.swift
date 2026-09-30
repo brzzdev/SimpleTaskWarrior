@@ -35,14 +35,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
 		// swiftlint:disable:next unneeded_escaping
 		completionHandler: @escaping (NSWindow?, (any Error)?) -> Void,
 	) {
-		@Dependency(\.bookmarkClient) var bookmarkClient
 		// A Replica already restored gets no second window, since AppKit expects a window per request.
 		// One that's gone still gets its window, which says so, at the path it was last at.
 		guard
 			let delegate = NSApp.delegate as? AppDelegate,
 			let bookmark = ReplicaWindowController.bookmark(restoredFrom: state),
-			let folder = (try? folder(of: bookmark)) ?? bookmarkClient.path(bookmark)
-				.map(standardizedFolder),
+			let folder = (try? folder(of: bookmark)) ?? bookmarkPath(bookmark).map(standardizedFolder),
 			delegate.controller(on: folder) == nil
 		else {
 			completionHandler(nil, CocoaError(.userCancelled))
@@ -126,13 +124,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
 			autosaveName: name,
 			bookmark: bookmark,
 			folder: folder,
-			onClose: { [weak self] closed in
-				self?.controllers.removeAll { $0 === closed }
-			},
-			windowOnReplica: { [weak self] folder in
-				self?.controller(on: folder)
-			},
-		)
+		) { [weak self] closed in
+			self?.controllers.removeAll { $0 === closed }
+		}
 		controller.window?.identifier = NSUserInterfaceItemIdentifier(name)
 		controller.window?.restorationClass = Self.self
 		controller.window?.setFrameAutosaveName(name)
