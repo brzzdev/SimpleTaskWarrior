@@ -28,13 +28,13 @@ public struct WritePlanner: Sendable {
 		guard !series.isEmpty else {
 			return ids
 		}
-		let template = { (id: Task.ID) in tasks[id]?["parent"].flatMap(UUID.init(uuidString:)) }
+		let templateOf = { (id: Task.ID) in tasks[id]?["parent"].flatMap(UUID.init(uuidString:)) }
 		var pending: [Task.ID: [Task.ID]] = [:]
 		for (id, properties) in tasks where isPending(properties["status"]) {
-			guard let parent = template(id), series.contains(parent) else {
+			guard let template = templateOf(id), series.contains(template) else {
 				continue
 			}
-			pending[parent, default: []].append(id)
+			pending[template, default: []].append(id)
 		}
 		let index = { (id: Task.ID) in tasks[id]?["imask"].flatMap(Int.init) ?? .max }
 		var expanded: [Task.ID] = []
@@ -42,15 +42,15 @@ public struct WritePlanner: Sendable {
 		for id in ids {
 			expanded.append(id)
 			guard
-				let parent = template(id),
-				series.contains(parent),
-				expandedSeries.insert(parent).inserted
+				let template = templateOf(id),
+				series.contains(template),
+				expandedSeries.insert(template).inserted
 			else {
 				continue
 			}
-			expanded += pending[parent, default: []].sorted { (index($0), $0) < (index($1), $1) }
-			if tasks[parent] != nil {
-				expanded.append(parent)
+			expanded += pending[template, default: []].sorted { (index($0), $0) < (index($1), $1) }
+			if tasks[template] != nil {
+				expanded.append(template)
 			}
 		}
 		return expanded

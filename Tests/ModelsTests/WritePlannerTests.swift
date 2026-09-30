@@ -649,6 +649,26 @@ struct WritePlannerTests {
 		#expect(plan.applied(to: recording.before) == recording.after)
 	}
 
+	/// `task delete` finds siblings by `parent` alone, so they go even once the template is gone.
+	@Test
+	func deletingASeriesWhoseTemplateIsGoneDeletesItsSiblings() throws {
+		let recording = try Recording("series/delete_series")
+		let planner = WritePlanner(taskrc: recording.taskrc, timeZone: .gmt)
+		let deleted = try recording.deleted()
+		let template = try #require(recording.before[deleted]?["parent"].flatMap(UUID.init(uuidString:)))
+		var tasks = recording.before
+		tasks[template] = nil
+
+		let plan = try planner.plan(
+			.delete([deleted], chains: .repair, series: [template]),
+			tasks: tasks,
+			at: recording.now,
+		)
+
+		let applied = plan.applied(to: tasks)
+		#expect(try recording.siblings().allSatisfy { applied[$0]?["status"] == "deleted" })
+	}
+
 	@Test
 	func addingATagExpectsTheOtherTags() throws {
 		let planner = WritePlanner(taskrc: .defaults, timeZone: .gmt)
@@ -751,7 +771,7 @@ struct Recording {
 		let deleted = try deleted()
 		return before
 			.filter { $0.key != deleted && $0.value["parent"] != nil }
-			.sorted { Int($0.value["imask"] ?? "") ?? 0 < Int($1.value["imask"] ?? "") ?? 0 }
+			.sorted { Int($0.value["imask"] ?? "") ?? .max < Int($1.value["imask"] ?? "") ?? .max }
 			.map(\.key)
 	}
 

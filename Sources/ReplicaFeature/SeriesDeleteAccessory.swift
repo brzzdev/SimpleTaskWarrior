@@ -28,7 +28,7 @@ final class SeriesDeleteAccessory: NSStackView {
 				String(localized: "Delete All Tasks in Series"),
 			])
 			popUp.action = #selector(seriesPopUpChanged(_:))
-			popUp.selectItem(at: choice.deletesSeries ? 1 : 0)
+			popUp.selectItem(at: choice.deletesSeries ? deleteSeriesItem : deleteTaskItem)
 			popUp.tag = index
 			popUp.target = self
 			let label = NSTextField(labelWithString: "“\(choice.description)”")
@@ -64,14 +64,19 @@ final class SeriesDeleteAccessory: NSStackView {
 
 	@objc
 	private func chainsCheckboxChanged(_ checkbox: NSButton) {
-		send(.repairChainsCheckboxChanged(checkbox.state == .on))
+		send(.repairChainsCheckboxChanged(repairsChains: checkbox.state == .on))
 	}
 
 	@objc
 	private func seriesPopUpChanged(_ popUp: NSPopUpButton) {
-		send(.seriesChoiceChanged(templates[popUp.tag], deletesSeries: popUp.indexOfSelectedItem == 1))
+		let deletesSeries = popUp.indexOfSelectedItem == deleteSeriesItem
+		send(.seriesChoiceChanged(templates[popUp.tag], deletesSeries: deletesSeries))
 	}
 }
 
 /// As wide as an alert's text.
 private let accessoryWidth: CGFloat = 300
+
+/// The pop-up items' indices, in the order it lists them.
+private let deleteSeriesItem = 1
+private let deleteTaskItem = 0

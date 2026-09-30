@@ -398,7 +398,7 @@ struct ReplicaFeature {
 		case readSucceeded(TaskSnapshot)
 		case redoButtonTapped
 		case repairChainButtonTapped
-		case repairChainsCheckboxChanged(Bool)
+		case repairChainsCheckboxChanged(repairsChains: Bool)
 		case savingDelayElapsed
 		/// A Series' pop-up in the sheet asking whether a Delete takes each Series.
 		case seriesChoiceChanged(Models.Task.ID, deletesSeries: Bool)
@@ -647,7 +647,7 @@ struct ReplicaFeature {
 				}
 				state.seriesDeletePrompt = nil
 				// Repaired unasked where the Taskrc says not to ask, and left where there was nothing to ask.
-				let repairs = !state.runningTaskrc.boolean("dependency.confirmation")
+				let repairs = !state.runningTaskrc.boolean(dependencyConfirmation)
 					|| prompt.chainRepairMessage != nil && prompt.repairsChains
 				return close(
 					prompt.ids,
@@ -924,7 +924,7 @@ struct ReplicaFeature {
 		tasks: [Models.Task.ID: [String: String]],
 		_ state: State,
 	) -> String? {
-		guard state.runningTaskrc.boolean("dependency.confirmation") else {
+		guard state.runningTaskrc.boolean(dependencyConfirmation) else {
 			return nil
 		}
 		let chains = repairedChains(.delete(ids, chains: .repair, series: series), tasks: tasks, state)
@@ -962,15 +962,6 @@ struct ReplicaFeature {
 			: .complete(ids, chains: chains)
 	}
 
-	/// Writes the Done or Delete that asked about chains, with the user's answer.
-	private func closePromptedTasks(chains: ChainRepair, _ state: inout State) -> Effect<Action> {
-		guard let prompt = state.chainRepairPrompt else {
-			return .none
-		}
-		state.chainRepairPrompt = nil
-		return close(prompt.ids, prompt.command, chains: chains, series: prompt.series, &state)
-	}
-
 	/// Closes `ids` as `command` says, first asking about the chains it breaks where
 	/// `dependency.confirmation` says to.
 	private func closeAskingAboutChains(
@@ -980,7 +971,7 @@ struct ReplicaFeature {
 		tasks: [Models.Task.ID: [String: String]],
 		_ state: inout State,
 	) -> Effect<Action> {
-		guard state.runningTaskrc.boolean("dependency.confirmation") else {
+		guard state.runningTaskrc.boolean(dependencyConfirmation) else {
 			return close(ids, command, chains: .repair, series: series, &state)
 		}
 		let action = closeAction(ids, command, chains: .repair, series: series)
@@ -996,6 +987,15 @@ struct ReplicaFeature {
 			tasks: tasks,
 		)
 		return .none
+	}
+
+	/// Writes the Done or Delete that asked about chains, with the user's answer.
+	private func closePromptedTasks(chains: ChainRepair, _ state: inout State) -> Effect<Action> {
+		guard let prompt = state.chainRepairPrompt else {
+			return .none
+		}
+		state.chainRepairPrompt = nil
+		return close(prompt.ids, prompt.command, chains: chains, series: prompt.series, &state)
 	}
 
 	/// Writes an inspector edit, of one task or several, to the tasks `ids`, keeping them in the table
@@ -1061,8 +1061,8 @@ struct ReplicaFeature {
 				return closeAskingAboutChains(ids, command, series: [], tasks: tasks, &state)
 			}
 			// As `task delete` reads it: `prompt` asks, else it's a boolean.
-			guard state.runningTaskrc["recurrence.confirmation"] == "prompt" else {
-				let series = state.runningTaskrc.boolean("recurrence.confirmation")
+			guard state.runningTaskrc[recurrenceConfirmation] == askingConfirmation else {
+				let series = state.runningTaskrc.boolean(recurrenceConfirmation)
 					? Set(choices.ids)
 					: []
 				return closeAskingAboutChains(ids, command, series: series, tasks: tasks, &state)
@@ -1080,29 +1080,6 @@ struct ReplicaFeature {
 		case .startStop:
 			return write(state.isStopping ? .stop(ids) : .start(ids), &state)
 		}
-	}
-
-	/// A choice for each Series the tasks `ids` are Recurrence instances of, in the order of the first
-	/// of each, named by its template's description. An instance whose template is gone has no Series
-	/// left to delete.
-	private func seriesChoices(
-		_ ids: [Models.Task.ID],
-		tasks: [Models.Task.ID: [String: String]],
-	) -> IdentifiedArrayOf<SeriesDeletePrompt.Choice> {
-		var choices: IdentifiedArrayOf<SeriesDeletePrompt.Choice> = []
-		for id in ids {
-			guard
-				let template = tasks[id]?["parent"].flatMap(UUID.init(uuidString:)),
-				let properties = tasks[template]
-			else {
-				continue
-			}
-			choices.append(SeriesDeletePrompt.Choice(
-				description: properties["description"] ?? "",
-				id: template,
-			))
-		}
-		return choices
 	}
 
 	/// The chains `action` repairs, planned against `tasks`. A plan that can't be made repairs none,
@@ -1141,6 +1118,24 @@ struct ReplicaFeature {
 		state.selection = [created]
 		inspectSelection(&state)
 		state.focusesDescription = true
+	}
+
+	/// A choice for each Series the tasks `ids` are Recurrence instances of, in the order of the first
+	/// of each, named by its template's description, or the instance's where the template is gone,
+	/// since `task delete` still takes the siblings then.
+	private func seriesChoices(
+		_ ids: [Models.Task.ID],
+		tasks: [Models.Task.ID: [String: String]],
+	) -> IdentifiedArrayOf<SeriesDeletePrompt.Choice> {
+		var choices: IdentifiedArrayOf<SeriesDeletePrompt.Choice> = []
+		for id in ids {
+			guard let template = tasks[id]?["parent"].flatMap(UUID.init(uuidString:)) else {
+				continue
+			}
+			let description = (tasks[template] ?? tasks[id])?["description"] ?? ""
+			choices.append(SeriesDeletePrompt.Choice(description: description, id: template))
+		}
+		return choices
 	}
 
 	/// Resets the sidebar to Pending where it wouldn't show a task New Task would create now.
@@ -1290,12 +1285,21 @@ private let annotationSpacing: TimeInterval = 1
 /// of notes a person can add, and short enough that a clock set back soon stops mattering.
 private let annotationWindow: TimeInterval = 60
 
+/// The `recurrence.confirmation` value that asks, where any other reads as a boolean.
+private let askingConfirmation = "prompt"
+
+/// Whether a Done or Delete asks before repairing the dependency chains it breaks.
+private let dependencyConfirmation = "dependency.confirmation"
+
 /// How many times a write is planned before a plan the engine keeps refusing as stale fails it.
 private let planAttempts = 3
 
 /// How long reads of the Replica fail before the window says so, which rides out a `task` command
 /// holding the lock for its 5 s.
 private let readFailureDelay = Duration.seconds(30)
+
+/// Whether a Delete of a Recurrence instance takes its Series, or asks.
+private let recurrenceConfirmation = "recurrence.confirmation"
 
 /// How long a write runs before the subtitle says it's saving.
 private let savingDelay = Duration.milliseconds(500)
@@ -1337,6 +1341,13 @@ private func undoName(for action: WriteAction, udaColumns: [UDAColumn]) -> Strin
 
 	case .create:
 		newTaskTitle
+
+	case let .delete(_, _, series) where !series.isEmpty:
+		counted(
+			Array(series),
+			String(localized: "Delete Series"),
+			String(localized: "Delete \(series.count) Series"),
+		)
 
 	case let .delete(ids, _, _):
 		counted(ids, String(localized: "Delete Task"), String(localized: "Delete \(ids.count) Tasks"))

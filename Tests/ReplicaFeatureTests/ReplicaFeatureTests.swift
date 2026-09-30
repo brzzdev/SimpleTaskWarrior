@@ -367,6 +367,7 @@ struct ReplicaFeatureTests {
 	func deleteOfAnInstanceAsksWhetherToTakeItsSeries() async throws {
 		let plants = series(0, "Water plants", instances: [1, 2])
 		let plans = LockIsolated<[WritePlan]>([])
+		let undoNames = LockIsolated<[String]>([])
 		var initialState = try loadedState(plants.instances, selection: [UUID(1)])
 		initialState.storedTasks.append(plants.template)
 		let stored = initialState.storedTasks
@@ -375,8 +376,9 @@ struct ReplicaFeatureTests {
 		} withDependencies: {
 			$0.continuousClock = TestClock()
 			$0.date.now = now
-			$0.replicaClient.apply = { plan, _, _ in
+			$0.replicaClient.apply = { plan, name, _ in
 				plans.withValue { $0.append(plan) }
+				undoNames.withValue { $0.append(name) }
 				return ApplyOutcome(isCommitted: true, snapshot: snapshot(stored))
 			}
 			$0.timeZone = .gmt
@@ -411,6 +413,7 @@ struct ReplicaFeatureTests {
 				),
 			],
 		)
+		#expect(undoNames.value == ["Delete Series"])
 		await store.finish()
 	}
 
@@ -495,7 +498,7 @@ struct ReplicaFeatureTests {
 				"“Alpha” would depend on “Gamma” instead of “Water plants”."
 			$0.seriesDeletePrompt?.choices[id: UUID(0)]?.deletesSeries = true
 		}
-		await store.send(.repairChainsCheckboxChanged(false)) {
+		await store.send(.repairChainsCheckboxChanged(repairsChains: false)) {
 			$0.seriesDeletePrompt?.repairsChains = false
 		}
 		// The table's reads are other tests' business: this one is about the plan.
