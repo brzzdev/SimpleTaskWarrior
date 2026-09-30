@@ -643,7 +643,7 @@ struct WritePlannerTests {
 		let recording = try Recording("series/delete_series")
 		let planner = WritePlanner(taskrc: recording.taskrc, timeZone: .gmt)
 		let deleted = try recording.deleted()
-		let template = try #require(recording.before[deleted]?["parent"].flatMap(UUID.init(uuidString:)))
+		let template = try recording.template(of: deleted)
 		let both = try WriteAction.delete(
 			[deleted, recording.siblings()[0]],
 			chains: .repair,
@@ -661,7 +661,7 @@ struct WritePlannerTests {
 		let recording = try Recording("series/delete_series")
 		let planner = WritePlanner(taskrc: recording.taskrc, timeZone: .gmt)
 		let deleted = try recording.deleted()
-		let template = try #require(recording.before[deleted]?["parent"].flatMap(UUID.init(uuidString:)))
+		let template = try recording.template(of: deleted)
 		var tasks = recording.before
 		tasks[template] = nil
 
@@ -681,8 +681,7 @@ struct WritePlannerTests {
 		let recording = try Recording("series/set_until_of_series")
 		let planner = WritePlanner(taskrc: recording.taskrc, timeZone: .gmt)
 		let instances = recording.pendingInstances()
-		let template = try #require(recording.before[instances[0]]?["parent"]
-			.flatMap(UUID.init(uuidString:)))
+		let template = try recording.template(of: instances[0])
 		let both = WriteAction.edit(
 			Array(instances.prefix(2)),
 			.set("until", .date(newYear2030)),
@@ -701,7 +700,7 @@ struct WritePlannerTests {
 		let planner = WritePlanner(taskrc: recording.taskrc, timeZone: .gmt)
 		let instances = recording.pendingInstances()
 		let instance = try #require(instances.first)
-		let template = try #require(recording.before[instance]?["parent"].flatMap(UUID.init(uuidString:)))
+		let template = try recording.template(of: instance)
 
 		let plan = try planner.plan(
 			.edit([instance], .setInput(property, text: "2030-01-01"), series: [template]),
@@ -841,19 +840,18 @@ struct Recording {
 
 	/// The pending instances, in `imask` order.
 	func pendingInstances() -> [Task.ID] {
-		before
-			.filter { $0.value["parent"] != nil && $0.value["status"] == "pending" }
-			.sorted { Int($0.value["imask"] ?? "") ?? .max < Int($1.value["imask"] ?? "") ?? .max }
-			.map(\.key)
+		instances { $1["status"] == "pending" }
 	}
 
 	/// The instances other than `deleted()`, in `imask` order.
 	func siblings() throws -> [Task.ID] {
 		let deleted = try deleted()
-		return before
-			.filter { $0.key != deleted && $0.value["parent"] != nil }
-			.sorted { Int($0.value["imask"] ?? "") ?? .max < Int($1.value["imask"] ?? "") ?? .max }
-			.map(\.key)
+		return instances { id, _ in id != deleted }
+	}
+
+	/// The template of `instance`, from its `parent`.
+	func template(of instance: Task.ID) throws -> Task.ID {
+		try #require(before[instance]?["parent"].flatMap(UUID.init(uuidString:)))
 	}
 
 	/// What the write left different, by task and property.
@@ -872,6 +870,14 @@ struct Recording {
 			}
 		}
 		return changes.dropping(before)
+	}
+
+	/// The instances `isIncluded` keeps, in `imask` order.
+	private func instances(where isIncluded: (Task.ID, [String: String]) -> Bool) -> [Task.ID] {
+		before
+			.filter { $0.value["parent"] != nil && isIncluded($0.key, $0.value) }
+			.sorted { Int($0.value["imask"] ?? "") ?? .max < Int($1.value["imask"] ?? "") ?? .max }
+			.map(\.key)
 	}
 }
 
@@ -977,7 +983,7 @@ extension WriteAction {
 		of instance: Task.ID,
 		in recording: Recording,
 	) throws -> Self {
-		let template = try #require(recording.before[instance]?["parent"].flatMap(UUID.init(uuidString:)))
+		let template = try recording.template(of: instance)
 		return .delete([instance], chains: .repair, series: [template])
 	}
 
@@ -986,7 +992,7 @@ extension WriteAction {
 	/// stands for the one `task` was run on.
 	fileprivate static func editSeries(_ edit: TaskEdit, in recording: Recording) throws -> Self {
 		let instance = try #require(recording.pendingInstances().first)
-		let template = try #require(recording.before[instance]?["parent"].flatMap(UUID.init(uuidString:)))
+		let template = try recording.template(of: instance)
 		return .edit([instance], edit, series: [template])
 	}
 }

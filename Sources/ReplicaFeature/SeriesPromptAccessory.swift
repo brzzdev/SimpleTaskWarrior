@@ -2,8 +2,7 @@ import AppKit
 import Models
 
 /// The controls under the sheet asking whether a Delete or edit takes each Series: a pop-up for
-/// each,
-/// then the chains a Delete's answer breaks, which change as the choices do.
+/// each, then the chains a Delete's answer breaks, which change as the choices do.
 final class SeriesPromptAccessory: NSStackView {
 	private let chainsCheckbox = NSButton(
 		checkboxWithTitle: String(localized: "Repair Dependency Chains"),

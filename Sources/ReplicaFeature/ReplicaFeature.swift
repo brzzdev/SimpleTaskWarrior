@@ -1020,15 +1020,15 @@ struct ReplicaFeature {
 	) -> Effect<Action> {
 		let planner = WritePlanner(taskrc: state.runningTaskrc, timeZone: timeZone)
 		let tasks = properties(of: state.storedTasks)
-		// A plan that can't be made asks nothing, and the write reports why.
+		// Planned only where it might ask. A plan that can't be made asks nothing, and the write
+		// reports why.
 		guard
 			planner.cascadesToSeries(edit),
-			let applied = try? planner.plan(.edit(ids, edit), tasks: tasks, at: now).applied(to: tasks)
+			ids.contains(where: { tasks[$0]?["parent"] != nil }),
+			let applied = try? planner.plan(.edit(ids, edit), tasks: tasks, at: now).applied(to: tasks),
+			case let choices = seriesChoices(ids.filter { applied[$0] != tasks[$0] }, tasks: tasks),
+			!choices.isEmpty
 		else {
-			return startWrite(.edit(ids, edit), at: now, &state)
-		}
-		let choices = seriesChoices(ids.filter { applied[$0] != tasks[$0] }, tasks: tasks)
-		guard !choices.isEmpty else {
 			return startWrite(.edit(ids, edit), at: now, &state)
 		}
 		guard state.runningTaskrc[recurrenceConfirmation] == askingConfirmation else {
