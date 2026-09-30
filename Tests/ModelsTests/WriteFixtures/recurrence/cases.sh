@@ -17,6 +17,14 @@ case_complete_instance() {
 	act "$(instance)" done
 }
 
+case_complete_two_instances() {
+	# Due two days ago, so the template generates an instance for each day since.
+	task add Alpha due:today-2d recur:daily
+	task list
+	instances=($(instance | head -2))
+	act "${instances[@]}" done
+}
+
 case_delete_instance() {
 	series
 	act "$(instance)" delete
@@ -42,4 +50,9 @@ case_set_description_of_instance() {
 case_set_wait_on_instance() {
 	series
 	act "$(instance)" modify wait:2029-12-01
+}
+
+case_start_instance() {
+	series
+	act "$(instance)" start
 }

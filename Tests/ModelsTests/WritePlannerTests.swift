@@ -80,6 +80,13 @@ struct WritePlannerTests {
 		"edits/start_deleted_while_started": { try .start([$0.id("Alpha")]) },
 		"edits/stop": { try .stop([$0.id("Alpha")]) },
 		"recurrence/complete_instance": { try .complete([$0.instance()], chains: .repair) },
+		"recurrence/complete_two_instances": { recording in
+			// The two of the Series' four the CLI completed.
+			.complete(
+				recording.after.filter { $0.value["status"] == "completed" }.keys.sorted(),
+				chains: .repair,
+			)
+		},
 		"recurrence/delete_instance": { try .delete([$0.instance()], chains: .repair) },
 		"recurrence/mark_completed_instance_pending": { try .markPending([$0.instance()]) },
 		"recurrence/remove_wait_from_instance": { try .edit([$0.instance()], .set("wait", nil)) },
@@ -89,6 +96,7 @@ struct WritePlannerTests {
 		"recurrence/set_wait_on_instance": {
 			try .edit([$0.instance()], .set("wait", .date(december2029)))
 		},
+		"recurrence/start_instance": { try .start([$0.instance()]) },
 	]
 
 	/// Where the app writes something other than `task` on purpose, as the value the app stores, or
@@ -550,9 +558,9 @@ struct WritePlannerTests {
 		}
 	}
 
-	/// The CLI rebuilds a mask whose `imask` it can't place, losing the other instances' statuses.
+	/// The CLI reads a missing or invalid `imask` as 0, overwriting another instance's status.
 	@Test(arguments: ["1", "-1", "first", nil])
-	func completingAnInstanceWhoseImaskIsOutOfPlaceLeavesTheMask(imask: String?) throws {
+	func completingAnInstanceWithAnUnusableImaskLeavesTheMask(imask: String?) throws {
 		let recording = try Recording("recurrence/complete_instance")
 		let planner = WritePlanner(taskrc: recording.taskrc, timeZone: .gmt)
 		let instance = try recording.instance()

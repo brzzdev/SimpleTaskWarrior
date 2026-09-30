@@ -271,41 +271,6 @@ public struct WritePlanner: Sendable {
 		return WritePlan.RepairedChain(blocked: blocked, blocking: blocking, task: id)
 	}
 
-	/// Records the status of the Recurrence instance the draft at `index` changed in its template's
-	/// `mask`, as `updateRecurrenceMask` does: `-` pending, `W` waiting at `now`, `+` completed, `X`
-	/// deleted. Only the instance's character changes, so the mask never shortens, and a missing,
-	/// invalid or out-of-range `imask` leaves it alone, where the CLI would rebuild it.
-	private func updateRecurrenceMask(of index: Int, in drafts: inout Drafts, at now: Date) {
-		guard
-			let parent = drafts[index].properties["parent"].flatMap(UUID.init(uuidString:)),
-			let imask = drafts[index].properties["imask"].flatMap(Int.init),
-			drafts[index].isChanged,
-			let template = drafts.index(parent),
-			var mask = drafts[template].read("mask").map(Array.init),
-			mask.indices.contains(imask),
-			let status = drafts[index].read("status").flatMap(Status.init(rawValue:))
-		else {
-			return
-		}
-		let symbol: Character =
-			switch status {
-			case .completed:
-				"+"
-
-			case .deleted:
-				"X"
-
-			// `Task.isWaiting`, over the stored `wait`.
-			case .pending:
-				drafts[index].read("wait").flatMap { Date(epoch: $0) }.map { $0 > now } == true ? "W" : "-"
-
-			case .recurring:
-				"?"
-			}
-		mask[imask] = symbol
-		drafts[template].set("mask", String(mask))
-	}
-
 	/// What an expression reads for `name`: a date attribute or UDA as its value, dates and durations
 	/// typed, or an empty string where the task has none, as TW reads one. Any other name is nil,
 	/// which reads as its own text, and is never passed to `read`.
@@ -377,6 +342,45 @@ public struct WritePlanner: Sendable {
 			}
 		}
 		return searched
+	}
+
+	/// Records the status of the Recurrence instance the draft at `index` changed in its template's
+	/// `mask`, as TW's `updateRecurrenceMask` does: `-` pending, `W` waiting at `now`, `+` completed,
+	/// `X` deleted. Only the instance's character changes, so the mask never shortens, and a missing,
+	/// invalid or out-of-range `imask` leaves it alone, where TW reads a missing or invalid one as 0.
+	private func updateRecurrenceMask(of index: Int, in drafts: inout Drafts, at now: Date) {
+		guard drafts[index].isChanged, drafts[index].properties["parent"] != nil else {
+			return
+		}
+		// Read, so a CLI write that moves the instance to another template or index fails the plan.
+		guard
+			let templateID = drafts[index].read("parent").flatMap(UUID.init(uuidString:)),
+			let imask = drafts[index].read("imask").flatMap(Int.init),
+			let template = drafts.index(templateID),
+			var mask = drafts[template].read("mask").map(Array.init),
+			mask.indices.contains(imask),
+			let status = drafts[index].read("status").flatMap(Status.init(rawValue:))
+		else {
+			return
+		}
+		let symbol: Character =
+			switch status {
+			case .completed:
+				"+"
+
+			case .deleted:
+				"X"
+
+			// `Task.isWaiting`, over the stored `wait`.
+			case .pending:
+				drafts[index].read("wait").flatMap { Date(epoch: $0) }.map { $0 > now } == true ? "W" : "-"
+
+			// Only a template has this status; TW writes `?` for an instance that has it anyway.
+			case .recurring:
+				"?"
+			}
+		mask[imask] = symbol
+		drafts[template].set("mask", String(mask))
 	}
 }
 
@@ -535,7 +539,9 @@ public enum WritePlanError: Equatable, LocalizedError, Sendable {
 			String(localized: "The task no longer exists.")
 
 		case .removedSeriesDue:
-			String(localized: "A repeating task needs a due date, which its series repeats from.")
+			String(
+				localized: "A repeating task needs a due date, which its series repeats from. Change the series with the task command.",
+			)
 
 		case let .reservedTag(tag):
 			String(localized: "\(tag) is a virtual tag, which Taskwarrior sets itself.")
