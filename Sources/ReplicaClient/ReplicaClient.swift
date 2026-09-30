@@ -167,9 +167,9 @@ private let openReplicas = Mutex<[URL: Registration]>([:])
 
 /// A window's `tasks` stream's hold on its Replica.
 private struct Registration {
-	var replica: Replica
 	/// Set as the stream ends, when its window closes, before it lets go of the Replica.
-	var stream: StreamEnd
+	var end: StreamEnd
+	var replica: Replica
 }
 
 /// Whether a `tasks` stream has ended. Its window may have closed while a read holds its poll, so
@@ -208,10 +208,13 @@ extension ReplicaClient: DependencyKey {
 							// A Replica shows in one window, whichever registered first, as when a moved one's
 							// window recovers it at a folder another has just opened, so no two actors write to
 							// it. A window closing gives way at once.
-							if let owner = replicas[directory], !owner.stream.hasEnded.load(ordering: .acquiring) {
+							if
+								let owner = replicas[directory],
+								!owner.end.hasEnded.load(ordering: .acquiring)
+							{
 								throw .openElsewhere
 							}
-							replicas[directory] = Registration(replica: replica, stream: end)
+							replicas[directory] = Registration(end: end, replica: replica)
 							return true
 						}
 						guard isRegistered else {
@@ -220,7 +223,7 @@ extension ReplicaClient: DependencyKey {
 						defer {
 							// A window reopened on the folder may have registered its own by now.
 							openReplicas.withLock { replicas in
-								if replicas[directory]?.stream === end {
+								if replicas[directory]?.end === end {
 									replicas[directory] = nil
 								}
 							}

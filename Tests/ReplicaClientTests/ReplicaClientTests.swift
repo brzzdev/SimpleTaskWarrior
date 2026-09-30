@@ -10,6 +10,13 @@ import Testing
 /// handle stands in for the CLI.
 @Suite(.timeLimit(.minutes(1)))
 final class ReplicaClientTests {
+	/// Which of two windows opens a Replica first: one recovering it as it moved there, or one ⌘O
+	/// opened on its folder.
+	enum FirstOpen: CaseIterable {
+		case openPanel
+		case recovery
+	}
+
 	let directory = URL.temporaryDirectory.appending(path: UUID().uuidString)
 	let replicaClient = ReplicaClient.liveValue
 
@@ -127,16 +134,18 @@ final class ReplicaClientTests {
 		#expect(try await replicaClient.redo(directory).isApplied == false)
 	}
 
-	@Test
-	func tasksLeavesAReplicaToTheWindowAlreadyOnIt() async throws {
+	@Test(arguments: FirstOpen.allCases)
+	func tasksLeavesAReplicaToTheWindowAlreadyOnIt(firstOpen: FirstOpen) async throws {
 		_ = try createReplica()
-		var recovered = replicaClient.tasks(directory, nil).makeAsyncIterator()
-		_ = try await recovered.next()
-		// As ⌘O would, finishing its open after a moved window recovered the Replica.
-		var opened = replicaClient.tasks(directory, nil).makeAsyncIterator()
+		let identity = try #require(replicaClient.identity(directory))
+		let recovering = { self.replicaClient.tasks(self.directory, identity).makeAsyncIterator() }
+		let opening = { self.replicaClient.tasks(self.directory, nil).makeAsyncIterator() }
+		var first = firstOpen == .recovery ? recovering() : opening()
+		_ = try await first.next()
+		var second = firstOpen == .recovery ? opening() : recovering()
 
 		await #expect(throws: ReplicaError.openElsewhere) {
-			_ = try await opened.next()
+			_ = try await second.next()
 		}
 	}
 
