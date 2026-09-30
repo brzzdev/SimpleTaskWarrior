@@ -528,17 +528,21 @@ check-tag version:
 		{ name = $2; sub("^refs/tags/", "", name); sub(/\^\{\}$/, "", name); commit[name] = $1 }
 		END { for (name in commit) if (name ~ /^v[0-9]+\.[0-9]+\.[0-9]+$/) print name, commit[name] }
 	')"
+	# Runs a git test whose exit status 1 means false, stopping the check on any
+	# other failure rather than reading it as false and skipping a release.
+	holds() {
+		local status=0
+		"$@" || status=$?
+		[ "$status" -le 1 ] || exit "$status"
+		return "$status"
+	}
 	while read -r other commit; do
 		[ -z "$other" ] && continue
 		[ "$other" = "$tag" ] && continue
 		# Only a tag on `main` can have been published. The clone holds all of
-		# `main`, so a commit it lacks is off it too; any other git failure stops
-		# the check rather than skipping a release.
-		git cat-file -e "$commit^{commit}" 2>/dev/null || continue
-		ancestor=0
-		git merge-base --is-ancestor "$commit" origin/main || ancestor=$?
-		[ "$ancestor" = 1 ] && continue
-		[ "$ancestor" = 0 ] || exit "$ancestor"
+		# `main`, so a commit it lacks is off it too.
+		holds git rev-parse -q --verify "$commit^{commit}" > /dev/null || continue
+		holds git merge-base --is-ancestor "$commit" origin/main || continue
 		count="$(git rev-list --count "$commit")"
 		if [ "$count" -ge "$build" ]; then
 			echo "$other is built at $count, not below HEAD's $build" >&2
