@@ -9,7 +9,7 @@ One Taskwarrior 3 data store: the TaskChampion database directory that `TASKDATA
 _Avoid_: File, document, database, task list
 
 **Taskrc**:
-The Taskwarrior configuration file a replica's window runs on, together with the files it includes, supplying its UDA definitions and urgency coefficients. It's the one paired with the replica, or else the one the CLI reads by default: `$TASKRC`, then `~/.taskrc`.
+The Taskwarrior configuration file a replica's window runs on, together with the files it includes, supplying its UDA definitions and urgency coefficients. It's the one paired with the replica, or else, in a Release build, the one the CLI reads by default: `$TASKRC`, then `~/.taskrc`. A Debug build has no default and runs on TW's defaults until one is paired.
 _Avoid_: Config, settings, rc file
 
 **Context**:

@@ -6,7 +6,7 @@ The app ships only as a hardened, notarised Developer ID build, and it doesn't r
 
 - No Mac App Store release. App Review Guideline 2.4.5(i) requires the sandbox.
 - The app and its engine reach the user's files without a panel, subject to macOS privacy controls. Files & Folders protection prompts before the app reads `~/Documents`, `~/Desktop`, `~/Downloads`, iCloud Drive, or a network or removable volume. Data behind Full Disk Access stays out of reach unless the user grants it. A Replica or Taskrc in any of those can still be denied.
-- With no Taskrc chosen, the app reads the one the CLI would, `$TASKRC` or `~/.taskrc`, by path, and watches a symlink's link node too.
+- With no Taskrc chosen, the Release build reads the one the CLI would, `$TASKRC` or `~/.taskrc`, by path, and watches a symlink's link node too. The Debug build reads no default, so a development session can't pick up real settings by accident.
 - Replica bookmarks, Taskrc pairings and restored windows saved by sandboxed builds don't carry over. Those builds kept them inside the sandbox's container, which the unsandboxed app doesn't read, and none of them shipped.
 
 ## Considered options

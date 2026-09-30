@@ -10,8 +10,8 @@ public struct TaskrcClient: Sendable {
 	/// Parses the Taskrc that `taskrc` returns, or the one the CLI reads by default when it returns
 	/// nil, then parses it again whenever it or an include it read changes. Calls `taskrc` before
 	/// every parse, so a Taskrc that was moved or replaced is found again. With neither, yields TW's
-	/// defaults until a default Taskrc appears, and those defaults become the last good Taskrc. Until
-	/// a parse succeeds, a broken Taskrc runs on `lastGood`.
+	/// defaults, which become the last good Taskrc, until a default Taskrc appears; a Debug build has
+	/// none, so it waits for a pairing. Until a parse succeeds, a broken Taskrc runs on `lastGood`.
 	public var load: @Sendable (
 		_ taskrc: @escaping @Sendable () -> URL?,
 		_ lastGood: Taskrc,
@@ -77,9 +77,7 @@ extension TaskrcClient: DependencyKey {
 							publish(Loaded(taskrc: lastGood, url: nil))
 							watched = []
 							// Waits on the default Taskrc alone, since pairing one starts another load.
-							while defaultTaskrc() == nil, !_Concurrency.Task.isCancelled {
-								try? await _Concurrency.Task.sleep(for: missingFilePoll)
-							}
+							await defaultTaskrcAppears()
 							continue
 						}
 
@@ -133,6 +131,21 @@ extension DependencyValues {
 	}
 }
 
+#if DEBUG
+// A Debug build never reads the CLI's default Taskrc, so a development session can't pick up real
+// settings by accident. It runs on TW's defaults until a Taskrc is paired.
+
+private func defaultTaskrc() -> URL? {
+	nil
+}
+
+/// Returns once cancelled. Nothing yields to this stream, and dropping its continuation doesn't
+/// finish it, so only cancellation ends the iteration.
+private func defaultTaskrcAppears() async {
+	let never = AsyncStream<Void> { _ in }
+	for await _ in never {}
+}
+#else
 /// The Taskrc the CLI reads when nothing names another, unless there's no file at its path. TW
 /// runs on its defaults without one. One the app can't reach is still returned, so its parse
 /// reports it unreadable rather than dropping the window to the defaults.
@@ -147,6 +160,14 @@ private func defaultTaskrc() -> URL? {
 	}
 	return URL(filePath: path)
 }
+
+/// Returns once there's a default Taskrc, or once cancelled.
+private func defaultTaskrcAppears() async {
+	while defaultTaskrc() == nil, !_Concurrency.Task.isCancelled {
+		try? await _Concurrency.Task.sleep(for: missingFilePoll)
+	}
+}
+#endif
 
 /// Returns once `changes` yields, or after `timeout` when there is one.
 private func firstChange(in changes: AsyncStream<Void>, orAfter timeout: Duration?) async {

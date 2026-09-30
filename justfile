@@ -26,6 +26,8 @@ derived_data := ".build/xcode"
 # config revisions fight over one file, each overwriting the other's mid-commit.
 swiftformat_base := "/tmp/swiftformat-base-SimpleTaskWarrior"
 swiftformat_url := "https://raw.githubusercontent.com/brzzdev/Configs/main/Configs/swiftformat"
+# The Debug configuration's product name, which names the `.app` and executable `run` launches.
+debug_product := scheme + " Debug"
 notary_profile := "SimpleTaskWarrior"
 release_dir := ".release"
 # The one target `Engine/rust-toolchain.toml` installs.
@@ -348,18 +350,18 @@ run: build
 	# The guard is not checking whether the build succeeded (pipefail already
 	# did) but whether the product still lands where this line says, which a
 	# scheme or configuration change would quietly move.
-	app="{{ derived_data }}/Build/Products/Debug/{{ scheme }}.app"
+	app="{{ derived_data }}/Build/Products/Debug/{{ debug_product }}.app"
 	if [ ! -d "$app" ]; then
 		echo "no app at $app — \`just build\` should have produced it" >&2
 		exit 1
 	fi
 
 	# `open` only activates a copy that is already running, so quit the previous
-	# dev build first. Matching the exact executable path spares an installed
-	# release copy and anything else that merely names the path.
-	binary="$PWD/$app/Contents/MacOS/{{ scheme }}"
+	# dev build first. Matching the exact executable path spares a copy built
+	# elsewhere and anything else that merely names the path.
+	binary="$PWD/$app/Contents/MacOS/{{ debug_product }}"
 	running() {
-		for pid in $(pgrep -x {{ scheme }}); do
+		for pid in $(pgrep -x "{{ debug_product }}"); do
 			[ "$(ps -o comm= -p "$pid")" = "$binary" ] && echo "$pid"
 		done
 		return 0
@@ -373,7 +375,7 @@ run: build
 			sleep 0.1
 		done
 		if [ -n "$(running)" ]; then
-			echo "the previous {{ scheme }} is still running; quit it and retry" >&2
+			echo "the previous {{ debug_product }} is still running; quit it and retry" >&2
 			exit 1
 		fi
 	fi
