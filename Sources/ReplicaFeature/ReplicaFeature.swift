@@ -632,7 +632,12 @@ struct ReplicaFeature {
 					return .none
 				}
 				prompt.choices[id: template]?.deletesSeries = deletesSeries
-				prompt.chainRepairMessage = chainRepairMessage(prompt.ids, series: prompt.series, state)
+				prompt.chainRepairMessage = chainRepairMessage(
+					prompt.ids,
+					series: prompt.series,
+					tasks: properties(of: state.storedTasks),
+					state,
+				)
 				state.seriesDeletePrompt = prompt
 				return .none
 
@@ -912,24 +917,18 @@ struct ReplicaFeature {
 	}
 
 	/// What repairing would do to the chains a Delete of `ids` and `series` breaks, nil where
-	/// `dependency.confirmation` doesn't ask or it breaks none. A Delete that can't be planned asks
-	/// nothing, and its write reports why.
+	/// `dependency.confirmation` doesn't ask or it breaks none.
 	private func chainRepairMessage(
 		_ ids: [Models.Task.ID],
 		series: Set<Models.Task.ID>,
+		tasks: [Models.Task.ID: [String: String]],
 		_ state: State,
 	) -> String? {
 		guard state.runningTaskrc.boolean("dependency.confirmation") else {
 			return nil
 		}
-		let tasks = properties(of: state.storedTasks)
-		let chains = try? WritePlanner(taskrc: state.runningTaskrc, timeZone: timeZone)
-			.plan(.delete(ids, chains: .repair, series: series), tasks: tasks, at: now)
-			.repairedChains
-		guard let chains, !chains.isEmpty else {
-			return nil
-		}
-		return ChainRepairPrompt.message(for: chains, tasks: tasks)
+		let chains = repairedChains(.delete(ids, chains: .repair, series: series), tasks: tasks, state)
+		return chains.isEmpty ? nil : ChainRepairPrompt.message(for: chains, tasks: tasks)
 	}
 
 	/// Completes or deletes the tasks `ids`, and a Delete the rest of each Series in `series`, as
@@ -938,22 +937,14 @@ struct ReplicaFeature {
 		_ ids: [Models.Task.ID],
 		_ command: TaskCommand,
 		chains: ChainRepair,
-		series: Set<Models.Task.ID> = [],
+		series: Set<Models.Task.ID>,
 		_ state: inout State,
 	) -> Effect<Action> {
 		let effect = write(closeAction(ids, command, chains: chains, series: series), &state)
 		// Only once the write has started, since only its end brings them back.
 		if state.writeProgress != nil {
-			let siblings = state.allRows.filter { row in
-				guard
-					row.task.status == .pending,
-					let template = row.task.parent.flatMap(UUID.init(uuidString:))
-				else {
-					return false
-				}
-				return series.contains(template)
-			}
-			state.leavingTasks = Set(ids).union(siblings.map(\.id))
+			let tasks = series.isEmpty ? [:] : properties(of: state.storedTasks)
+			state.leavingTasks = Set(WritePlanner.withSeries(ids, series: series, tasks: tasks))
 			filterRows(&state)
 		}
 		return effect
@@ -986,17 +977,15 @@ struct ReplicaFeature {
 		_ ids: [Models.Task.ID],
 		_ command: TaskCommand,
 		series: Set<Models.Task.ID>,
+		tasks: [Models.Task.ID: [String: String]],
 		_ state: inout State,
 	) -> Effect<Action> {
 		guard state.runningTaskrc.boolean("dependency.confirmation") else {
 			return close(ids, command, chains: .repair, series: series, &state)
 		}
-		let tasks = properties(of: state.storedTasks)
-		// A plan that can't be made asks nothing, and the write reports why.
-		let chains = try? WritePlanner(taskrc: state.runningTaskrc, timeZone: timeZone)
-			.plan(closeAction(ids, command, chains: .repair, series: series), tasks: tasks, at: now)
-			.repairedChains
-		guard let chains, !chains.isEmpty else {
+		let action = closeAction(ids, command, chains: .repair, series: series)
+		let chains = repairedChains(action, tasks: tasks, state)
+		guard !chains.isEmpty else {
 			return close(ids, command, chains: .leave, series: series, &state)
 		}
 		state.chainRepairPrompt = ChainRepairPrompt(
@@ -1066,19 +1055,20 @@ struct ReplicaFeature {
 				let rank = { (id: Models.Task.ID) in rows[id: id]?.task.workingSetID ?? .max }
 				return (rank(lhs), lhs) < (rank(rhs), rhs)
 			}
-			let choices = command == .delete ? seriesChoices(ids, state) : []
+			let tasks = properties(of: state.storedTasks)
+			let choices = command == .delete ? seriesChoices(ids, tasks: tasks) : []
 			guard !choices.isEmpty else {
-				return closeAskingAboutChains(ids, command, series: [], &state)
+				return closeAskingAboutChains(ids, command, series: [], tasks: tasks, &state)
 			}
 			// As `task delete` reads it: `prompt` asks, else it's a boolean.
 			guard state.runningTaskrc["recurrence.confirmation"] == "prompt" else {
 				let series = state.runningTaskrc.boolean("recurrence.confirmation")
 					? Set(choices.ids)
 					: []
-				return closeAskingAboutChains(ids, command, series: series, &state)
+				return closeAskingAboutChains(ids, command, series: series, tasks: tasks, &state)
 			}
 			state.seriesDeletePrompt = SeriesDeletePrompt(
-				chainRepairMessage: chainRepairMessage(ids, series: [], state),
+				chainRepairMessage: chainRepairMessage(ids, series: [], tasks: tasks, state),
 				choices: choices,
 				ids: ids,
 			)
@@ -1097,9 +1087,8 @@ struct ReplicaFeature {
 	/// left to delete.
 	private func seriesChoices(
 		_ ids: [Models.Task.ID],
-		_ state: State,
+		tasks: [Models.Task.ID: [String: String]],
 	) -> IdentifiedArrayOf<SeriesDeletePrompt.Choice> {
-		let tasks = properties(of: state.storedTasks)
 		var choices: IdentifiedArrayOf<SeriesDeletePrompt.Choice> = []
 		for id in ids {
 			guard
@@ -1114,6 +1103,17 @@ struct ReplicaFeature {
 			))
 		}
 		return choices
+	}
+
+	/// The chains `action` repairs, planned against `tasks`. A plan that can't be made repairs none,
+	/// so asks nothing, and its write reports why.
+	private func repairedChains(
+		_ action: WriteAction,
+		tasks: [Models.Task.ID: [String: String]],
+		_ state: State,
+	) -> [WritePlan.RepairedChain] {
+		let planner = WritePlanner(taskrc: state.runningTaskrc, timeZone: timeZone)
+		return (try? planner.plan(action, tasks: tasks, at: now).repairedChains) ?? []
 	}
 
 	/// Selects the task `offset` rows from the inspected one, as ⌘⌥↑ and ⌘⌥↓ do.
@@ -1322,7 +1322,7 @@ private func counted(_ ids: [Models.Task.ID], _ single: String, _ multiple: Stri
 }
 
 /// Every task's properties, as the planner reads them.
-private func properties(of tasks: [StoredTask]) -> [Models.Task.ID: [String: String]] {
+func properties(of tasks: [StoredTask]) -> [Models.Task.ID: [String: String]] {
 	Dictionary(
 		tasks.compactMap { task in UUID(uuidString: task.uuid).map { ($0, task.properties) } },
 		uniquingKeysWith: { first, _ in first },

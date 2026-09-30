@@ -392,7 +392,8 @@ struct ReplicaFeatureTests {
 			$0.seriesDeletePrompt?.choices[id: UUID(0)]?.deletesSeries = true
 		}
 		await store.send(.seriesDeleteButtonTapped) {
-			$0.leavingTasks = [UUID(1), UUID(2)]
+			// Everything the Delete takes, the hidden template included.
+			$0.leavingTasks = [UUID(0), UUID(1), UUID(2)]
 			$0.rows = []
 			$0.selection = []
 			$0.seriesDeletePrompt = nil
@@ -2044,15 +2045,6 @@ private func chain(from first: Int = 0, suffix: String = "") -> [StoredTask] {
 		storedTask(first + 1, "Beta" + suffix, workingSetID: first + 2, dependingOn(first + 2)),
 		storedTask(first + 2, "Gamma" + suffix, workingSetID: first + 3),
 	]
-}
-
-/// Every task's properties, as the planner reads them.
-private func properties(of tasks: [StoredTask]) -> [Models.Task.ID: [String: String]] {
-	Dictionary(
-		uniqueKeysWithValues: tasks.compactMap { task in
-			UUID(uuidString: task.uuid).map { ($0, task.properties) }
-		},
-	)
 }
 
 /// A weekly Series named `description`: its template, seeded `template`, and a pending instance

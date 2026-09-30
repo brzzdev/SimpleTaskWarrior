@@ -15,6 +15,47 @@ public struct WritePlanner: Sendable {
 		self.taskrc = taskrc
 	}
 
+	/// `ids`, each instance of a template in `series` followed by the rest of its Series: its pending
+	/// siblings, waiting ones included, in `imask` order, then the template, as a confirmed `task
+	/// delete` takes them. Found by scanning, so an instance the CLI generates before the plan commits
+	/// is missed, but generating it grows the template's `mask`, which the plan expects, so the plan
+	/// is made again.
+	public static func withSeries(
+		_ ids: [Task.ID],
+		series: Set<Task.ID>,
+		tasks: [Task.ID: [String: String]],
+	) -> [Task.ID] {
+		guard !series.isEmpty else {
+			return ids
+		}
+		let template = { (id: Task.ID) in tasks[id]?["parent"].flatMap(UUID.init(uuidString:)) }
+		var pending: [Task.ID: [Task.ID]] = [:]
+		for (id, properties) in tasks where isPending(properties["status"]) {
+			guard let parent = template(id), series.contains(parent) else {
+				continue
+			}
+			pending[parent, default: []].append(id)
+		}
+		let index = { (id: Task.ID) in tasks[id]?["imask"].flatMap(Int.init) ?? .max }
+		var expanded: [Task.ID] = []
+		var expandedSeries: Set<Task.ID> = []
+		for id in ids {
+			expanded.append(id)
+			guard
+				let parent = template(id),
+				series.contains(parent),
+				expandedSeries.insert(parent).inserted
+			else {
+				continue
+			}
+			expanded += pending[parent, default: []].sorted { (index($0), $0) < (index($1), $1) }
+			if tasks[parent] != nil {
+				expanded.append(parent)
+			}
+		}
+		return expanded
+	}
+
 	/// Plans `action` against `tasks`, every task's properties as the snapshot holds them.
 	public func plan(
 		_ action: WriteAction,
@@ -47,7 +88,7 @@ public struct WritePlanner: Sendable {
 			return plan
 
 		case let .delete(ids, chains, series):
-			let ids = withSeries(ids, series: series, tasks: tasks)
+			let ids = Self.withSeries(ids, series: series, tasks: tasks)
 			return try plan(ids, tasks: tasks, at: now, chains: chains) { $0.delete(at: epoch) }
 
 		case let .edit(ids, edit):
@@ -343,40 +384,6 @@ public struct WritePlanner: Sendable {
 			}
 		}
 		return searched
-	}
-
-	/// `ids`, each instance of a template in `series` followed by the rest of its Series: its pending
-	/// siblings, waiting ones included, in `imask` order, then the template, as a confirmed `task
-	/// delete` takes them. Found by scanning, so an instance the CLI generates before the plan commits
-	/// is missed, but generating it grows the template's `mask`, which the plan expects, so the plan
-	/// is made again.
-	private func withSeries(
-		_ ids: [Task.ID],
-		series: Set<Task.ID>,
-		tasks: [Task.ID: [String: String]],
-	) -> [Task.ID] {
-		guard !series.isEmpty else {
-			return ids
-		}
-		let template = { (id: Task.ID) in tasks[id]?["parent"].flatMap(UUID.init(uuidString:)) }
-		var expanded: [Task.ID] = []
-		for id in ids {
-			expanded.append(id)
-			guard let parent = template(id), series.contains(parent) else {
-				continue
-			}
-			let siblings = tasks.keys
-				.filter { template($0) == parent && isPending(tasks[$0]?["status"]) }
-				.sorted { lhs, rhs in
-					let index = { (id: Task.ID) in tasks[id]?["imask"].flatMap(Int.init) ?? .max }
-					return (index(lhs), lhs) < (index(rhs), rhs)
-				}
-			expanded += siblings
-			if tasks[parent] != nil {
-				expanded.append(parent)
-			}
-		}
-		return expanded
 	}
 
 	/// Records the status of the Recurrence instance the draft at `index` changed in its template's

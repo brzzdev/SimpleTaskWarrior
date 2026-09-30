@@ -459,9 +459,8 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 		}
 	}
 
-	/// Asks as a sheet on the window whether the Delete `prompt` takes each Series, and the chains
-	/// that
-	/// breaks, and reports the answer.
+	/// Asks as a sheet on the window whether the Delete `prompt` takes each Series, and about the
+	/// chains that breaks, and reports the answer.
 	private func beginAlert(for prompt: ReplicaFeature.SeriesDeletePrompt) {
 		guard alert == nil, let window else {
 			return
