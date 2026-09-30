@@ -26,6 +26,8 @@ derived_data := ".build/xcode"
 # `publish` runs the `generate_appcast` of the Sparkle `.package.resolved` pins.
 source_packages := derived_data / "SourcePackages"
 sparkle_bin := source_packages / "artifacts/sparkle/Sparkle/bin"
+# The `task` the fixtures are recorded from and the contract is with.
+task_version := "3.5.0"
 releases_url := "https://github.com/brzzdev/SimpleTaskWarrior/releases"
 # Repo-scoped because a path shared across repos lets two checkouts on different
 # config revisions fight over one file, each overwriting the other's mid-commit.
@@ -140,8 +142,8 @@ fixtures:
 
 	task="$(command -v task)"
 	version="$("$task" --version)"
-	if [ "$version" != 3.5.0 ]; then
-		echo "the fixtures are recorded from task 3.5.0, not $version" >&2
+	if [ "$version" != {{ task_version }} ]; then
+		echo "the fixtures are recorded from task {{ task_version }}, not $version" >&2
 		exit 1
 	fi
 
@@ -313,6 +315,22 @@ build: ensure-generated
 # Run the test plan (all package test targets)
 test: ensure-generated
 	just xcodebuild-strict CODE_SIGNING_ALLOWED=NO test
+
+# By hand, not in CI, whenever TaskChampion or TW is bumped: `CLIContractTests` skips itself
+# unless `xcodebuild` forwards it a `task` in `TEST_RUNNER_CONTRACT_TASK`.
+# Check the app's writes, undo and a concurrent edit against the pinned real `task`
+contract: ensure-generated
+	#!/usr/bin/env bash
+	set -euo pipefail
+
+	task="$(command -v task)"
+	version="$("$task" --version)"
+	if [ "$version" != {{ task_version }} ]; then
+		echo "the contract is with task {{ task_version }}, not $version" >&2
+		exit 1
+	fi
+	TEST_RUNNER_CONTRACT_TASK="$task" just xcodebuild-strict CODE_SIGNING_ALLOWED=NO test \
+		-only-testing:ReplicaClientTests/CLIContractTests
 
 # `treatAllWarnings` can't catch every warning: Swift 6.4 downgrades a nonisolated
 # call into AppKit's imported main actor API to a warning that

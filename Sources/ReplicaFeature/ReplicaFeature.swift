@@ -1412,14 +1412,6 @@ private func counted(_ ids: [Models.Task.ID], _ single: String, _ multiple: Stri
 	ids.count == 1 ? single : multiple
 }
 
-/// Every task's properties, as the planner reads them.
-func properties(of tasks: [StoredTask]) -> [Models.Task.ID: [String: String]] {
-	Dictionary(
-		tasks.compactMap { task in UUID(uuidString: task.uuid).map { ($0, task.properties) } },
-		uniquingKeysWith: { first, _ in first },
-	)
-}
-
 /// The name the Edit menu gives `action`'s Undo point, as in "Undo Change Due Date".
 private func undoName(for action: WriteAction, udaColumns: [UDAColumn]) -> String {
 	switch action {
