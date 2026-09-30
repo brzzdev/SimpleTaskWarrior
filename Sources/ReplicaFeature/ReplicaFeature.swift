@@ -429,9 +429,6 @@ struct ReplicaFeature {
 		case replicaLost(ReplicaIdentity)
 		/// Where the window's bookmark resolves, there's no Replica.
 		case replicaNotFound
-		/// The window's bookmark now locates the Replica it was pointed at by Locate… or Open
-		/// Replacement.
-		case replicaRebound(Data)
 		/// Another Replica is where the lost one's bookmark resolves, in the folder given.
 		case replicaReplaced(URL)
 		case repairChainButtonTapped
@@ -610,7 +607,8 @@ struct ReplicaFeature {
 				guard state.unavailable == .replaced, let directory = state.directory else {
 					return .none
 				}
-				return rebind(from: directory, to: directory)
+				// The folder is the same, but the Replica in it isn't the one the bookmark was made for.
+				return rebind(to: directory, &state)
 
 			case .pairingChanged:
 				return loadTaskrc(for: state)
@@ -654,11 +652,7 @@ struct ReplicaFeature {
 				return closePromptedTasks(chains: .repair, &state)
 
 			case let .replicaFolderChosen(directory):
-				// Taken as the window's folder at once, before the bookmark is made, so no other window
-				// opens it meanwhile.
-				let lastDirectory = state.directory
-				state.directory = directory
-				return rebind(from: lastDirectory, to: directory)
+				return rebind(to: directory, &state)
 
 			case let .replicaLost(identity):
 				// A write and the stream can each find it lost, and finding it again is harmless.
@@ -685,11 +679,6 @@ struct ReplicaFeature {
 			case .replicaNotFound:
 				showUnavailable(.notFound, &state)
 				return .none
-
-			case let .replicaRebound(bookmark):
-				state.bookmark = bookmark
-				state.unavailable = nil
-				return openReplica(state)
 
 			case let .replicaReplaced(directory):
 				state.directory = directory
@@ -906,18 +895,25 @@ struct ReplicaFeature {
 		.cancellable(id: CancelID.replica, cancelInFlight: true)
 	}
 
-	/// Points the window at the Replica in `directory`, taking the Taskrc paired with the one it had,
-	/// last in `lastDirectory`, with it, then opens it.
-	private func rebind(from lastDirectory: URL?, to directory: URL) -> Effect<Action> {
-		.run { [bookmarkClient] send in
-			let bookmark = try bookmarkClient.create(directory)
-			if let lastDirectory {
-				bookmarkClient.movePairing(lastDirectory, directory, bookmark)
-			}
-			await send(.replicaRebound(bookmark))
-		} catch: { error, send in
-			await send(.openFailed(error.localizedDescription))
+	/// Points the window at the Replica in `directory`, moving its Taskrc pairing along, then opens
+	/// it. Done at once, so the window claims the folder only once its bookmark exists, and before
+	/// another window can open it.
+	private func rebind(to directory: URL, _ state: inout State) -> Effect<Action> {
+		let bookmark: Data
+		do {
+			bookmark = try bookmarkClient.create(directory)
+		} catch {
+			showUnavailable(.cantOpen(error.localizedDescription), &state)
+			return .none
 		}
+		if let lastDirectory = state.directory {
+			bookmarkClient.movePairing(lastDirectory, directory, bookmark)
+		}
+		state.bookmark = bookmark
+		state.directory = directory
+		state.unavailable = nil
+		// Replaces anything still finding the Replica lost.
+		return openReplica(state)
 	}
 
 	/// Shows why the window has no Replica in place of its tasks, which it drops.

@@ -1828,8 +1828,7 @@ struct ReplicaFeatureTests {
 			$0.unavailable = .replaced
 		}
 
-		await store.send(.openReplacementButtonTapped)
-		await store.receive(\.replicaRebound) {
+		await store.send(.openReplacementButtonTapped) {
 			$0.bookmark = Data([2])
 			$0.unavailable = nil
 		}
@@ -1874,12 +1873,9 @@ struct ReplicaFeatureTests {
 		}
 
 		// Keeping the Taskrc paired with the Replica last at its old path.
-		// Taken as the window's folder at once, so no other window opens it meanwhile.
 		await store.send(.replicaFolderChosen(located)) {
-			$0.directory = located
-		}
-		await store.receive(\.replicaRebound) {
 			$0.bookmark = Data([2])
+			$0.directory = located
 			$0.unavailable = nil
 		}
 		await store.receive(\.directoryResolved)

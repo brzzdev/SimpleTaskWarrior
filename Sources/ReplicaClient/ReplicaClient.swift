@@ -309,8 +309,8 @@ actor Replica {
 	private init(directory: URL, queue: DispatchSerialQueue) throws(ReplicaError) {
 		self.directory = directory
 		self.queue = queue
-		// Taken before opening, and checked again after: taken only after, a replacement landing while
-		// the engine opened would be recorded in place of the database the engine has open.
+		// Read before opening, so a replacement landing mid-open fails the check after it, rather than
+		// being recorded as the database the engine has open.
 		guard let identity = ReplicaIdentity(directory: directory) else {
 			throw .notAReplica
 		}
