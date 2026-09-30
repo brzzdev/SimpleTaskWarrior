@@ -1,0 +1,97 @@
+{
+	"after": {
+		"5f1a136a-3982-427c-ba09-8e6c30369ed8": {
+			"description": "Alpha",
+			"due": "1893456000",
+			"entry": "1790777088",
+			"imask": "0",
+			"modified": "1790777088",
+			"parent": "8f824b7f-59e8-4d23-81a1-60bf7ef1daf3",
+			"recur": "weekly",
+			"rtype": "periodic",
+			"status": "pending"
+		},
+		"8f824b7f-59e8-4d23-81a1-60bf7ef1daf3": {
+			"description": "Alpha",
+			"due": "1893456000",
+			"entry": "1790777088",
+			"mask": "-",
+			"modified": "1790777088",
+			"recur": "weekly",
+			"rtype": "periodic",
+			"status": "recurring"
+		}
+	},
+	"before": {
+		"5f1a136a-3982-427c-ba09-8e6c30369ed8": {
+			"description": "Alpha",
+			"due": "1893456000",
+			"end": "1790777088",
+			"entry": "1790777088",
+			"imask": "0",
+			"modified": "1790777088",
+			"parent": "8f824b7f-59e8-4d23-81a1-60bf7ef1daf3",
+			"recur": "weekly",
+			"rtype": "periodic",
+			"status": "completed"
+		},
+		"8f824b7f-59e8-4d23-81a1-60bf7ef1daf3": {
+			"description": "Alpha",
+			"due": "1893456000",
+			"entry": "1790777088",
+			"mask": "+",
+			"modified": "1790777088",
+			"recur": "weekly",
+			"rtype": "periodic",
+			"status": "recurring"
+		}
+	},
+	"now": 1790777088,
+	"operations": [
+		{
+			"Update": {
+				"old_value": "1790777088",
+				"property": "modified",
+				"timestamp": "2026-09-30T14:04:48.704485Z",
+				"uuid": "8f824b7f-59e8-4d23-81a1-60bf7ef1daf3",
+				"value": "1790777088"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "+",
+				"property": "mask",
+				"timestamp": "2026-09-30T14:04:48.704486Z",
+				"uuid": "8f824b7f-59e8-4d23-81a1-60bf7ef1daf3",
+				"value": "-"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "1790777088",
+				"property": "modified",
+				"timestamp": "2026-09-30T14:04:48.704861Z",
+				"uuid": "5f1a136a-3982-427c-ba09-8e6c30369ed8",
+				"value": "1790777088"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "1790777088",
+				"property": "end",
+				"timestamp": "2026-09-30T14:04:48.704862Z",
+				"uuid": "5f1a136a-3982-427c-ba09-8e6c30369ed8",
+				"value": null
+			}
+		},
+		{
+			"Update": {
+				"old_value": "completed",
+				"property": "status",
+				"timestamp": "2026-09-30T14:04:48.704864Z",
+				"uuid": "5f1a136a-3982-427c-ba09-8e6c30369ed8",
+				"value": "pending"
+			}
+		}
+	]
+}

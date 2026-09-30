@@ -1,0 +1,88 @@
+{
+	"after": {
+		"5129b8a5-e653-4283-9e55-fb3ee9eb4054": {
+			"description": "Alpha",
+			"due": "1893456000",
+			"entry": "1790777088",
+			"imask": "0",
+			"modified": "1790777088",
+			"parent": "bdf75718-084e-4df8-afd3-91d159b024b6",
+			"recur": "weekly",
+			"rtype": "periodic",
+			"status": "pending"
+		},
+		"bdf75718-084e-4df8-afd3-91d159b024b6": {
+			"description": "Alpha",
+			"due": "1893456000",
+			"entry": "1790777088",
+			"mask": "-",
+			"modified": "1790777088",
+			"recur": "weekly",
+			"rtype": "periodic",
+			"status": "recurring"
+		}
+	},
+	"before": {
+		"5129b8a5-e653-4283-9e55-fb3ee9eb4054": {
+			"description": "Alpha",
+			"due": "1893456000",
+			"entry": "1790777088",
+			"imask": "0",
+			"modified": "1790777088",
+			"parent": "bdf75718-084e-4df8-afd3-91d159b024b6",
+			"recur": "weekly",
+			"rtype": "periodic",
+			"status": "pending",
+			"wait": "1890777600"
+		},
+		"bdf75718-084e-4df8-afd3-91d159b024b6": {
+			"description": "Alpha",
+			"due": "1893456000",
+			"entry": "1790777088",
+			"mask": "W",
+			"modified": "1790777088",
+			"recur": "weekly",
+			"rtype": "periodic",
+			"status": "recurring"
+		}
+	},
+	"now": 1790777088,
+	"operations": [
+		{
+			"Update": {
+				"old_value": "1790777088",
+				"property": "modified",
+				"timestamp": "2026-09-30T14:04:48.953303Z",
+				"uuid": "bdf75718-084e-4df8-afd3-91d159b024b6",
+				"value": "1790777088"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "W",
+				"property": "mask",
+				"timestamp": "2026-09-30T14:04:48.953303Z",
+				"uuid": "bdf75718-084e-4df8-afd3-91d159b024b6",
+				"value": "-"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "1790777088",
+				"property": "modified",
+				"timestamp": "2026-09-30T14:04:48.953761Z",
+				"uuid": "5129b8a5-e653-4283-9e55-fb3ee9eb4054",
+				"value": "1790777088"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "1890777600",
+				"property": "wait",
+				"timestamp": "2026-09-30T14:04:48.953761Z",
+				"uuid": "5129b8a5-e653-4283-9e55-fb3ee9eb4054",
+				"value": null
+			}
+		}
+	]
+}

@@ -79,6 +79,16 @@ struct WritePlannerTests {
 		// `task start` refuses a task that kept its `start` when deleted: it's already started.
 		"edits/start_deleted_while_started": { try .start([$0.id("Alpha")]) },
 		"edits/stop": { try .stop([$0.id("Alpha")]) },
+		"recurrence/complete_instance": { try .complete([$0.instance()], chains: .repair) },
+		"recurrence/delete_instance": { try .delete([$0.instance()], chains: .repair) },
+		"recurrence/mark_completed_instance_pending": { try .markPending([$0.instance()]) },
+		"recurrence/remove_wait_from_instance": { try .edit([$0.instance()], .set("wait", nil)) },
+		"recurrence/set_description_of_instance": {
+			try .edit([$0.instance()], .set("description", .string("Beta")))
+		},
+		"recurrence/set_wait_on_instance": {
+			try .edit([$0.instance()], .set("wait", .date(december2029)))
+		},
 	]
 
 	/// Where the app writes something other than `task` on purpose, as the value the app stores, or
@@ -540,6 +550,36 @@ struct WritePlannerTests {
 		}
 	}
 
+	/// The CLI rebuilds a mask whose `imask` it can't place, losing the other instances' statuses.
+	@Test(arguments: ["1", "-1", "first", nil])
+	func completingAnInstanceWhoseImaskIsOutOfPlaceLeavesTheMask(imask: String?) throws {
+		let recording = try Recording("recurrence/complete_instance")
+		let planner = WritePlanner(taskrc: recording.taskrc, timeZone: .gmt)
+		let instance = try recording.instance()
+		var tasks = recording.before
+		tasks[instance]?["imask"] = imask
+
+		let plan = try planner.plan(
+			.complete([instance], chains: .repair),
+			tasks: tasks,
+			at: recording.now,
+		)
+
+		#expect(!plan.operations.contains { $0.property == "mask" })
+	}
+
+	/// `task modify due:` refuses it with "You cannot remove the due date from a recurring task."
+	@Test(arguments: [TaskEdit.set("due", nil), .setInput("due", text: "")])
+	func removingDueFromAnInstanceThrows(edit: TaskEdit) throws {
+		let recording = try Recording("recurrence/set_description_of_instance")
+		let planner = WritePlanner(taskrc: recording.taskrc, timeZone: .gmt)
+		let instance = try recording.instance()
+
+		#expect(throws: WritePlanError.removedSeriesDue) {
+			try planner.plan(.edit([instance], edit), tasks: recording.before, at: recording.now)
+		}
+	}
+
 	@Test
 	func addingATagExpectsTheOtherTags() throws {
 		let planner = WritePlanner(taskrc: .defaults, timeZone: .gmt)
@@ -561,6 +601,9 @@ struct WritePlannerTests {
 		)))
 	}
 }
+
+/// 2029-12-01 in UTC, which the fixtures write as `2029-12-01`.
+private let december2029 = Date(timeIntervalSince1970: 1_890_777_600)
 
 /// 2030-01-01 in UTC, which the fixtures write as `2030-01-01`.
 private let newYear2030 = Date(timeIntervalSince1970: 1_893_456_000)
@@ -615,6 +658,11 @@ struct Recording {
 	/// The task described as `description` before the write.
 	func id(_ description: String) throws -> Task.ID {
 		try #require(before.first { $0.value["description"] == description }?.key)
+	}
+
+	/// The one Recurrence instance before the write, which shares its template's description.
+	func instance() throws -> Task.ID {
+		try #require(before.first { $0.value["parent"] != nil }?.key)
 	}
 
 	/// What the write left different, by task and property.
@@ -714,6 +762,13 @@ extension WritePlan.Operation {
 		switch self {
 		case let .create(id), let .setStatus(id, _), let .setValue(id, _, _): id
 		}
+	}
+
+	fileprivate var property: String? {
+		if case let .setValue(_, property, _) = self {
+			return property
+		}
+		return nil
 	}
 
 	fileprivate var isStatus: Bool {

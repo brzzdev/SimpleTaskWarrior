@@ -1,0 +1,69 @@
+{
+	"after": {
+		"44b839fe-bd2f-4998-9f51-600ca0d95c6b": {
+			"description": "Alpha",
+			"due": "1893456000",
+			"entry": "1790777089",
+			"mask": "-",
+			"modified": "1790777089",
+			"recur": "weekly",
+			"rtype": "periodic",
+			"status": "recurring"
+		},
+		"b154d864-c5ae-449b-81b6-fc4ead1a3626": {
+			"description": "Beta",
+			"due": "1893456000",
+			"entry": "1790777089",
+			"imask": "0",
+			"modified": "1790777089",
+			"parent": "44b839fe-bd2f-4998-9f51-600ca0d95c6b",
+			"recur": "weekly",
+			"rtype": "periodic",
+			"status": "pending"
+		}
+	},
+	"before": {
+		"44b839fe-bd2f-4998-9f51-600ca0d95c6b": {
+			"description": "Alpha",
+			"due": "1893456000",
+			"entry": "1790777089",
+			"mask": "-",
+			"modified": "1790777089",
+			"recur": "weekly",
+			"rtype": "periodic",
+			"status": "recurring"
+		},
+		"b154d864-c5ae-449b-81b6-fc4ead1a3626": {
+			"description": "Alpha",
+			"due": "1893456000",
+			"entry": "1790777089",
+			"imask": "0",
+			"modified": "1790777089",
+			"parent": "44b839fe-bd2f-4998-9f51-600ca0d95c6b",
+			"recur": "weekly",
+			"rtype": "periodic",
+			"status": "pending"
+		}
+	},
+	"now": 1790777089,
+	"operations": [
+		{
+			"Update": {
+				"old_value": "1790777089",
+				"property": "modified",
+				"timestamp": "2026-09-30T14:04:49.308863Z",
+				"uuid": "b154d864-c5ae-449b-81b6-fc4ead1a3626",
+				"value": "1790777089"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "Alpha",
+				"property": "description",
+				"timestamp": "2026-09-30T14:04:49.308863Z",
+				"uuid": "b154d864-c5ae-449b-81b6-fc4ead1a3626",
+				"value": "Beta"
+			}
+		}
+	]
+}

@@ -1,0 +1,88 @@
+{
+	"after": {
+		"1e6b57fc-7602-4258-a12c-8d053e5fbb85": {
+			"description": "Alpha",
+			"due": "1893456000",
+			"entry": "1790777089",
+			"mask": "W",
+			"modified": "1790777089",
+			"recur": "weekly",
+			"rtype": "periodic",
+			"status": "recurring"
+		},
+		"7e648546-e484-4f51-a597-bda4b436a1f5": {
+			"description": "Alpha",
+			"due": "1893456000",
+			"entry": "1790777089",
+			"imask": "0",
+			"modified": "1790777089",
+			"parent": "1e6b57fc-7602-4258-a12c-8d053e5fbb85",
+			"recur": "weekly",
+			"rtype": "periodic",
+			"status": "pending",
+			"wait": "1890777600"
+		}
+	},
+	"before": {
+		"1e6b57fc-7602-4258-a12c-8d053e5fbb85": {
+			"description": "Alpha",
+			"due": "1893456000",
+			"entry": "1790777089",
+			"mask": "-",
+			"modified": "1790777089",
+			"recur": "weekly",
+			"rtype": "periodic",
+			"status": "recurring"
+		},
+		"7e648546-e484-4f51-a597-bda4b436a1f5": {
+			"description": "Alpha",
+			"due": "1893456000",
+			"entry": "1790777089",
+			"imask": "0",
+			"modified": "1790777089",
+			"parent": "1e6b57fc-7602-4258-a12c-8d053e5fbb85",
+			"recur": "weekly",
+			"rtype": "periodic",
+			"status": "pending"
+		}
+	},
+	"now": 1790777089,
+	"operations": [
+		{
+			"Update": {
+				"old_value": "1790777089",
+				"property": "modified",
+				"timestamp": "2026-09-30T14:04:49.510427Z",
+				"uuid": "1e6b57fc-7602-4258-a12c-8d053e5fbb85",
+				"value": "1790777089"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "-",
+				"property": "mask",
+				"timestamp": "2026-09-30T14:04:49.510428Z",
+				"uuid": "1e6b57fc-7602-4258-a12c-8d053e5fbb85",
+				"value": "W"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "1790777089",
+				"property": "modified",
+				"timestamp": "2026-09-30T14:04:49.510946Z",
+				"uuid": "7e648546-e484-4f51-a597-bda4b436a1f5",
+				"value": "1790777089"
+			}
+		},
+		{
+			"Update": {
+				"old_value": null,
+				"property": "wait",
+				"timestamp": "2026-09-30T14:04:49.510947Z",
+				"uuid": "7e648546-e484-4f51-a597-bda4b436a1f5",
+				"value": "1890777600"
+			}
+		}
+	]
+}
