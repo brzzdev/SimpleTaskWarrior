@@ -97,6 +97,9 @@ struct WritePlannerTests {
 			try .edit([$0.instance()], .set("wait", .date(december2029)))
 		},
 		"recurrence/start_instance": { try .start([$0.instance()]) },
+		"series/delete_series": { try .deleteSeries(of: $0.deleted(), in: $0) },
+		"series/delete_series_with_completed_and_waiting": { try .deleteSeries(of: $0.deleted(), in: $0)
+		},
 	]
 
 	/// Where the app writes something other than `task` on purpose, as the value the app stores, or
@@ -605,6 +608,47 @@ struct WritePlannerTests {
 		)))
 	}
 
+	/// The CLI repairs only the chain of the instance it was asked to delete.
+	@Test
+	func deletingASeriesRepairsTheChainOfEachTaskItDeletes() throws {
+		let recording = try Recording("series/delete_series")
+		let planner = WritePlanner(taskrc: recording.taskrc, timeZone: .gmt)
+		let (deleted, sibling) = try (recording.deleted(), #require(recording.siblings().first))
+		let (blocked, blocking) = (UUID(), UUID())
+		var tasks = recording.before
+		tasks[blocking] = ["status": "pending"]
+		tasks[sibling]?["dep_\(blocking.uuidString.lowercased())"] = "x"
+		tasks[blocked] = ["dep_\(sibling.uuidString.lowercased())": "x", "status": "pending"]
+
+		let plan = try planner.plan(
+			.deleteSeries(of: deleted, in: recording),
+			tasks: tasks,
+			at: recording.now,
+		)
+
+		#expect(plan.repairedChains == [
+			WritePlan.RepairedChain(blocked: [blocked], blocking: [blocking], task: sibling),
+		])
+	}
+
+	/// As a bulk Delete of two instances writes it, once for each.
+	@Test
+	func deletingTwoInstancesOfASeriesDeletesItOnce() throws {
+		let recording = try Recording("series/delete_series")
+		let planner = WritePlanner(taskrc: recording.taskrc, timeZone: .gmt)
+		let deleted = try recording.deleted()
+		let template = try #require(recording.before[deleted]?["parent"].flatMap(UUID.init(uuidString:)))
+		let both = try WriteAction.delete(
+			[deleted, recording.siblings()[0]],
+			chains: .repair,
+			series: [template],
+		)
+
+		let plan = try planner.plan(both, tasks: recording.before, at: recording.now)
+
+		#expect(plan.applied(to: recording.before) == recording.after)
+	}
+
 	@Test
 	func addingATagExpectsTheOtherTags() throws {
 		let planner = WritePlanner(taskrc: .defaults, timeZone: .gmt)
@@ -688,6 +732,27 @@ struct Recording {
 	/// The one Recurrence instance before the write, which shares its template's description.
 	func instance() throws -> Task.ID {
 		try #require(before.first { $0.value["parent"] != nil }?.key)
+	}
+
+	/// The instance `task delete` was run on: the one whose `end` is the first operation on an
+	/// instance, since the CLI deletes it before its siblings.
+	func deleted() throws -> Task.ID {
+		let ended = operations.compactMap { operation -> Task.ID? in
+			guard case let .update(id, "end", _) = operation else {
+				return nil
+			}
+			return id
+		}
+		return try #require(ended.first { before[$0]?["parent"] != nil })
+	}
+
+	/// The instances other than `deleted()`, in `imask` order.
+	func siblings() throws -> [Task.ID] {
+		let deleted = try deleted()
+		return before
+			.filter { $0.key != deleted && $0.value["parent"] != nil }
+			.sorted { Int($0.value["imask"] ?? "") ?? 0 < Int($1.value["imask"] ?? "") ?? 0 }
+			.map(\.key)
 	}
 
 	/// What the write left different, by task and property.
@@ -802,5 +867,16 @@ extension [String: [String: String]] {
 		try [Task.ID: [String: String]](uniqueKeysWithValues: map { uuid, properties in
 			try (#require(UUID(uuidString: uuid)), properties)
 		})
+	}
+}
+
+extension WriteAction {
+	/// Deletes `instance` with the rest of its Series, as `recurrence.confirmation=yes` does.
+	fileprivate static func deleteSeries(
+		of instance: Task.ID,
+		in recording: Recording,
+	) throws -> Self {
+		let template = try #require(recording.before[instance]?["parent"].flatMap(UUID.init(uuidString:)))
+		return .delete([instance], chains: .repair, series: [template])
 	}
 }

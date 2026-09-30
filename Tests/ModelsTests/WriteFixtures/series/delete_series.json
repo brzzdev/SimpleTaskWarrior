@@ -1,0 +1,329 @@
+{
+	"after": {
+		"0e9eab4f-7ec8-4b97-b904-cc433e719027": {
+			"description": "Alpha",
+			"due": "1790553600",
+			"end": "1790783038",
+			"entry": "1790783038",
+			"imask": "0",
+			"modified": "1790783038",
+			"parent": "492aa431-232d-45c8-92b9-be5f64119f1d",
+			"recur": "daily",
+			"rtype": "periodic",
+			"status": "deleted"
+		},
+		"492aa431-232d-45c8-92b9-be5f64119f1d": {
+			"description": "Alpha",
+			"due": "1790553600",
+			"end": "1790783038",
+			"entry": "1790783038",
+			"mask": "XXXX",
+			"modified": "1790783038",
+			"recur": "daily",
+			"rtype": "periodic",
+			"status": "deleted"
+		},
+		"66a76ad6-ac01-42c2-8334-fcc5db667f83": {
+			"description": "Alpha",
+			"due": "1790726400",
+			"end": "1790783038",
+			"entry": "1790783038",
+			"imask": "2",
+			"modified": "1790783038",
+			"parent": "492aa431-232d-45c8-92b9-be5f64119f1d",
+			"recur": "daily",
+			"rtype": "periodic",
+			"status": "deleted"
+		},
+		"711f8dd7-7150-43f3-bbd9-c9cf45dfa1b2": {
+			"description": "Alpha",
+			"due": "1790640000",
+			"end": "1790783038",
+			"entry": "1790783038",
+			"imask": "1",
+			"modified": "1790783038",
+			"parent": "492aa431-232d-45c8-92b9-be5f64119f1d",
+			"recur": "daily",
+			"rtype": "periodic",
+			"status": "deleted"
+		},
+		"d881171d-2a5d-494a-94f4-460f81487bd9": {
+			"description": "Alpha",
+			"due": "1790812800",
+			"end": "1790783038",
+			"entry": "1790783038",
+			"imask": "3",
+			"modified": "1790783038",
+			"parent": "492aa431-232d-45c8-92b9-be5f64119f1d",
+			"recur": "daily",
+			"rtype": "periodic",
+			"status": "deleted"
+		}
+	},
+	"before": {
+		"0e9eab4f-7ec8-4b97-b904-cc433e719027": {
+			"description": "Alpha",
+			"due": "1790553600",
+			"entry": "1790783038",
+			"imask": "0",
+			"modified": "1790783038",
+			"parent": "492aa431-232d-45c8-92b9-be5f64119f1d",
+			"recur": "daily",
+			"rtype": "periodic",
+			"status": "pending"
+		},
+		"492aa431-232d-45c8-92b9-be5f64119f1d": {
+			"description": "Alpha",
+			"due": "1790553600",
+			"entry": "1790783038",
+			"mask": "----",
+			"modified": "1790783038",
+			"recur": "daily",
+			"rtype": "periodic",
+			"status": "recurring"
+		},
+		"66a76ad6-ac01-42c2-8334-fcc5db667f83": {
+			"description": "Alpha",
+			"due": "1790726400",
+			"entry": "1790783038",
+			"imask": "2",
+			"modified": "1790783038",
+			"parent": "492aa431-232d-45c8-92b9-be5f64119f1d",
+			"recur": "daily",
+			"rtype": "periodic",
+			"status": "pending"
+		},
+		"711f8dd7-7150-43f3-bbd9-c9cf45dfa1b2": {
+			"description": "Alpha",
+			"due": "1790640000",
+			"entry": "1790783038",
+			"imask": "1",
+			"modified": "1790783038",
+			"parent": "492aa431-232d-45c8-92b9-be5f64119f1d",
+			"recur": "daily",
+			"rtype": "periodic",
+			"status": "pending"
+		},
+		"d881171d-2a5d-494a-94f4-460f81487bd9": {
+			"description": "Alpha",
+			"due": "1790812800",
+			"entry": "1790783038",
+			"imask": "3",
+			"modified": "1790783038",
+			"parent": "492aa431-232d-45c8-92b9-be5f64119f1d",
+			"recur": "daily",
+			"rtype": "periodic",
+			"status": "pending"
+		}
+	},
+	"now": 1790783038,
+	"operations": [
+		{
+			"Update": {
+				"old_value": "1790783038",
+				"property": "modified",
+				"timestamp": "2026-09-30T15:43:58.654684Z",
+				"uuid": "492aa431-232d-45c8-92b9-be5f64119f1d",
+				"value": "1790783038"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "----",
+				"property": "mask",
+				"timestamp": "2026-09-30T15:43:58.654685Z",
+				"uuid": "492aa431-232d-45c8-92b9-be5f64119f1d",
+				"value": "X---"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "1790783038",
+				"property": "modified",
+				"timestamp": "2026-09-30T15:43:58.655214Z",
+				"uuid": "0e9eab4f-7ec8-4b97-b904-cc433e719027",
+				"value": "1790783038"
+			}
+		},
+		{
+			"Update": {
+				"old_value": null,
+				"property": "end",
+				"timestamp": "2026-09-30T15:43:58.655215Z",
+				"uuid": "0e9eab4f-7ec8-4b97-b904-cc433e719027",
+				"value": "1790783038"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "pending",
+				"property": "status",
+				"timestamp": "2026-09-30T15:43:58.655220Z",
+				"uuid": "0e9eab4f-7ec8-4b97-b904-cc433e719027",
+				"value": "deleted"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "1790783038",
+				"property": "modified",
+				"timestamp": "2026-09-30T15:43:58.655672Z",
+				"uuid": "492aa431-232d-45c8-92b9-be5f64119f1d",
+				"value": "1790783038"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "X---",
+				"property": "mask",
+				"timestamp": "2026-09-30T15:43:58.655674Z",
+				"uuid": "492aa431-232d-45c8-92b9-be5f64119f1d",
+				"value": "XX--"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "1790783038",
+				"property": "modified",
+				"timestamp": "2026-09-30T15:43:58.656045Z",
+				"uuid": "711f8dd7-7150-43f3-bbd9-c9cf45dfa1b2",
+				"value": "1790783038"
+			}
+		},
+		{
+			"Update": {
+				"old_value": null,
+				"property": "end",
+				"timestamp": "2026-09-30T15:43:58.656045Z",
+				"uuid": "711f8dd7-7150-43f3-bbd9-c9cf45dfa1b2",
+				"value": "1790783038"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "pending",
+				"property": "status",
+				"timestamp": "2026-09-30T15:43:58.656048Z",
+				"uuid": "711f8dd7-7150-43f3-bbd9-c9cf45dfa1b2",
+				"value": "deleted"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "1790783038",
+				"property": "modified",
+				"timestamp": "2026-09-30T15:43:58.656469Z",
+				"uuid": "492aa431-232d-45c8-92b9-be5f64119f1d",
+				"value": "1790783038"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "XX--",
+				"property": "mask",
+				"timestamp": "2026-09-30T15:43:58.656470Z",
+				"uuid": "492aa431-232d-45c8-92b9-be5f64119f1d",
+				"value": "XXX-"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "1790783038",
+				"property": "modified",
+				"timestamp": "2026-09-30T15:43:58.656751Z",
+				"uuid": "66a76ad6-ac01-42c2-8334-fcc5db667f83",
+				"value": "1790783038"
+			}
+		},
+		{
+			"Update": {
+				"old_value": null,
+				"property": "end",
+				"timestamp": "2026-09-30T15:43:58.656751Z",
+				"uuid": "66a76ad6-ac01-42c2-8334-fcc5db667f83",
+				"value": "1790783038"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "pending",
+				"property": "status",
+				"timestamp": "2026-09-30T15:43:58.656753Z",
+				"uuid": "66a76ad6-ac01-42c2-8334-fcc5db667f83",
+				"value": "deleted"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "1790783038",
+				"property": "modified",
+				"timestamp": "2026-09-30T15:43:58.657047Z",
+				"uuid": "492aa431-232d-45c8-92b9-be5f64119f1d",
+				"value": "1790783038"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "XXX-",
+				"property": "mask",
+				"timestamp": "2026-09-30T15:43:58.657047Z",
+				"uuid": "492aa431-232d-45c8-92b9-be5f64119f1d",
+				"value": "XXXX"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "1790783038",
+				"property": "modified",
+				"timestamp": "2026-09-30T15:43:58.657345Z",
+				"uuid": "d881171d-2a5d-494a-94f4-460f81487bd9",
+				"value": "1790783038"
+			}
+		},
+		{
+			"Update": {
+				"old_value": null,
+				"property": "end",
+				"timestamp": "2026-09-30T15:43:58.657345Z",
+				"uuid": "d881171d-2a5d-494a-94f4-460f81487bd9",
+				"value": "1790783038"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "pending",
+				"property": "status",
+				"timestamp": "2026-09-30T15:43:58.657347Z",
+				"uuid": "d881171d-2a5d-494a-94f4-460f81487bd9",
+				"value": "deleted"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "1790783038",
+				"property": "modified",
+				"timestamp": "2026-09-30T15:43:58.657736Z",
+				"uuid": "492aa431-232d-45c8-92b9-be5f64119f1d",
+				"value": "1790783038"
+			}
+		},
+		{
+			"Update": {
+				"old_value": null,
+				"property": "end",
+				"timestamp": "2026-09-30T15:43:58.657736Z",
+				"uuid": "492aa431-232d-45c8-92b9-be5f64119f1d",
+				"value": "1790783038"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "recurring",
+				"property": "status",
+				"timestamp": "2026-09-30T15:43:58.657737Z",
+				"uuid": "492aa431-232d-45c8-92b9-be5f64119f1d",
+				"value": "deleted"
+			}
+		}
+	]
+}

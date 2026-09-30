@@ -1165,7 +1165,7 @@ private func undoName(for action: WriteAction, udaColumns: [UDAColumn]) -> Strin
 	case .create:
 		newTaskTitle
 
-	case let .delete(ids, _):
+	case let .delete(ids, _, _):
 		counted(ids, String(localized: "Delete Task"), String(localized: "Delete \(ids.count) Tasks"))
 
 	case .edit(_, .addAnnotation):
