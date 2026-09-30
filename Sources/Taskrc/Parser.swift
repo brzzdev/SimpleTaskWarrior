@@ -1,5 +1,6 @@
 /// The theme and holiday files TW 3.5 installs in its share directory, the last place it looks for
-/// a relative include. The sandbox can't look there, and they set nothing that changes tasks.
+/// a relative include. The app doesn't know where TW is installed, and they set nothing that
+/// changes tasks.
 private let bundledFiles: Set = [
 	"bubblegum-256.theme",
 	"dark-16.theme",
@@ -107,24 +108,21 @@ struct Parser {
 	var entries: [String: Entry] = [:]
 	let environment: Taskrc.Environment
 	var problems: [Taskrc.Problem] = []
-	let readFile: (_ path: String, _ include: Taskrc.Include?) throws(Taskrc.ReadError) -> Taskrc.File
+	let readFile: (_ path: String) throws(Taskrc.ReadError) -> Taskrc.File
 
 	/// Starts from TW's compiled-in defaults.
 	init(
 		environment: Taskrc.Environment,
-		readFile: @escaping (_ path: String, _ include: Taskrc.Include?) throws(Taskrc.ReadError)
-			-> Taskrc.File,
+		readFile: @escaping (_ path: String) throws(Taskrc.ReadError) -> Taskrc.File,
 	) {
 		self.environment = environment
 		self.readFile = readFile
 		parse(taskwarriorDefaults, file: nil)
 	}
 
-	/// Reads the file at `path`, which `include` names, and parses it, throwing when it can't be
-	/// read.
+	/// Reads the file at `path` and parses it, throwing when it can't be read.
 	mutating func load(
 		_ path: String,
-		for include: Taskrc.Include?,
 		at location: Taskrc.Location?,
 		depth: Int,
 	) throws(Taskrc.ReadError) {
@@ -132,7 +130,7 @@ struct Parser {
 			problems.append(Taskrc.Problem(.includeNestedTooDeeply(path: path), at: location))
 			return
 		}
-		let file = try readFile(path, include)
+		let file = try readFile(path)
 		// libshared's `File::read` drops a UTF-8 BOM from the start of every file it reads.
 		let contents = file.contents.unicodeScalars.first == "\u{FEFF}"
 			? String(file.contents.unicodeScalars.dropFirst())
@@ -153,7 +151,7 @@ struct Parser {
 
 			if let equals = line.firstIndex(of: "=") {
 				let key = String(line[..<equals].trimmed)
-				let expansion = expand(line[line.index(after: equals)...].trimmed)
+				let expansion = environment.expand(line[line.index(after: equals)...].trimmed)
 				if !expansion.unsetVariables.isEmpty {
 					problems.append(
 						Taskrc.Problem(.unsetVariables(expansion.unsetVariables, key: key), at: location),
@@ -168,8 +166,7 @@ struct Parser {
 				problems.append(Taskrc.Problem(.malformedLine(String(line)), at: location))
 				continue
 			}
-			let expansion = expand(line[include.upperBound...].trimmed)
-			let includeLine = file.map { Taskrc.Include(file: $0.path, line: String(line)) }
+			let expansion = environment.expand(line[include.upperBound...].trimmed)
 			let path = expansion.value
 			let isRelative = !path.hasPrefix("/")
 			// TW tries a relative path against the CWD first, which means nothing to a GUI app. The
@@ -179,7 +176,7 @@ struct Parser {
 				guard let resolved else {
 					throw .notFound
 				}
-				try load(resolved, for: includeLine, at: location, depth: depth + 1)
+				try load(resolved, at: location, depth: depth + 1)
 			} catch .notFound where isRelative && bundledFiles.contains(path) {
 				// Only TW's share directory is left to resolve it.
 			} catch {
@@ -187,7 +184,6 @@ struct Parser {
 					Taskrc.Problem(
 						error.kind(path: resolved ?? path, unsetVariables: expansion.unsetVariables),
 						at: location,
-						include: includeLine,
 					),
 				)
 			}
@@ -241,9 +237,11 @@ struct Parser {
 		}
 		return String(output)
 	}
+}
 
+extension Taskrc.Environment {
 	/// `Path::expand`: a leading `~` or `~user`, then every `$NAME`, an unset one becoming empty.
-	private func expand(
+	func expand(
 		_ input: Substring.UnicodeScalarView,
 	) -> (value: String, unsetVariables: [String]) {
 		var output = String.UnicodeScalarView()
@@ -255,9 +253,9 @@ struct Parser {
 			let user = String(input[input.index(after: index) ..< slash])
 			let home =
 				if user.isEmpty {
-					environment.variables["HOME"] ?? ""
+					variables["HOME"] ?? ""
 				} else {
-					environment.homeDirectory(user) ?? "/home/\(user)"
+					homeDirectory(user) ?? "/home/\(user)"
 				}
 			output.append(contentsOf: home.unicodeScalars)
 			index = slash
@@ -277,7 +275,7 @@ struct Parser {
 				continue
 			}
 			let name = String(input[nameStart ..< nameEnd])
-			guard let value = environment.variables[name] else {
+			guard let value = variables[name] else {
 				unsetVariables.append(name)
 				continue
 			}

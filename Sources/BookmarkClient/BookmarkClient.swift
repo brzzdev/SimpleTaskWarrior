@@ -1,23 +1,16 @@
-// Security-scoped bookmarks for Replicas, Taskrcs and the files a Taskrc includes.
+// Bookmarks for Replicas and the Taskrcs paired with them.
 public import ComposableArchitecture
 public import Foundation
 import Synchronization
-public import Taskrc
 
 @DependencyClient
 public struct BookmarkClient: Sendable {
-	/// Yields whenever any window pairs or detaches a Taskrc or keeps a grant. A stale bookmark
-	/// re-saved doesn't count, since it resolves where it did before.
+	/// Yields whenever any window pairs or detaches a Taskrc. A stale bookmark re-saved doesn't
+	/// count, since it resolves where it did before.
 	public var changes: @Sendable () -> AsyncStream<Void> = { .finished }
 	public var create: @Sendable (_ url: URL) throws -> Data
-	/// The kept include grants, by the line each answers. A stale bookmark is re-saved, and one that
-	/// no longer resolves is left out, so its include asks again.
-	public var grants: @Sendable () -> [Taskrc.Include: URL] = { [:] }
-	/// The bookmarked URL. Whatever reads it holds its security scope, as
-	/// `ReplicaClient.tasks` does.
+	/// The bookmarked URL, which follows a folder that moved.
 	public var resolve: @Sendable (_ bookmark: Data) throws -> URL
-	/// Keeps a grant of access to `file` for the `include` line.
-	public var saveGrant: @Sendable (_ file: URL, _ include: Taskrc.Include) throws -> Void
 	/// Pairs `taskrc` with the Replica in `replica`, or detaches the Replica's Taskrc when nil.
 	public var saveTaskrc: @Sendable (_ taskrc: URL?, _ replica: URL) throws -> Void
 	/// The Taskrc paired with the Replica in `replica`, re-saving a stale bookmark. Where the
@@ -37,30 +30,17 @@ extension BookmarkClient: DependencyKey {
 			}
 		},
 		create: { url in
-			try makeBookmark(url)
-		},
-		grants: {
-			update { stored in
-				let grants = stored.grants
-				return grants.reduce(into: [:]) { resolved, grant in
-					resolved[grant.key] = url(of: grant.value) { stored.grants[grant.key] = $0 }
-				}
-			}
+			try url.bookmarkData()
 		},
 		resolve: { bookmark in
 			// A stale bookmark still resolves, to where the folder moved. Re-saving it is part of
 			// handling a lost Replica.
 			try resolved(bookmark).url
 		},
-		saveGrant: { file, include in
-			let bookmark = try makeBookmark(file)
-			update { $0.grants[include] = bookmark }
-			notifyChanges()
-		},
 		saveTaskrc: { taskrc, replica in
 			let pairing = try taskrc.map { try Pairing(
-				replica: makeBookmark(replica),
-				taskrc: makeBookmark($0),
+				replica: replica.bookmarkData(),
+				taskrc: $0.bookmarkData(),
 			) }
 			update { stored in
 				switch (pairingIndex(of: replica, in: &stored), pairing) {
@@ -106,23 +86,7 @@ extension DependencyValues {
 /// Every live `changes` stream, by an id its termination removes it with.
 private let changeContinuations = Mutex<[UUID: AsyncStream<Void>.Continuation]>([:])
 
-/// A security-scoped bookmark on `url`, which it can make only inside the scope of a URL from a
-/// file panel or another bookmark.
-private func makeBookmark(_ url: URL) throws -> Data {
-	let isAccessing = url.startAccessingSecurityScopedResource()
-	defer {
-		if isAccessing {
-			url.stopAccessingSecurityScopedResource()
-		}
-	}
-	return try url.bookmarkData(
-		options: .withSecurityScope,
-		includingResourceValuesForKeys: nil,
-		relativeTo: nil,
-	)
-}
-
-/// Tells every `changes` stream that a window saved a pairing or grant.
+/// Tells every `changes` stream that a window saved a pairing.
 private func notifyChanges() {
 	changeContinuations.withLock { continuations in
 		for continuation in continuations.values {
@@ -156,18 +120,12 @@ public func standardizedFolder(_ url: URL) -> URL {
 /// The URL `bookmark` resolves to, and whether the bookmark is stale and wants saving again.
 private func resolved(_ bookmark: Data) throws -> (url: URL, isStale: Bool) {
 	var isStale = false
-	let url = try URL(
-		resolvingBookmarkData: bookmark,
-		options: .withSecurityScope,
-		relativeTo: nil,
-		bookmarkDataIsStale: &isStale,
-	)
+	let url = try URL(resolvingBookmarkData: bookmark, bookmarkDataIsStale: &isStale)
 	return (url, isStale)
 }
 
 /// The bookmarks the app keeps.
 private struct Stored: Codable, Equatable {
-	var grants: [Taskrc.Include: Data] = [:]
 	var pairings: [Pairing] = []
 }
 
@@ -196,7 +154,7 @@ private func url(of bookmark: Data, resave: (Data) -> Void) -> URL? {
 	guard let (url, isStale) = try? resolved(bookmark) else {
 		return nil
 	}
-	if isStale, let fresh = try? makeBookmark(url) {
+	if isStale, let fresh = try? url.bookmarkData() {
 		resave(fresh)
 	}
 	return url

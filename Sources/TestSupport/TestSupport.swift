@@ -9,7 +9,7 @@ extension Taskrc {
 			.init(
 				path: url.path(percentEncoded: false),
 				environment: .fixture,
-			) { path, _ throws(Self.ReadError) in
+			) { path throws(Self.ReadError) in
 				try Self.File(reading: URL(filePath: path))
 			}
 	}

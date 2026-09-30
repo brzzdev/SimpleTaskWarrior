@@ -111,30 +111,16 @@ final class ReplicaContentController: NSViewController {
 			)
 		}
 		if let problem = store.taskrc?.problem {
-			let remedy: NSButton? =
-				switch store.taskrcRemedy {
-				case .grant:
-					NSButton(
-						title: String(localized: "Grant Access…"),
-						target: target,
-						action: #selector(Self.grantAccessButtonClicked(_:)),
-					)
-
-				case .taskrc:
-					NSButton(
-						title: String(localized: "Choose Taskrc…"),
-						target: target,
-						action: #selector(Self.chooseTaskrcButtonClicked(_:)),
-					)
-
-				case nil:
-					nil
-				}
+			let chooseTaskrc = NSButton(
+				title: String(localized: "Choose Taskrc…"),
+				target: target,
+				action: #selector(Self.chooseTaskrcButtonClicked(_:)),
+			)
 			banners.append(
 				BannerView(
 					symbolName: "exclamationmark.triangle.fill",
 					message: message(for: problem),
-					actions: remedy.map { [$0] } ?? [],
+					actions: store.hasUnreachableFile ? [chooseTaskrc] : [],
 				),
 			)
 		}
@@ -150,7 +136,7 @@ final class ReplicaContentController: NSViewController {
 					message: String(
 						localized: "SimpleTaskWarrior couldn't keep access to the file: \(failure.message)",
 					),
-					actions: failure.retry == nil ? [] : [tryAgain],
+					actions: failure.canRetry ? [tryAgain] : [],
 				),
 			)
 		}
@@ -169,11 +155,6 @@ final class ReplicaContentController: NSViewController {
 	@objc
 	func chooseTaskrcButtonClicked(_: Any?) {
 		store.send(.chooseTaskrcButtonTapped)
-	}
-
-	@objc
-	func grantAccessButtonClicked(_: Any?) {
-		store.send(.grantAccessButtonTapped)
 	}
 
 	@objc

@@ -23,7 +23,6 @@ struct ReplicaFeature {
 		var creatingTask: Models.Task.ID?
 		var directory: URL?
 		var failure: String?
-		var fileImporter: FileImporter?
 		/// Set as New Task selects the task it created, for the inspector to put the cursor in its
 		/// description, until the selection changes.
 		var focusesDescription = false
@@ -38,6 +37,7 @@ struct ReplicaFeature {
 		/// Set once the Replica's tasks first arrive, by which point `apply` can reach it.
 		var isReplicaOpen = false
 		var isTaskrcHintPresented = false
+		var isTaskrcPanelPresented = false
 		/// The tasks an inspector edit, of one task or several, may move out of the table, which the
 		/// table keeps
 		/// until the selection changes.
@@ -67,7 +67,7 @@ struct ReplicaFeature {
 		/// Every task in the Replica as last read, which the blocked rule and Urgency read.
 		var storedTasks: [StoredTask] = []
 		var taskrc: TaskrcClient.Loaded?
-		/// Why the last Taskrc or grant the user chose couldn't be kept.
+		/// Why the last Taskrc the user chose couldn't be kept.
 		var taskrcSaveFailure: TaskrcSaveFailure?
 		/// The running Taskrc's UDAs, which the table offers as columns.
 		var udaColumns = UDAColumn.all(in: .defaults)
@@ -86,14 +86,6 @@ struct ReplicaFeature {
 		/// and Context a new task takes, has loaded, and while nothing holds writes back.
 		var canCreateTask: Bool {
 			isReplicaOpen && failure == nil && taskrc != nil && canWrite
-		}
-
-		/// Whether Grant Access… can fix the Taskrc's problem.
-		var canGrantAccess: Bool {
-			if case .grant = taskrcRemedy {
-				return true
-			}
-			return false
 		}
 
 		/// Whether Redo applies: while nothing has written since the undo, and nothing holds writes back.
@@ -147,6 +139,12 @@ struct ReplicaFeature {
 			taskrc?.url != nil
 		}
 
+		/// Whether the Taskrc's problem is a file it names that's missing or can't be read, the Taskrc
+		/// itself or an include. Choosing another Taskrc is the one remedy the app offers.
+		var hasUnreachableFile: Bool {
+			taskrc?.problem?.kind.isUnreachableFile ?? false
+		}
+
 		/// The row the inspector shows, whether or not the table does.
 		var inspectedRow: TaskRow? {
 			inspectedTask.flatMap { id in allRows.first { $0.id == id } }
@@ -155,6 +153,12 @@ struct ReplicaFeature {
 		/// Whether Start/Stop stops, which it does when every selected task is active.
 		var isStopping: Bool {
 			isStopping(selectedTasks())
+		}
+
+		/// Whether the window's Taskrc is paired with its Replica, which Use Taskwarrior Defaults
+		/// detaches.
+		var isTaskrcPaired: Bool {
+			taskrc?.isPaired ?? false
 		}
 
 		/// The Taskrc's `data.location`, where it names a folder other than the window's Replica.
@@ -189,28 +193,6 @@ struct ReplicaFeature {
 
 		var sidebar: Sidebar {
 			Sidebar(rows: allRows, selection: sidebarSelection)
-		}
-
-		/// The file panel that fixes the Taskrc's problem: a grant for an include the app can't read,
-		/// or another Taskrc in place of one it can't.
-		var taskrcRemedy: FileImporter? {
-			guard let problem = taskrc?.problem else {
-				return nil
-			}
-			switch problem.kind {
-			case let .notFound(path, variables), let .unreadable(path, variables):
-				guard let include = problem.include else {
-					return .taskrc
-				}
-				// A grant can't make a missing file exist, only reach one an unset variable moved.
-				if case .notFound = problem.kind, variables.isEmpty {
-					return nil
-				}
-				return .grant(include, file: URL(filePath: path))
-
-			default:
-				return nil
-			}
 		}
 
 		/// Whether a write can start now, rather than queue: not while one is in progress, nor while a
@@ -304,8 +286,9 @@ struct ReplicaFeature {
 
 	struct TaskrcSaveFailure: Equatable {
 		var message: String
-		/// The panel that chose the file, which Try Again… opens again.
-		var retry: FileImporter?
+		/// Whether Try Again… can open the panel that chose the file: not after a detach, which chose
+		/// none.
+		var canRetry: Bool
 	}
 
 	/// A write, undo or redo that failed, having changed nothing.
@@ -335,13 +318,6 @@ struct ReplicaFeature {
 		case saving
 	}
 
-	/// What a file panel on screen is choosing.
-	enum FileImporter: Equatable {
-		/// The file an `include` line names, which the app couldn't read at `file`.
-		case grant(Taskrc.Include, file: URL)
-		case taskrc
-	}
-
 	enum Action: BindableAction {
 		case annotationDeleteButtonTapped(Models.Task.ID, entry: Date)
 		/// Return in the inspector's new-annotation field, or clicking away from it.
@@ -357,8 +333,6 @@ struct ReplicaFeature {
 		case doneButtonTapped
 		case dontRepairChainButtonTapped
 		case fetchRequested
-		case fileChosen(URL, for: FileImporter)
-		case grantAccessButtonTapped
 		/// Return, Tab or clicking away from an inspector field, or choosing from its menu, for the tasks
 		/// it showed as you began typing.
 		case inspectorFieldSubmitted([Models.Task.ID], TaskEdit)
@@ -383,6 +357,8 @@ struct ReplicaFeature {
 		case startStopButtonTapped
 		/// A tag's remove button in the inspector, or the tag chosen from Remove Tag.
 		case tagRemoveButtonTapped([Models.Task.ID], tag: String)
+		/// A Taskrc chosen in the panel Choose Taskrc… or Try Again… opened.
+		case taskrcChosen(URL)
 		case taskrcHintCloseButtonTapped
 		case taskrcLoaded(TaskrcClient.Loaded)
 		case taskrcSaveFailed(TaskrcSaveFailure)
@@ -448,7 +424,7 @@ struct ReplicaFeature {
 				return finishWrite(&state)
 
 			case .chooseTaskrcButtonTapped:
-				state.fileImporter = .taskrc
+				state.isTaskrcPanelPresented = true
 				return .none
 
 			case .deleteButtonTapped:
@@ -462,7 +438,7 @@ struct ReplicaFeature {
 
 			case let .directoryResolved(directory):
 				state.directory = directory
-				// Another window pairing, detaching or granting changes this window's Taskrc too. Subscribed
+				// Another window pairing or detaching changes this window's Taskrc too. Subscribed
 				// here rather than in the effect, so the subscription exists before the first load reads the
 				// pairing and a change between the two can't be missed.
 				let changes = bookmarkClient.changes()
@@ -507,31 +483,6 @@ struct ReplicaFeature {
 						}
 					},
 				)
-
-			case let .fileChosen(file, .grant(include, resolved)):
-				state.fileImporter = nil
-				state.taskrcSaveFailure = nil
-				return reloadTaskrc(
-					for: state,
-					retrying: .grant(include, file: resolved),
-				) { [bookmarkClient] _ in
-					try bookmarkClient.saveGrant(file, include)
-				}
-
-			case let .fileChosen(file, .taskrc):
-				state.fileImporter = nil
-				state.isTaskrcHintPresented = false
-				state.taskrcSaveFailure = nil
-				return reloadTaskrc(
-					for: state,
-					retrying: .taskrc,
-				) { [bookmarkClient] directory in
-					try bookmarkClient.saveTaskrc(file, directory)
-				}
-
-			case .grantAccessButtonTapped:
-				state.fileImporter = state.taskrcRemedy
-				return .none
 
 			case let .inspectorFieldSubmitted(ids, taskEdit):
 				return edit(ids, taskEdit, &state)
@@ -631,6 +582,17 @@ struct ReplicaFeature {
 				// Every task asked for, even one without the tag now: a write queued ahead may add it.
 				return edit(ids, .removeTag(tag), &state)
 
+			case let .taskrcChosen(file):
+				state.isTaskrcPanelPresented = false
+				state.isTaskrcHintPresented = false
+				state.taskrcSaveFailure = nil
+				return reloadTaskrc(
+					for: state,
+					canRetry: true,
+				) { [bookmarkClient] directory in
+					try bookmarkClient.saveTaskrc(file, directory)
+				}
+
 			case .taskrcHintCloseButtonTapped:
 				state.isTaskrcHintPresented = false
 				return .none
@@ -660,7 +622,7 @@ struct ReplicaFeature {
 				return .none
 
 			case .tryAgainButtonTapped:
-				state.fileImporter = state.taskrcSaveFailure?.retry
+				state.isTaskrcPanelPresented = state.taskrcSaveFailure?.canRetry ?? false
 				return .none
 
 			case .undoButtonTapped:
@@ -689,7 +651,7 @@ struct ReplicaFeature {
 				// Detaching makes no bookmark, so it has nothing to retry.
 				return reloadTaskrc(
 					for: state,
-					retrying: nil,
+					canRetry: false,
 				) { [bookmarkClient] directory in
 					try bookmarkClient.saveTaskrc(nil, directory)
 				}
@@ -725,25 +687,15 @@ struct ReplicaFeature {
 
 	init() {}
 
-	/// Loads the Taskrc paired with the window's Replica, and keeps it current, replacing any load
-	/// already running. Until the Taskrc parses, the window keeps the Taskrc it runs on now.
+	/// Loads the Taskrc paired with the window's Replica, or else the CLI's default, and keeps it
+	/// current, replacing any load already running. Until the Taskrc parses, the window keeps the
+	/// Taskrc it runs on now.
 	private func loadTaskrc(for state: State) -> Effect<Action> {
 		guard let directory = state.directory else {
 			return .none
 		}
 		return .run { [bookmarkClient, lastGood = state.runningTaskrc, taskrcClient] send in
-			// So an include in the Replica folder reads without a grant of its own.
-			let isAccessing = directory.startAccessingSecurityScopedResource()
-			defer {
-				if isAccessing {
-					directory.stopAccessingSecurityScopedResource()
-				}
-			}
-			let taskrcs = taskrcClient.load(
-				{ bookmarkClient.taskrc(directory) },
-				{ bookmarkClient.grants() },
-				lastGood,
-			)
+			let taskrcs = taskrcClient.load({ bookmarkClient.taskrc(directory) }, lastGood)
 			for await taskrc in taskrcs {
 				await send(.taskrcLoaded(taskrc))
 			}
@@ -1129,10 +1081,10 @@ struct ReplicaFeature {
 	}
 
 	/// Runs `save` with the Replica's folder, then loads its Taskrc again. A failed save is
-	/// reported with the panel that would choose the file again.
+	/// reported, offering Try Again… where `canRetry`.
 	private func reloadTaskrc(
 		for state: State,
-		retrying retry: FileImporter?,
+		canRetry: Bool,
 		after save: @escaping @Sendable (_ directory: URL) throws -> Void,
 	) -> Effect<Action> {
 		guard let directory = state.directory else {
@@ -1145,7 +1097,7 @@ struct ReplicaFeature {
 				try save(directory)
 			} catch: { error, send in
 				await send(
-					.taskrcSaveFailed(TaskrcSaveFailure(message: error.localizedDescription, retry: retry)),
+					.taskrcSaveFailed(TaskrcSaveFailure(message: error.localizedDescription, canRetry: canRetry)),
 				)
 			},
 			loadTaskrc(for: state),

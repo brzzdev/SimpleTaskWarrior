@@ -56,7 +56,6 @@ func mainMenu(openRecent openRecentDelegate: any NSMenuDelegate) -> NSMenu {
 			key: "o",
 			modifiers: [.command, .option],
 		),
-		menuItem("Grant Access…", #selector(ReplicaWindowController.grantAccess(_:))),
 		menuItem(
 			"Use Taskwarrior Defaults",
 			#selector(ReplicaWindowController.useTaskwarriorDefaults(_:)),

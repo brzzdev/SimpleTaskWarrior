@@ -50,7 +50,7 @@ private let now = Date(timeIntervalSince1970: 1_790_000_000)
 
 /// A Taskrc defining a UDA, attached from a file so loading it doesn't offer the Taskrc hint.
 private let sizedTaskrc: TaskrcClient.Loaded = {
-	let taskrc = Taskrc(path: taskrcFile.path(), environment: .fixture) { path, _ in
+	let taskrc = Taskrc(path: taskrcFile.path(), environment: .fixture) { path in
 		Taskrc.File(contents: "uda.size.type=string\nuda.size.values=S,M,L", realPath: path)
 	}
 	return TaskrcClient.Loaded(taskrc: taskrc, url: taskrcFile)
