@@ -30,6 +30,9 @@ swiftformat_url := "https://raw.githubusercontent.com/brzzdev/Configs/main/Confi
 debug_product := scheme + " Debug"
 notary_profile := "SimpleTaskWarrior"
 release_dir := ".release"
+# The app `archive` exports, which `release` and `publish` notarize.
+release_app := release_dir / "export" / scheme + ".app"
+release_zip := release_dir / scheme + ".zip"
 # The one target `Engine/rust-toolchain.toml` installs.
 engine_target := "aarch64-apple-darwin"
 # The Brewfile's rustup is keg-only, so it is off PATH unless the shell put it
@@ -389,10 +392,9 @@ run: build
 notary-setup:
 	xcrun notarytool store-credentials {{ notary_profile }} --team-id "${TUIST_DEVELOPMENT_TEAM:?set TUIST_DEVELOPMENT_TEAM in your shell profile}"
 
-# Archives the app and exports it with Developer ID to `{{ release_dir }}/export`, for `release` and
-# `publish`. The build number counts the commits reaching HEAD, which only grows while the default
-# branch is never rewritten; Sparkle orders releases by it. `version` stamps the marketing version,
-# which otherwise keeps the manifest's development default.
+# Archives the app and exports it with Developer ID to `release_app`. The build number counts the
+# commits reaching HEAD, which only grows while the default branch is never rewritten; Sparkle orders
+# releases by it. `version` stamps the marketing version over the manifest's development default.
 [private]
 archive version="": ensure-generated
 	#!/usr/bin/env bash
@@ -435,7 +437,7 @@ archive version="": ensure-generated
 	PLIST
 	xcodebuild -exportArchive \
 		-archivePath "$archive" \
-		-exportPath "{{ release_dir }}/export" \
+		-exportPath "{{ parent_directory(release_app) }}" \
 		-exportOptionsPlist "$options" | xcbeautify
 
 # Run `just notary-setup` once first. By default the running app is quit and the
@@ -447,8 +449,8 @@ release quit_and_launch="true": archive
 	#!/usr/bin/env bash
 	set -euo pipefail
 
-	app="{{ release_dir }}/export/{{ scheme }}.app"
-	zip="{{ release_dir }}/{{ scheme }}.zip"
+	app="{{ release_app }}"
+	zip="{{ release_zip }}"
 	dest="/Applications/{{ scheme }}.app"
 
 	echo "==> Notarizing (waiting for Apple — this can take a few minutes)"
@@ -476,26 +478,16 @@ release quit_and_launch="true": archive
 
 	echo "✅ Released {{ scheme }} → $dest"
 
-# Run `just notary-setup` once first, then tag HEAD `v<version>` and push the tag. Never installs,
-# quits or launches the app. The zip is what Sparkle updates from; the DMG is for downloading by
-# hand.
-# Archive, notarize, and publish a zip and DMG as the GitHub release `v<version>`
-publish version:
+# Checked before the minutes of archiving and notarizing, rather than left to
+# `gh release create --verify-tag` at the end.
+[private]
+check-tag version:
 	#!/usr/bin/env bash
 	set -euo pipefail
 
-	version="{{ version }}"
-	tag="v$version"
-	team="${TUIST_DEVELOPMENT_TEAM:?set TUIST_DEVELOPMENT_TEAM in your shell profile}"
-	app="{{ release_dir }}/export/{{ scheme }}.app"
-	dmg="{{ release_dir }}/{{ scheme }}.dmg"
-	staging="{{ release_dir }}/dmg"
-	zip="{{ release_dir }}/{{ scheme }}.zip"
-
-	# Checked before the minutes of archiving and notarizing, rather than left to
-	# `gh release create --verify-tag` at the end.
-	if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-		echo "the version is X.Y.Z, not $version" >&2
+	tag="v{{ version }}"
+	if [[ ! "{{ version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+		echo "the version is X.Y.Z, not {{ version }}" >&2
 		exit 1
 	fi
 	if [ -n "$(git status --porcelain)" ]; then
@@ -511,23 +503,27 @@ publish version:
 		exit 1
 	fi
 
-	# A keychain can hold Developer ID certificates for several teams, which the
-	# name alone doesn't tell apart.
-	identity="$(security find-identity -v -p codesigning | awk -v team="($team)\"" '
-		/"Developer ID Application: / && index($0, team) { print $2; exit }
-	')"
-	if [ -z "$identity" ]; then
-		echo "no Developer ID Application identity for team $team" >&2
-		exit 1
-	fi
+# Run `just notary-setup` once first, then tag HEAD `v<version>` and push the tag. Never installs,
+# quits or launches the app. The zip is what Sparkle updates from; the DMG is for downloading by
+# hand.
+# Archive, notarize, and publish a zip and DMG as the GitHub release `v<version>`
+publish version: (check-tag version) (archive version)
+	#!/usr/bin/env bash
+	set -euo pipefail
 
-	just archive "$version"
+	tag="v{{ version }}"
+	app="{{ release_app }}"
+	dmg="{{ release_dir }}/{{ scheme }}.dmg"
+	staging="{{ release_dir }}/dmg"
+	zip="{{ release_zip }}"
 
 	echo "==> Building the DMG"
 	mkdir "$staging"
 	ditto "$app" "$staging/{{ scheme }}.app"
 	ln -s /Applications "$staging/Applications"
 	diskutil image create from --volumeName {{ scheme }} "$staging" "$dmg"
+	# Signed by the certificate the export chose for the app.
+	identity="$(codesign -dvv "$app" 2>&1 | sed -n 's/^Authority=//p' | head -1)"
 	codesign --sign "$identity" --timestamp "$dmg"
 
 	# One submission covers the DMG and the app inside it, which is the exported

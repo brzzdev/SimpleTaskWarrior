@@ -14,8 +14,8 @@ let fileAccessReason =
 let baseSettings: SettingsDictionary = [
 	"ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon",
 	"ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS": "YES",
-	// With `MARKETING_VERSION`, the version a development build carries. `just archive` overrides
-	// the build number, and `just publish` the version, from the release's tag.
+	// Development defaults, with `MARKETING_VERSION`: `just archive` stamps the build number, and
+	// `just publish` the version from the release's tag.
 	"CURRENT_PROJECT_VERSION": "0",
 	"ENABLE_HARDENED_RUNTIME": "YES",
 	// Off so the SwiftLint build phase can read the whole source tree. This is a
