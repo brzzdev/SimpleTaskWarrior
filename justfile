@@ -22,8 +22,8 @@ destination := "platform=macOS"
 # `archive` deliberately does not pin it — a notarised build has no business
 # reusing an incremental dev cache. It shares only the package checkouts.
 derived_data := ".build/xcode"
-# Where every build checks out the packages, `archive` included, so `publish` runs the
-# `generate_appcast` of the Sparkle version `.package.resolved` pins.
+# Where the builds above check out the packages, and `archive` too, by name, so
+# `publish` runs the `generate_appcast` of the Sparkle `.package.resolved` pins.
 source_packages := derived_data / "SourcePackages"
 sparkle_bin := source_packages / "artifacts/sparkle/Sparkle/bin"
 releases_url := "https://github.com/brzzdev/SimpleTaskWarrior/releases"
