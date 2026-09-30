@@ -103,7 +103,7 @@ final class ReplicaContentController: NSViewController {
 			case .openElsewhere:
 				unavailableView.title = String(localized: "Replica Open in Another Window")
 				unavailableView.message = path
-					.map { String(localized: "It moved to \($0), which another window has open.") }
+					.map { String(localized: "Another window has \($0) open.") }
 				unavailableView.actions = [closeWindowButton]
 
 			case .replaced:

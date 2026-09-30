@@ -128,16 +128,28 @@ final class ReplicaClientTests {
 	}
 
 	@Test
-	func tasksLeavesAMovedReplicaToTheWindowAlreadyOnItsFolder() async throws {
+	func tasksLeavesAReplicaToTheWindowAlreadyOnIt() async throws {
 		_ = try createReplica()
-		var open = replicaClient.tasks(directory, nil).makeAsyncIterator()
-		_ = try await open.next()
-		let identity = try #require(replicaClient.identity(directory))
-		var moved = replicaClient.tasks(directory, identity).makeAsyncIterator()
+		var recovered = replicaClient.tasks(directory, nil).makeAsyncIterator()
+		_ = try await recovered.next()
+		// As ⌘O would, finishing its open after a moved window recovered the Replica.
+		var opened = replicaClient.tasks(directory, nil).makeAsyncIterator()
 
 		await #expect(throws: ReplicaError.openElsewhere) {
-			_ = try await moved.next()
+			_ = try await opened.next()
 		}
+	}
+
+	@Test
+	func tasksReopensAReplicaWhoseWindowJustClosed() async throws {
+		_ = try createReplica()
+		var closing = Optional(replicaClient.tasks(directory, nil).makeAsyncIterator())
+		_ = try await closing?.next()
+		// Its stream ends at once, though it lets go of the Replica only as its poll returns.
+		closing = nil
+		var reopened = replicaClient.tasks(directory, nil).makeAsyncIterator()
+
+		#expect(try await reopened.next()?.get().tasks.isEmpty == true)
 	}
 
 	@Test

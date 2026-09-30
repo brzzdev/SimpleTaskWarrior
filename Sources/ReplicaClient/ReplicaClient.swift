@@ -28,8 +28,8 @@ public struct ReplicaClient: Sendable {
 	/// and the first to succeed after one yields the tasks whether or not they changed. Throws
 	/// `lost` and closes the Replica once its database is no longer the one opened. Where `expected`
 	/// is given, opens only that database, throwing `lost(expected)` where another is there, as for
-	/// a Replica that moved, or `openElsewhere` where another window has its new folder open.
-	/// Ending iteration closes the Replica once any open or read in flight returns.
+	/// a Replica that moved. Throws `openElsewhere` where another window's stream, not yet ended, has
+	/// the folder open. Ending iteration closes the Replica once any open or read in flight returns.
 	public var tasks: @Sendable (_ directory: URL, _ expected: ReplicaIdentity?)
 		-> AsyncThrowingStream<Result<TaskSnapshot, ReplicaError>, any Error> = { _, _ in .finished() }
 
@@ -126,7 +126,7 @@ public enum ReplicaError: Equatable, LocalizedError {
 	case notAReplica
 	/// No window has the Replica open.
 	case notOpen
-	/// A moved Replica, which another window opened at its new folder first.
+	/// Another window has the Replica open.
 	case openElsewhere
 	/// An undo failed, and the Replica couldn't be read to tell whether its reversal landed first.
 	/// Undoing again could revert the Undo point before it.
@@ -163,7 +163,20 @@ public enum ReplicaError: Equatable, LocalizedError {
 }
 
 /// Each window's Replica, by the folder its `tasks` stream opened, which `apply` writes through.
-private let openReplicas = Mutex<[URL: Replica]>([:])
+private let openReplicas = Mutex<[URL: Registration]>([:])
+
+/// A window's `tasks` stream's hold on its Replica.
+private struct Registration {
+	var replica: Replica
+	/// Set as the stream ends, when its window closes, before it lets go of the Replica.
+	var stream: StreamEnd
+}
+
+/// Whether a `tasks` stream has ended. Its window may have closed while a read holds its poll, so
+/// a window reopened on the folder takes the Replica over rather than waiting on it.
+private final class StreamEnd: Sendable {
+	let hasEnded = Atomic(false)
+}
 
 /// How often a window checks whether anything has committed to its Replica.
 private let pollInterval = Duration.milliseconds(500)
@@ -181,6 +194,7 @@ extension ReplicaClient: DependencyKey {
 		},
 		tasks: { directory, expected in
 			AsyncThrowingStream { continuation in
+				let end = StreamEnd()
 				let polling = _Concurrency.Task {
 					do {
 						let replica = try await Replica.open(directory: directory, expected: expected)
@@ -191,13 +205,13 @@ extension ReplicaClient: DependencyKey {
 							guard !_Concurrency.Task.isCancelled else {
 								return false
 							}
-							// A moved Replica that another window opened at its new folder first stays that
-							// window's, so no two actors write to it. Only then: a window closed and reopened on
-							// a folder can find its old one still registered, as it's let go of on the way out.
-							if expected != nil, replicas[directory] != nil {
+							// A Replica shows in one window, whichever registered first, as when a moved one's
+							// window recovers it at a folder another has just opened, so no two actors write to
+							// it. A window closing gives way at once.
+							if let owner = replicas[directory], !owner.stream.hasEnded.load(ordering: .acquiring) {
 								throw .openElsewhere
 							}
-							replicas[directory] = replica
+							replicas[directory] = Registration(replica: replica, stream: end)
 							return true
 						}
 						guard isRegistered else {
@@ -206,7 +220,7 @@ extension ReplicaClient: DependencyKey {
 						defer {
 							// A window reopened on the folder may have registered its own by now.
 							openReplicas.withLock { replicas in
-								if replicas[directory] === replica {
+								if replicas[directory]?.stream === end {
 									replicas[directory] = nil
 								}
 							}
@@ -225,7 +239,10 @@ extension ReplicaClient: DependencyKey {
 						continuation.finish(throwing: error)
 					}
 				}
-				continuation.onTermination = { _ in polling.cancel() }
+				continuation.onTermination = { _ in
+					end.hasEnded.store(true, ordering: .releasing)
+					polling.cancel()
+				}
 			}
 		},
 		undo: { directory in
@@ -252,7 +269,7 @@ private func replicaErrors<Value>(
 
 /// The Replica a window's `tasks` stream has open in `directory`.
 private func openReplica(_ directory: URL) throws(ReplicaError) -> Replica {
-	guard let replica = openReplicas.withLock({ $0[directory] }) else {
+	guard let replica = openReplicas.withLock({ $0[directory]?.replica }) else {
 		throw .notOpen
 	}
 	return replica

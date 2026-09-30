@@ -354,7 +354,7 @@ struct ReplicaFeature {
 		case cantOpen(String)
 		/// The bookmark no longer resolves, or nothing's where it does.
 		case notFound
-		/// The Replica moved to a folder another window already has open.
+		/// Another window has the Replica open, as when it moved to a folder one had just opened.
 		case openElsewhere
 		/// A Replica other than the one the window had open is where its bookmark resolves, now its
 		/// `directory`, which Open Replacement opens.
@@ -437,7 +437,7 @@ struct ReplicaFeature {
 		case replicaLost(ReplicaIdentity)
 		/// Where the window's bookmark resolves, there's no Replica.
 		case replicaNotFound
-		/// The Replica lost moved to a folder another window already has open.
+		/// Another window has the Replica open.
 		case replicaOpenElsewhere
 		/// Another Replica is where the lost one's bookmark resolves, in the folder given.
 		case replicaReplaced(URL)
