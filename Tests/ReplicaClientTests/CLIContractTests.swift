@@ -64,14 +64,18 @@ final class CLIContractTests: Sendable {
 	}
 
 	@Test
-	func anAppWriteWaitsOutATaskImportHoldingTheLock() async throws {
+	func anAppWriteCommitsBetweenATaskImportsCommits() async throws {
 		let uuid = try addTask("Seed")
 		var tasks = replicaClient.tasks(replica, nil).makeAsyncIterator()
 		_ = try await tasks.next()
 		// `task` holds the lock only while it commits, never at a prompt or in a hook, so a long
 		// import is how it holds it again and again. It commits each task on its own, and this many
-		// keep it going for seconds.
+		// keep it going for seconds, well past the up to 500 ms the app takes to see it start.
+		// It can't hold the lock past the 5 s the app waits, so the app's busy failure is out of
+		// the contract's reach.
 		let imported = (1 ... 500).map { ["description": "Imported \($0)"] }
+		// The seed and the import.
+		let total = imported.count + 1
 		let file = directory.appending(path: "import.json")
 		try JSONEncoder().encode(imported).write(to: file)
 		async let importing = task("import", file.path(percentEncoded: false))
@@ -90,11 +94,11 @@ final class CLIContractTests: Sendable {
 			as: "Set Project",
 		)
 
-		// Committed between the import's transactions, not after them.
-		#expect(written.tasks.count < imported.count + 1)
+		// Committed between the import's commits, not after them.
+		#expect(written.tasks.count < total)
 		// Nor did the app's lock fail an import commit.
 		_ = try await importing
-		#expect(try task("count") == "\(imported.count + 1)")
+		#expect(try task("count") == "\(total)")
 		#expect(try export(uuid).project == "Home")
 	}
 
