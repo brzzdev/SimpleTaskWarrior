@@ -1029,7 +1029,7 @@ struct ReplicaFeature {
 
 	/// Starts `edit` of the tasks `ids`, taking the Series of each Recurrence instance among them as
 	/// `recurrence.confirmation` says, or first asking. A Series the edit would leave as it is asks
-	/// nothing, since the inspector sends a value a task already shows.
+	/// nothing, since the inspector sends a value a task already shows, unless one can't be planned.
 	private func editAskingAboutSeries(
 		_ ids: [Models.Task.ID],
 		_ edit: TaskEdit,
@@ -1048,9 +1048,9 @@ struct ReplicaFeature {
 			let changed = changedSeries(plan.applied(to: tasks), tasks: tasks)
 			choices = every.filter { changed.contains($0.id) }
 		} catch {
-			// Where only a Series can't take the edit, as a sibling can't depend on itself, each is
-			// still offered, and its write reports why. Where the tasks themselves can't, the write
-			// reports why without asking.
+			// Where the tasks can take the edit but a Series can't, as when a sibling would depend on
+			// itself, every Series is offered, and taking one reports why. Where the tasks can't, the
+			// write reports why without asking.
 			let plansAlone = (try? planner.plan(.edit(ids, edit), tasks: tasks, at: now)) != nil
 			choices = plansAlone ? every : []
 		}

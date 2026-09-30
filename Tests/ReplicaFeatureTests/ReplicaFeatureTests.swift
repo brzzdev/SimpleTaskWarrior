@@ -724,6 +724,35 @@ struct ReplicaFeatureTests {
 		}
 	}
 
+	/// Taking the Series reports why it can't, where `task` would refuse the whole command.
+	@Test
+	func editOfAnInstanceTheSeriesCantTakeFailsWhereTheTaskrcTakesIt() async throws {
+		let plants = series(0, "Water plants", instances: [1, 2])
+		let taskrc = Taskrc(path: taskrcFile.path(), environment: .fixture) { path in
+			Taskrc.File(contents: "recurrence.confirmation=yes", realPath: path)
+		}
+		var initialState = try loadedState(plants.instances, selection: [UUID(1)])
+		initialState.storedTasks.append(plants.template)
+		initialState.taskrc = TaskrcClient.Loaded(taskrc: taskrc, url: taskrcFile)
+		let store = TestStore(initialState: initialState) {
+			ReplicaFeature()
+		} withDependencies: {
+			$0.continuousClock = TestClock()
+			$0.date.now = now
+			$0.timeZone = .gmt
+		}
+		store.exhaustivity = .off(showSkippedAssertions: false)
+
+		await store.send(.inspectorFieldSubmitted([UUID(1)], .addDependency(UUID(2))))
+		await store.receive(\.writeFailed) {
+			$0.writeProgress = .failed(ReplicaFeature.WriteFailure(
+				reason: WritePlanError.selfDependency(UUID(2)).localizedDescription,
+				retry: nil,
+				title: "Couldn't Add Dependency",
+			))
+		}
+	}
+
 	/// Asked as it starts, so an edit queued behind a running write asks once that write ends, and
 	/// the edits queued behind the question wait for the answer.
 	@Test
