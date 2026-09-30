@@ -94,9 +94,19 @@ struct ReplicaFeature {
 			isReplicaOpen && unavailable == nil && taskrc != nil && canWrite
 		}
 
-		/// Whether Locate… applies: while the window shows no Replica, unless another window has it.
+		/// Whether Locate… applies: while the window shows no Replica, unless another window has it. The
+		/// menu item and the window's button both read this.
 		var canLocateReplica: Bool {
-			unavailable != nil && unavailable != .openElsewhere
+			switch unavailable {
+			case .cantOpen, .notFound, .replaced: true
+			case .none, .openElsewhere: false
+			}
+		}
+
+		/// Whether Open Replacement applies: once a different Replica is where the window's was. The
+		/// menu item and the window's button both read this.
+		var canOpenReplacement: Bool {
+			unavailable == .replaced
 		}
 
 		/// Whether Redo applies: while nothing has written since the undo, and nothing holds writes back.
@@ -619,7 +629,7 @@ struct ReplicaFeature {
 				return .none
 
 			case .openReplacementButtonTapped:
-				guard state.unavailable == .replaced, let directory = state.directory else {
+				guard state.canOpenReplacement, let directory = state.directory else {
 					return .none
 				}
 				// The folder is the same, but the Replica in it isn't the one the bookmark was made for.

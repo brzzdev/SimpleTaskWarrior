@@ -386,7 +386,7 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 			store.canCreateTask
 
 		case #selector(openReplacement(_:)):
-			store.unavailable == .replaced
+			store.canOpenReplacement
 
 		case #selector(redo(_:)):
 			validate(
