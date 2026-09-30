@@ -17,9 +17,9 @@ public struct WritePlanner: Sendable {
 
 	/// `ids`, each instance of a template in `series` followed by the rest of its Series: its pending
 	/// siblings, waiting ones included, in `imask` order, then the template, as a confirmed `task
-	/// delete` takes them. Found by scanning, so an instance the CLI generates before the plan commits
-	/// is missed, but generating it grows the template's `mask`, which the plan expects, so the plan
-	/// is made again.
+	/// delete` or `task modify` takes them. Found by scanning, so an instance the CLI generates before
+	/// the plan commits is missed, but generating it grows the template's `mask`, which the plan
+	/// expects, so the plan is made again.
 	public static func withSeries(
 		_ ids: [Task.ID],
 		series: Set<Task.ID>,
@@ -54,6 +54,22 @@ public struct WritePlanner: Sendable {
 			}
 		}
 		return expanded
+	}
+
+	/// Whether `edit` changes the rest of a Series where asked to, as `task modify` and `task
+	/// annotate` do: every edit but one of a date other than `until`, which each task keeps as its
+	/// own, and removing an annotation, which `task denotate` makes only on the task named.
+	public func cascadesToSeries(_ edit: TaskEdit) -> Bool {
+		switch edit {
+		case .addAnnotation, .addDependency, .addTags, .removeDependency, .removeTag:
+			true
+
+		case .removeAnnotation:
+			false
+
+		case let .set(property, _), let .setInput(property, _):
+			property == "until" || attributeType(property) != .date
+		}
 	}
 
 	/// Plans `action` against `tasks`, every task's properties as the snapshot holds them.
@@ -91,7 +107,7 @@ public struct WritePlanner: Sendable {
 			let ids = Self.withSeries(ids, series: series, tasks: tasks)
 			return try plan(ids, tasks: tasks, at: now, chains: chains) { $0.delete(at: epoch) }
 
-		case let .edit(ids, edit):
+		case let .edit(ids, edit, series):
 			let edit = edit.trimmed
 			if case let .addAnnotation(text, _) = edit, text.isEmpty {
 				throw .blankAnnotation
@@ -99,6 +115,8 @@ public struct WritePlanner: Sendable {
 			if let tag = edit.tags.first(where: reservedTags.contains) {
 				throw .reservedTag(tag)
 			}
+			// The same patch on each task, which reads and resolves against that task's own properties.
+			let ids = cascadesToSeries(edit) ? Self.withSeries(ids, series: series, tasks: tasks) : ids
 			let apply = { (draft: inout Draft) throws(WritePlanError) in
 				try draft.apply(edit, at: now, resolving: self)
 			}
@@ -435,7 +453,9 @@ public enum WriteAction: Equatable, Sendable {
 	/// `task delete`, which keeps `start`. An instance of a template in `series` takes the rest of its
 	/// Series with it, as `task delete` does under `recurrence.confirmation`.
 	case delete([Task.ID], chains: ChainRepair, series: Set<Task.ID> = [])
-	case edit([Task.ID], TaskEdit)
+	/// An edit that `cascadesToSeries` changes an instance of a template in `series` and the rest of
+	/// its Series alike, as `task modify` does under `recurrence.confirmation`.
+	case edit([Task.ID], TaskEdit, series: Set<Task.ID> = [])
 	/// `task modify status:pending` on a completed or deleted task.
 	case markPending([Task.ID])
 	/// `task start`, which reopens a completed or deleted task.

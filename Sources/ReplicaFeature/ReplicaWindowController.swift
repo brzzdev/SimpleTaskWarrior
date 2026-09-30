@@ -41,8 +41,8 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 	/// The file panel on screen, so a store change while it's up doesn't open a second.
 	private var openPanel: NSOpenPanel?
 	private let searchItem = NSSearchToolbarItem(itemIdentifier: searchIdentifier)
-	/// The controls of the sheet asking whether a Delete takes each Series, while it's up.
-	private var seriesDeleteAccessory: SeriesDeleteAccessory?
+	/// The controls of the sheet asking whether a write takes each Series, while it's up.
+	private var seriesPromptAccessory: SeriesPromptAccessory?
 
 	/// Every tag any selected task has, which Remove Tag lists.
 	fileprivate var selectedTags: [String] {
@@ -134,14 +134,14 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 			beginAlert(for: prompt)
 		}
 		observe { [weak self] in
-			guard let self, let prompt = store.seriesDeletePrompt else {
+			guard let self, let prompt = store.seriesPrompt else {
 				return
 			}
-			guard let alert, let seriesDeleteAccessory else {
+			guard let alert, let seriesPromptAccessory else {
 				beginAlert(for: prompt)
 				return
 			}
-			seriesDeleteAccessory.update(prompt)
+			seriesPromptAccessory.update(prompt)
 			alert.layout()
 		}
 		// The store clears a search that would hide the task New Task created.
@@ -459,36 +459,52 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 		}
 	}
 
-	/// Asks as a sheet on the window whether the Delete `prompt` takes each Series, and about the
-	/// chains that breaks, and reports the answer.
-	private func beginAlert(for prompt: ReplicaFeature.SeriesDeletePrompt) {
+	/// Asks as a sheet on the window whether the Delete or edit `prompt` takes each Series, and about
+	/// the chains a Delete breaks, and reports the answer.
+	private func beginAlert(for prompt: ReplicaFeature.SeriesPrompt) {
 		guard alert == nil, let window else {
 			return
 		}
 		let alert = NSAlert()
-		alert.messageText = prompt.choices.count == 1
-			? String(localized: "Delete a Repeating Task?")
-			: String(localized: "Delete Repeating Tasks?")
-		alert.informativeText = String(
-			localized: "Delete only the selected tasks, or every pending task in their series too.",
-		)
-		let accessory = SeriesDeleteAccessory(prompt: prompt) { [store] in store.send($0) }
-		alert.accessoryView = accessory
-		alert.addButton(withTitle: String(localized: "Delete"))
+		let isSingle = prompt.choices.count == 1
+		let confirmation: ReplicaFeature.Action
+		switch prompt.command {
+		case .delete:
+			alert.messageText = isSingle
+				? String(localized: "Delete a Repeating Task?")
+				: String(localized: "Delete Repeating Tasks?")
+			alert.informativeText = String(
+				localized: "Delete only the selected tasks, or every pending task in their series too.",
+			)
+			alert.addButton(withTitle: String(localized: "Delete"))
+			confirmation = .seriesDeleteButtonTapped
+
+		case .edit:
+			alert.messageText = isSingle
+				? String(localized: "Change a Repeating Task?")
+				: String(localized: "Change Repeating Tasks?")
+			alert.informativeText = String(
+				localized: "Change only the selected tasks, or every pending task in their series and the tasks it repeats into. A due, scheduled or wait date only ever changes the task it’s set on.",
+			)
+			alert.addButton(withTitle: String(localized: "Change"))
+			confirmation = .seriesChangeButtonTapped
+		}
 		alert.addButton(withTitle: String(localized: "Cancel"))
+		let accessory = SeriesPromptAccessory(prompt: prompt) { [store] in store.send($0) }
+		alert.accessoryView = accessory
 		self.alert = alert
-		seriesDeleteAccessory = accessory
+		seriesPromptAccessory = accessory
 		alert.beginSheetModal(for: window) { [weak self] response in
 			guard let self else {
 				return
 			}
 			self.alert = nil
-			seriesDeleteAccessory = nil
+			seriesPromptAccessory = nil
 			guard response == .alertFirstButtonReturn else {
-				store.send(.seriesDeleteDismissed)
+				store.send(.seriesPromptDismissed)
 				return
 			}
-			store.send(.seriesDeleteButtonTapped)
+			store.send(confirmation)
 		}
 	}
 

@@ -1,9 +1,10 @@
 import AppKit
 import Models
 
-/// The controls under the sheet asking whether a Delete takes each Series: a pop-up for each, then
-/// the chains the answer breaks, which change as the choices do.
-final class SeriesDeleteAccessory: NSStackView {
+/// The controls under the sheet asking whether a Delete or edit takes each Series: a pop-up for
+/// each,
+/// then the chains a Delete's answer breaks, which change as the choices do.
+final class SeriesPromptAccessory: NSStackView {
 	private let chainsCheckbox = NSButton(
 		checkboxWithTitle: String(localized: "Repair Dependency Chains"),
 		target: nil,
@@ -14,21 +15,26 @@ final class SeriesDeleteAccessory: NSStackView {
 	/// Each pop-up's template, by its tag's index.
 	private let templates: [Models.Task.ID]
 
-	init(prompt: ReplicaFeature.SeriesDeletePrompt, send: @escaping (ReplicaFeature.Action) -> Void) {
+	init(prompt: ReplicaFeature.SeriesPrompt, send: @escaping (ReplicaFeature.Action) -> Void) {
 		self.send = send
 		templates = prompt.choices.map(\.id)
 		super.init(frame: NSRect(origin: .zero, size: NSSize(width: accessoryWidth, height: 0)))
 		orientation = .vertical
 		alignment = .leading
 
+		let titles =
+			switch prompt.command {
+			case .delete:
+				[String(localized: "Delete This Task"), String(localized: "Delete All Tasks in Series")]
+
+			case .edit:
+				[String(localized: "This Task Only"), String(localized: "All Tasks in Series")]
+			}
 		let grid = NSGridView(views: prompt.choices.enumerated().map { index, choice in
 			let popUp = NSPopUpButton(frame: .zero, pullsDown: false)
-			popUp.addItems(withTitles: [
-				String(localized: "Delete This Task"),
-				String(localized: "Delete All Tasks in Series"),
-			])
+			popUp.addItems(withTitles: titles)
 			popUp.action = #selector(seriesPopUpChanged(_:))
-			popUp.selectItem(at: choice.deletesSeries ? deleteSeriesItem : deleteTaskItem)
+			popUp.selectItem(at: choice.includesSeries ? seriesItem : taskItem)
 			popUp.tag = index
 			popUp.target = self
 			let label = NSTextField(labelWithString: "“\(choice.description)”")
@@ -54,7 +60,7 @@ final class SeriesDeleteAccessory: NSStackView {
 	}
 
 	/// Shows the chains `prompt` asks about, where it asks about any, and fits itself to them.
-	func update(_ prompt: ReplicaFeature.SeriesDeletePrompt) {
+	func update(_ prompt: ReplicaFeature.SeriesPrompt) {
 		chainsCheckbox.isHidden = prompt.chainRepairMessage == nil
 		chainsCheckbox.state = prompt.repairsChains ? .on : .off
 		chainsLabel.isHidden = prompt.chainRepairMessage == nil
@@ -69,8 +75,8 @@ final class SeriesDeleteAccessory: NSStackView {
 
 	@objc
 	private func seriesPopUpChanged(_ popUp: NSPopUpButton) {
-		let deletesSeries = popUp.indexOfSelectedItem == deleteSeriesItem
-		send(.seriesChoiceChanged(templates[popUp.tag], deletesSeries: deletesSeries))
+		let includesSeries = popUp.indexOfSelectedItem == seriesItem
+		send(.seriesChoiceChanged(templates[popUp.tag], includesSeries: includesSeries))
 	}
 }
 
@@ -78,5 +84,5 @@ final class SeriesDeleteAccessory: NSStackView {
 private let accessoryWidth: CGFloat = 300
 
 /// The pop-up items' indices, in the order it lists them.
-private let deleteSeriesItem = 1
-private let deleteTaskItem = 0
+private let seriesItem = 1
+private let taskItem = 0

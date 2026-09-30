@@ -1,0 +1,212 @@
+{
+	"after": {
+		"5023b181-6d4c-431e-9791-24fb30650a1c": {
+			"description": "Alpha",
+			"due": "1790726400",
+			"entry": "1790786295",
+			"imask": "2",
+			"modified": "1790786295",
+			"parent": "b398f198-af09-4155-95da-1fb1ddf31e46",
+			"recur": "daily",
+			"rtype": "periodic",
+			"status": "pending",
+			"until": "1893456000"
+		},
+		"76e814ab-7d48-47b6-9f72-e8b3b8feeaf4": {
+			"description": "Alpha",
+			"due": "1790812800",
+			"entry": "1790786295",
+			"imask": "3",
+			"modified": "1790786295",
+			"parent": "b398f198-af09-4155-95da-1fb1ddf31e46",
+			"recur": "daily",
+			"rtype": "periodic",
+			"status": "pending",
+			"until": "1893456000"
+		},
+		"825d44fe-1243-4e1c-a044-54c693e6b50b": {
+			"description": "Alpha",
+			"due": "1790553600",
+			"entry": "1790786295",
+			"imask": "0",
+			"modified": "1790786295",
+			"parent": "b398f198-af09-4155-95da-1fb1ddf31e46",
+			"recur": "daily",
+			"rtype": "periodic",
+			"status": "pending",
+			"until": "1893456000"
+		},
+		"ad6ef9e7-ed8e-42a6-be7f-3f1c52d757e5": {
+			"description": "Alpha",
+			"due": "1790640000",
+			"entry": "1790786295",
+			"imask": "1",
+			"modified": "1790786295",
+			"parent": "b398f198-af09-4155-95da-1fb1ddf31e46",
+			"recur": "daily",
+			"rtype": "periodic",
+			"status": "pending",
+			"until": "1893456000"
+		},
+		"b398f198-af09-4155-95da-1fb1ddf31e46": {
+			"description": "Alpha",
+			"due": "1790553600",
+			"entry": "1790786295",
+			"mask": "----",
+			"modified": "1790786295",
+			"recur": "daily",
+			"rtype": "periodic",
+			"status": "recurring",
+			"until": "1893456000"
+		}
+	},
+	"before": {
+		"5023b181-6d4c-431e-9791-24fb30650a1c": {
+			"description": "Alpha",
+			"due": "1790726400",
+			"entry": "1790786295",
+			"imask": "2",
+			"modified": "1790786295",
+			"parent": "b398f198-af09-4155-95da-1fb1ddf31e46",
+			"recur": "daily",
+			"rtype": "periodic",
+			"status": "pending"
+		},
+		"76e814ab-7d48-47b6-9f72-e8b3b8feeaf4": {
+			"description": "Alpha",
+			"due": "1790812800",
+			"entry": "1790786295",
+			"imask": "3",
+			"modified": "1790786295",
+			"parent": "b398f198-af09-4155-95da-1fb1ddf31e46",
+			"recur": "daily",
+			"rtype": "periodic",
+			"status": "pending"
+		},
+		"825d44fe-1243-4e1c-a044-54c693e6b50b": {
+			"description": "Alpha",
+			"due": "1790553600",
+			"entry": "1790786295",
+			"imask": "0",
+			"modified": "1790786295",
+			"parent": "b398f198-af09-4155-95da-1fb1ddf31e46",
+			"recur": "daily",
+			"rtype": "periodic",
+			"status": "pending"
+		},
+		"ad6ef9e7-ed8e-42a6-be7f-3f1c52d757e5": {
+			"description": "Alpha",
+			"due": "1790640000",
+			"entry": "1790786295",
+			"imask": "1",
+			"modified": "1790786295",
+			"parent": "b398f198-af09-4155-95da-1fb1ddf31e46",
+			"recur": "daily",
+			"rtype": "periodic",
+			"status": "pending"
+		},
+		"b398f198-af09-4155-95da-1fb1ddf31e46": {
+			"description": "Alpha",
+			"due": "1790553600",
+			"entry": "1790786295",
+			"mask": "----",
+			"modified": "1790786295",
+			"recur": "daily",
+			"rtype": "periodic",
+			"status": "recurring"
+		}
+	},
+	"now": 1790786295,
+	"operations": [
+		{
+			"Update": {
+				"old_value": "1790786295",
+				"property": "modified",
+				"timestamp": "2026-09-30T16:38:15.716654Z",
+				"uuid": "5023b181-6d4c-431e-9791-24fb30650a1c",
+				"value": "1790786295"
+			}
+		},
+		{
+			"Update": {
+				"old_value": null,
+				"property": "until",
+				"timestamp": "2026-09-30T16:38:15.716654Z",
+				"uuid": "5023b181-6d4c-431e-9791-24fb30650a1c",
+				"value": "1893456000"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "1790786295",
+				"property": "modified",
+				"timestamp": "2026-09-30T16:38:15.717044Z",
+				"uuid": "825d44fe-1243-4e1c-a044-54c693e6b50b",
+				"value": "1790786295"
+			}
+		},
+		{
+			"Update": {
+				"old_value": null,
+				"property": "until",
+				"timestamp": "2026-09-30T16:38:15.717044Z",
+				"uuid": "825d44fe-1243-4e1c-a044-54c693e6b50b",
+				"value": "1893456000"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "1790786295",
+				"property": "modified",
+				"timestamp": "2026-09-30T16:38:15.717369Z",
+				"uuid": "ad6ef9e7-ed8e-42a6-be7f-3f1c52d757e5",
+				"value": "1790786295"
+			}
+		},
+		{
+			"Update": {
+				"old_value": null,
+				"property": "until",
+				"timestamp": "2026-09-30T16:38:15.717369Z",
+				"uuid": "ad6ef9e7-ed8e-42a6-be7f-3f1c52d757e5",
+				"value": "1893456000"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "1790786295",
+				"property": "modified",
+				"timestamp": "2026-09-30T16:38:15.717730Z",
+				"uuid": "76e814ab-7d48-47b6-9f72-e8b3b8feeaf4",
+				"value": "1790786295"
+			}
+		},
+		{
+			"Update": {
+				"old_value": null,
+				"property": "until",
+				"timestamp": "2026-09-30T16:38:15.717730Z",
+				"uuid": "76e814ab-7d48-47b6-9f72-e8b3b8feeaf4",
+				"value": "1893456000"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "1790786295",
+				"property": "modified",
+				"timestamp": "2026-09-30T16:38:15.718101Z",
+				"uuid": "b398f198-af09-4155-95da-1fb1ddf31e46",
+				"value": "1790786295"
+			}
+		},
+		{
+			"Update": {
+				"old_value": null,
+				"property": "until",
+				"timestamp": "2026-09-30T16:38:15.718103Z",
+				"uuid": "b398f198-af09-4155-95da-1fb1ddf31e46",
+				"value": "1893456000"
+			}
+		}
+	]
+}

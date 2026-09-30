@@ -1,0 +1,193 @@
+{
+	"after": {
+		"2b479895-a97c-4e57-9eaf-9afc45cbee19": {
+			"description": "Beta",
+			"due": "1790640000",
+			"entry": "1790786295",
+			"imask": "1",
+			"modified": "1790786295",
+			"parent": "a0ce949c-733e-4c91-9e3c-31c4b5268bfe",
+			"recur": "daily",
+			"rtype": "periodic",
+			"status": "pending"
+		},
+		"5301a8a0-5df3-4dbf-8302-efffe2b9b63f": {
+			"description": "Alpha",
+			"due": "1790553600",
+			"end": "1790786295",
+			"entry": "1790786295",
+			"imask": "0",
+			"modified": "1790786295",
+			"parent": "a0ce949c-733e-4c91-9e3c-31c4b5268bfe",
+			"recur": "daily",
+			"rtype": "periodic",
+			"status": "completed"
+		},
+		"5c390167-ab73-43c9-a9d0-77b03dda4ecb": {
+			"description": "Beta",
+			"due": "1790726400",
+			"entry": "1790786295",
+			"imask": "2",
+			"modified": "1790786295",
+			"parent": "a0ce949c-733e-4c91-9e3c-31c4b5268bfe",
+			"recur": "daily",
+			"rtype": "periodic",
+			"status": "pending",
+			"wait": "1893456000"
+		},
+		"63d06b8c-557d-472a-aaae-96bb1715715f": {
+			"description": "Beta",
+			"due": "1790812800",
+			"entry": "1790786295",
+			"imask": "3",
+			"modified": "1790786295",
+			"parent": "a0ce949c-733e-4c91-9e3c-31c4b5268bfe",
+			"recur": "daily",
+			"rtype": "periodic",
+			"status": "pending"
+		},
+		"a0ce949c-733e-4c91-9e3c-31c4b5268bfe": {
+			"description": "Beta",
+			"due": "1790553600",
+			"entry": "1790786295",
+			"mask": "+-W-",
+			"modified": "1790786295",
+			"recur": "daily",
+			"rtype": "periodic",
+			"status": "recurring"
+		}
+	},
+	"before": {
+		"2b479895-a97c-4e57-9eaf-9afc45cbee19": {
+			"description": "Alpha",
+			"due": "1790640000",
+			"entry": "1790786295",
+			"imask": "1",
+			"modified": "1790786295",
+			"parent": "a0ce949c-733e-4c91-9e3c-31c4b5268bfe",
+			"recur": "daily",
+			"rtype": "periodic",
+			"status": "pending"
+		},
+		"5301a8a0-5df3-4dbf-8302-efffe2b9b63f": {
+			"description": "Alpha",
+			"due": "1790553600",
+			"end": "1790786295",
+			"entry": "1790786295",
+			"imask": "0",
+			"modified": "1790786295",
+			"parent": "a0ce949c-733e-4c91-9e3c-31c4b5268bfe",
+			"recur": "daily",
+			"rtype": "periodic",
+			"status": "completed"
+		},
+		"5c390167-ab73-43c9-a9d0-77b03dda4ecb": {
+			"description": "Alpha",
+			"due": "1790726400",
+			"entry": "1790786295",
+			"imask": "2",
+			"modified": "1790786295",
+			"parent": "a0ce949c-733e-4c91-9e3c-31c4b5268bfe",
+			"recur": "daily",
+			"rtype": "periodic",
+			"status": "pending",
+			"wait": "1893456000"
+		},
+		"63d06b8c-557d-472a-aaae-96bb1715715f": {
+			"description": "Alpha",
+			"due": "1790812800",
+			"entry": "1790786295",
+			"imask": "3",
+			"modified": "1790786295",
+			"parent": "a0ce949c-733e-4c91-9e3c-31c4b5268bfe",
+			"recur": "daily",
+			"rtype": "periodic",
+			"status": "pending"
+		},
+		"a0ce949c-733e-4c91-9e3c-31c4b5268bfe": {
+			"description": "Alpha",
+			"due": "1790553600",
+			"entry": "1790786295",
+			"mask": "+-W-",
+			"modified": "1790786295",
+			"recur": "daily",
+			"rtype": "periodic",
+			"status": "recurring"
+		}
+	},
+	"now": 1790786295,
+	"operations": [
+		{
+			"Update": {
+				"old_value": "1790786295",
+				"property": "modified",
+				"timestamp": "2026-09-30T16:38:15.525834Z",
+				"uuid": "2b479895-a97c-4e57-9eaf-9afc45cbee19",
+				"value": "1790786295"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "Alpha",
+				"property": "description",
+				"timestamp": "2026-09-30T16:38:15.525835Z",
+				"uuid": "2b479895-a97c-4e57-9eaf-9afc45cbee19",
+				"value": "Beta"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "1790786295",
+				"property": "modified",
+				"timestamp": "2026-09-30T16:38:15.526283Z",
+				"uuid": "5c390167-ab73-43c9-a9d0-77b03dda4ecb",
+				"value": "1790786295"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "Alpha",
+				"property": "description",
+				"timestamp": "2026-09-30T16:38:15.526284Z",
+				"uuid": "5c390167-ab73-43c9-a9d0-77b03dda4ecb",
+				"value": "Beta"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "1790786295",
+				"property": "modified",
+				"timestamp": "2026-09-30T16:38:15.526764Z",
+				"uuid": "63d06b8c-557d-472a-aaae-96bb1715715f",
+				"value": "1790786295"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "Alpha",
+				"property": "description",
+				"timestamp": "2026-09-30T16:38:15.526764Z",
+				"uuid": "63d06b8c-557d-472a-aaae-96bb1715715f",
+				"value": "Beta"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "1790786295",
+				"property": "modified",
+				"timestamp": "2026-09-30T16:38:15.527110Z",
+				"uuid": "a0ce949c-733e-4c91-9e3c-31c4b5268bfe",
+				"value": "1790786295"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "Alpha",
+				"property": "description",
+				"timestamp": "2026-09-30T16:38:15.527111Z",
+				"uuid": "a0ce949c-733e-4c91-9e3c-31c4b5268bfe",
+				"value": "Beta"
+			}
+		}
+	]
+}
