@@ -4,20 +4,22 @@
 set -euo pipefail
 
 skill_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-app="$PWD/.build/xcode/Build/Products/Debug/SimpleTaskWarrior.app"
-bundle_id=dev.brzz.SimpleTaskWarrior
+# The Debug product, which has its own name and bundle ID so it runs alongside an installed release.
+product="SimpleTaskWarrior Debug"
+app="$PWD/.build/xcode/Build/Products/Debug/$product.app"
+bundle_id=dev.brzz.SimpleTaskWarrior.debug
 mouse_bin="${TMPDIR:-/tmp}/simpletaskwarrior-mouse"
 # `frame` pins the window here, so the header row sits at a known y.
 window_x=100
 window_y=100
 header_y=$((window_y + 66))
 
-# The dev build's PID, by executable path: `just run` leaves an installed release copy running
-# under the same process name. Compared as a string, since `pgrep -f` would read the path as a
-# regex and miss a checkout under a name like `fix(ci)`.
+# The dev build's PID, by executable path: another checkout's dev build runs under the same
+# process name. Compared as a string, since `pgrep -f` would read the path as a regex and miss a
+# checkout under a name like `fix(ci)`.
 dev_pid() {
-	local binary="$app/Contents/MacOS/SimpleTaskWarrior" pid
-	for pid in $(pgrep -x SimpleTaskWarrior || true); do
+	local binary="$app/Contents/MacOS/$product" pid
+	for pid in $(pgrep -x "$product" || true); do
 		if [ "$(ps -o comm= -p "$pid")" = "$binary" ]; then
 			echo "$pid"
 			return 0

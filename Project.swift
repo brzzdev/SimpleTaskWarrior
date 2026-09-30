@@ -41,6 +41,14 @@ if !developmentTeam.isEmpty {
 	signingSettings["DEVELOPMENT_TEAM"] = .string(developmentTeam)
 }
 
+// The Debug build runs alongside the installed release as an app of its own, so the two keep
+// separate preferences, Replica bookmarks, Taskrc pairings, restored windows and table layouts.
+// The app menu reads the process name, which is the executable's, so the product is renamed too.
+let debugSettings: SettingsDictionary = [
+	"PRODUCT_BUNDLE_IDENTIFIER": "dev.brzz.SimpleTaskWarrior.debug",
+	"PRODUCT_NAME": "SimpleTaskWarrior Debug",
+]
+
 let project = Project(
 	name: "SimpleTaskWarrior",
 	packages: [
@@ -58,12 +66,12 @@ let project = Project(
 			// can't remove: the app builds its menu bar and windows in code.
 			infoPlist: .dictionary([
 				"CFBundleDevelopmentRegion": "$(DEVELOPMENT_LANGUAGE)",
-				"CFBundleDisplayName": "SimpleTaskWarrior",
+				"CFBundleDisplayName": "$(PRODUCT_NAME)",
 				"CFBundleExecutable": "$(EXECUTABLE_NAME)",
 				"CFBundleIconFile": "",
 				"CFBundleIdentifier": "$(PRODUCT_BUNDLE_IDENTIFIER)",
 				"CFBundleInfoDictionaryVersion": "6.0",
-				"CFBundleName": "SimpleTaskWarrior",
+				"CFBundleName": "$(PRODUCT_NAME)",
 				"CFBundlePackageType": "APPL",
 				"CFBundleShortVersionString": "1.0",
 				"CFBundleVersion": "1",
@@ -107,7 +115,13 @@ let project = Project(
 				.package(product: "App"),
 				.package(product: "IssueReporting"),
 			],
-			settings: .settings(base: signingSettings),
+			settings: .settings(
+				base: signingSettings,
+				configurations: [
+					.debug(name: .debug, settings: debugSettings),
+					.release(name: .release),
+				],
+			),
 		),
 	],
 	schemes: [
