@@ -94,6 +94,11 @@ struct ReplicaFeature {
 			isReplicaOpen && unavailable == nil && taskrc != nil && canWrite
 		}
 
+		/// Whether Locate… applies: while the window shows no Replica, unless another window has it.
+		var canLocateReplica: Bool {
+			unavailable != nil && unavailable != .openElsewhere
+		}
+
 		/// Whether Redo applies: while nothing has written since the undo, and nothing holds writes back.
 		var canRedo: Bool {
 			redoName != nil && canWrite

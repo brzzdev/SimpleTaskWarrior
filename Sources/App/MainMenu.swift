@@ -61,6 +61,13 @@ func mainMenu(
 		.separator(),
 		menuItem("Open Replica…", #selector(AppDelegate.openReplica(_:)), key: "o"),
 		submenu(openRecent),
+		menuItem(
+			"Locate Replica…",
+			#selector(ReplicaWindowController.locateReplica(_:)),
+			key: "l",
+			modifiers: [.command, .shift],
+		),
+		menuItem("Open Replacement", #selector(ReplicaWindowController.openReplacement(_:))),
 		.separator(),
 		menuItem(
 			"Choose Taskrc…",

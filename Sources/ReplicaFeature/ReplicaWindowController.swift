@@ -197,12 +197,12 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 			NSMenuItem(
 				title: String(localized: "Set Project…"),
 				action: #selector(setProject(_:)),
-				keyEquivalent: "",
+				keyEquivalent: "M",
 			),
 			NSMenuItem(
 				title: String(localized: "Add Tag…"),
 				action: #selector(addTag(_:)),
-				keyEquivalent: "",
+				keyEquivalent: "T",
 			),
 			removeTagItem,
 		]
@@ -268,6 +268,11 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 	@objc
 	public func newTask(_: Any?) {
 		store.send(.newTaskButtonTapped)
+	}
+
+	@objc
+	public func openReplacement(_: Any?) {
+		store.send(.openReplacementButtonTapped)
 	}
 
 	/// Re-applies the Undo point the window last undid.
@@ -374,8 +379,14 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 		case #selector(addTag(_:)), #selector(removeTag(_:)), #selector(setProject(_:)):
 			store.canEditSelection
 
+		case #selector(locateReplica(_:)):
+			openPanel == nil && store.canLocateReplica
+
 		case #selector(newTask(_:)):
 			store.canCreateTask
+
+		case #selector(openReplacement(_:)):
+			store.unavailable == .replaced
 
 		case #selector(redo(_:)):
 			validate(

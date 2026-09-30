@@ -21,11 +21,11 @@ final class ReplicaContentController: NSViewController {
 		target: nil,
 		action: #selector(ReplicaWindowController.locateReplica(_:)),
 	)
-	/// Down the responder chain to this controller.
+	/// Down the responder chain to the window's controller, as the menu item's is.
 	private let openReplacementButton = NSButton(
 		title: String(localized: "Open Replacement"),
 		target: nil,
-		action: #selector(openReplacementButtonClicked(_:)),
+		action: #selector(ReplicaWindowController.openReplacement(_:)),
 	)
 	private let store: StoreOf<ReplicaFeature>
 	private let table: TaskTableController
@@ -196,11 +196,6 @@ final class ReplicaContentController: NSViewController {
 	@objc
 	func chooseTaskrcButtonClicked(_: Any?) {
 		store.send(.chooseTaskrcButtonTapped)
-	}
-
-	@objc
-	func openReplacementButtonClicked(_: Any?) {
-		store.send(.openReplacementButtonTapped)
 	}
 
 	@objc
