@@ -309,16 +309,20 @@ actor Replica {
 	private init(directory: URL, queue: DispatchSerialQueue) throws(ReplicaError) {
 		self.directory = directory
 		self.queue = queue
+		// Taken before opening, and checked again after: taken only after, a replacement landing while
+		// the engine opened would be recorded in place of the database the engine has open.
+		guard let identity = ReplicaIdentity(directory: directory) else {
+			throw .notAReplica
+		}
+		self.identity = identity
 		do {
 			engine = try EngineHandle.open(directory: directory.path(percentEncoded: false))
 		} catch {
 			throw ReplicaError(error)
 		}
-		// Gone as soon as it opened, so no longer the database that did.
-		guard let identity = ReplicaIdentity(directory: directory) else {
-			throw .notAReplica
+		guard ReplicaIdentity(directory: directory) == identity else {
+			throw .lost(identity)
 		}
-		self.identity = identity
 	}
 
 	/// Opens on the actor's queue, since opening waits on a held lock like any other call. The

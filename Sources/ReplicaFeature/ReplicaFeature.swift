@@ -610,7 +610,7 @@ struct ReplicaFeature {
 				guard state.unavailable == .replaced, let directory = state.directory else {
 					return .none
 				}
-				return rebind(to: directory, state)
+				return rebind(from: directory, to: directory)
 
 			case .pairingChanged:
 				return loadTaskrc(for: state)
@@ -654,7 +654,11 @@ struct ReplicaFeature {
 				return closePromptedTasks(chains: .repair, &state)
 
 			case let .replicaFolderChosen(directory):
-				return rebind(to: directory, state)
+				// Taken as the window's folder at once, before the bookmark is made, so no other window
+				// opens it meanwhile.
+				let lastDirectory = state.directory
+				state.directory = directory
+				return rebind(from: lastDirectory, to: directory)
 
 			case let .replicaLost(identity):
 				// A write and the stream can each find it lost, and finding it again is harmless.
@@ -902,10 +906,10 @@ struct ReplicaFeature {
 		.cancellable(id: CancelID.replica, cancelInFlight: true)
 	}
 
-	/// Points the window at the Replica in `directory`, taking the Taskrc paired with the one it had
-	/// with it, then opens it.
-	private func rebind(to directory: URL, _ state: State) -> Effect<Action> {
-		.run { [bookmarkClient, lastDirectory = state.directory] send in
+	/// Points the window at the Replica in `directory`, taking the Taskrc paired with the one it had,
+	/// last in `lastDirectory`, with it, then opens it.
+	private func rebind(from lastDirectory: URL?, to directory: URL) -> Effect<Action> {
+		.run { [bookmarkClient] send in
 			let bookmark = try bookmarkClient.create(directory)
 			if let lastDirectory {
 				bookmarkClient.movePairing(lastDirectory, directory, bookmark)

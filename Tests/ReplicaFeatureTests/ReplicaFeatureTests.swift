@@ -1874,14 +1874,15 @@ struct ReplicaFeatureTests {
 		}
 
 		// Keeping the Taskrc paired with the Replica last at its old path.
-		await store.send(.replicaFolderChosen(located))
+		// Taken as the window's folder at once, so no other window opens it meanwhile.
+		await store.send(.replicaFolderChosen(located)) {
+			$0.directory = located
+		}
 		await store.receive(\.replicaRebound) {
 			$0.bookmark = Data([2])
 			$0.unavailable = nil
 		}
-		await store.receive(\.directoryResolved) {
-			$0.directory = located
-		}
+		await store.receive(\.directoryResolved)
 		#expect(moves.value == [[replicaDirectory, located]])
 
 		streams[0].finish()

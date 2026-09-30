@@ -425,19 +425,9 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 	/// forward instead, or it can't be opened, which an alert explains.
 	private func locate(_ directory: URL) {
 		@Dependency(\.replicaClient) var replicaClient
-		let folder = standardizedFolder(directory)
-		let other = NSApp.windows
-			.lazy
-			.compactMap { $0.windowController as? ReplicaWindowController }
-			.first { $0 !== self && $0.folder == folder }
-		if let other {
-			other.showWindow(nil)
-			return
-		}
 		_Concurrency.Task { [weak self] in
 			do {
 				try await replicaClient.validate(directory)
-				self?.store.send(.replicaFolderChosen(directory))
 			} catch {
 				guard let self, alert == nil, let window else {
 					return
@@ -448,7 +438,24 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 				alert.beginSheetModal(for: window) { [weak self] _ in
 					self?.alert = nil
 				}
+				return
 			}
+			guard let self else {
+				return
+			}
+			// Only once validating, which can wait seconds on a held lock, is done: another window may
+			// have opened the folder meanwhile. This check and the store taking the folder as the window's
+			// run in one turn of the main actor, so none can open it in between.
+			let folder = standardizedFolder(directory)
+			let other = NSApp.windows
+				.lazy
+				.compactMap { $0.windowController as? ReplicaWindowController }
+				.first { $0 !== self && $0.folder == folder }
+			if let other {
+				other.showWindow(nil)
+				return
+			}
+			store.send(.replicaFolderChosen(directory))
 		}
 	}
 
