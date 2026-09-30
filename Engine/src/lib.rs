@@ -5,11 +5,12 @@
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::path::Path;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
+use async_trait::async_trait;
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
 use taskchampion::chrono::DateTime;
-use taskchampion::storage::AccessMode;
+use taskchampion::storage::{AccessMode, Storage, StorageTxn};
 use taskchampion::{Operation, Operations, Replica, SqliteStorage, TaskData, Uuid};
 use tokio::runtime::Runtime;
 
@@ -285,7 +286,7 @@ fn schema_version(connection: &Connection) -> Result<(u32, u32), EngineError> {
 
 /// A task's current data, read from the Replica once per `apply`.
 async fn task_data<'a>(
-	replica: &mut Replica<SqliteStorage>,
+	replica: &mut Replica<CheckedStorage>,
 	tasks: &'a mut HashMap<Uuid, Option<TaskData>>,
 	uuid: Uuid,
 ) -> Result<&'a mut Option<TaskData>, EngineError> {
@@ -296,7 +297,7 @@ async fn task_data<'a>(
 }
 
 async fn update(
-	replica: &mut Replica<SqliteStorage>,
+	replica: &mut Replica<CheckedStorage>,
 	tasks: &mut HashMap<Uuid, Option<TaskData>>,
 	uuid: &str,
 	property: &str,
@@ -311,11 +312,95 @@ async fn update(
 	Ok(())
 }
 
+/// What one commit must find in the Replica for it to go through.
+#[derive(Default)]
+struct Checks {
+	/// Tasks the batch creates, which must not exist yet.
+	creates: Vec<Uuid>,
+	/// Each task's property, and the value it must still hold.
+	expectations: Vec<(Uuid, Expectation)>,
+}
+
+impl Checks {
+	/// The tasks that fail a check, each once.
+	async fn conflicts(
+		&self,
+		txn: &mut (dyn StorageTxn + Send),
+	) -> Result<Vec<String>, taskchampion::Error> {
+		let mut conflicts: Vec<String> = Vec::new();
+		for (uuid, expectation) in &self.expectations {
+			if conflicts.contains(&expectation.uuid) {
+				continue;
+			}
+			let task = txn.get_task(*uuid).await?;
+			let current = task.as_ref().and_then(|task| task.get(&expectation.property));
+			if current == expectation.value.as_ref() {
+				continue;
+			}
+			conflicts.push(expectation.uuid.clone());
+		}
+		for uuid in &self.creates {
+			let uuid_string = uuid.to_string();
+			if conflicts.contains(&uuid_string) || txn.get_task(*uuid).await?.is_none() {
+				continue;
+			}
+			conflicts.push(uuid_string);
+		}
+		Ok(conflicts)
+	}
+}
+
+/// Passes `apply`'s checks to the storage that runs them, and their conflicts back.
+#[derive(Default)]
+struct CommitChecks {
+	/// The tasks the last checked transaction refused on.
+	conflicts: Vec<String>,
+	/// Checks for the next transaction, which takes them so they run once.
+	pending: Option<Checks>,
+	/// Runs just before the next checked transaction opens, so a test can write in that window.
+	#[cfg(test)]
+	before_transaction: Option<Box<dyn FnOnce() + Send>>,
+}
+
+/// `SqliteStorage` that runs `apply`'s checks inside the commit's own transaction. TaskChampion's
+/// commit opens exactly one transaction before it reads or writes anything, and `SqliteStorage`
+/// opens it `Immediate`, so the checks and the write happen under one SQLite write lock.
+struct CheckedStorage {
+	checks: Arc<Mutex<CommitChecks>>,
+	inner: SqliteStorage,
+}
+
+#[async_trait]
+impl Storage for CheckedStorage {
+	async fn txn<'a>(&'a mut self) -> Result<Box<dyn StorageTxn + Send + 'a>, taskchampion::Error> {
+		let Some(checks) = self.checks.lock().unwrap().pending.take() else {
+			return self.inner.txn().await;
+		};
+		#[cfg(test)]
+		{
+			let hook = self.checks.lock().unwrap().before_transaction.take();
+			if let Some(hook) = hook {
+				hook();
+			}
+		}
+		let mut txn = self.inner.txn().await?;
+		let conflicts = checks.conflicts(txn.as_mut()).await?;
+		if conflicts.is_empty() {
+			return Ok(txn);
+		}
+		// Dropping the transaction rolls it back. `apply` reads the conflicts, not this error.
+		self.checks.lock().unwrap().conflicts = conflicts;
+		Err(taskchampion::Error::Database("expectations no longer hold".into()))
+	}
+}
+
 /// One open Replica. Every call is a short, synchronous transaction: the CLI waits at most 5 s on a
 /// held lock, so nothing here holds one open between calls.
 #[derive(uniffi::Object)]
 pub struct EngineHandle {
-	replica: Mutex<Replica<SqliteStorage>>,
+	/// Shared with the replica's storage, which runs `apply`'s checks.
+	checks: Arc<Mutex<CommitChecks>>,
+	replica: Mutex<Replica<CheckedStorage>>,
 	/// Its own connection, because `PRAGMA data_version` moves only for other connections' commits.
 	/// The replica's connection counts as another, so the app's own writes move it too.
 	watcher: Mutex<Connection>,
@@ -341,18 +426,25 @@ impl EngineHandle {
 		if major > SUPPORTED_SCHEMA_MAJOR {
 			return Err(EngineError::UnsupportedSchema { major, minor });
 		}
-		let storage =
+		let inner =
 			runtime().block_on(SqliteStorage::new(&directory, AccessMode::ReadWrite, false))?;
+		let checks = Arc::new(Mutex::new(CommitChecks::default()));
+		let storage = CheckedStorage {
+			checks: Arc::clone(&checks),
+			inner,
+		};
 		Ok(Self {
+			checks,
 			replica: Mutex::new(Replica::new(storage)),
 			watcher: Mutex::new(watcher),
 		})
 	}
 
-	/// Commits `operations` as one Undo point, but only if every expectation still holds just
-	/// before the commit. TaskChampion's commit never checks an update's old value, so without this
-	/// a plan made from a stale snapshot would overwrite whatever changed since. A write landing
-	/// between the check and the commit still gets through, as it does for the CLI.
+	/// Commits `operations` as one Undo point, but only if every expectation still holds and no
+	/// created task exists. TaskChampion's commit never checks an update's old value, so without
+	/// this a plan made from a stale snapshot would overwrite whatever changed since. The checks run
+	/// first as a fast path, then again inside the commit's transaction, so no write lands between
+	/// them and the commit.
 	pub fn apply(
 		&self,
 		operations: Vec<PlannedOperation>,
@@ -362,18 +454,17 @@ impl EngineHandle {
 		let replica = &mut *replica;
 		runtime().block_on(async {
 			let mut tasks = HashMap::new();
+			let mut checks = Checks::default();
 			let mut conflicts: Vec<String> = Vec::new();
-			for expectation in &expectations {
-				if conflicts.contains(&expectation.uuid) {
-					continue;
-				}
+			for expectation in expectations {
 				let uuid = parse_uuid(&expectation.uuid)?;
 				let task = task_data(replica, &mut tasks, uuid).await?;
 				let current = task.as_ref().and_then(|task| task.get(&expectation.property));
-				if current == expectation.value.as_deref() {
-					continue;
+				let changed = current != expectation.value.as_deref();
+				if changed && !conflicts.contains(&expectation.uuid) {
+					conflicts.push(expectation.uuid.clone());
 				}
-				conflicts.push(expectation.uuid.clone());
+				checks.expectations.push((uuid, expectation));
 			}
 			if !conflicts.is_empty() {
 				return Ok(ApplyOutcome::Conflict { uuids: conflicts });
@@ -395,6 +486,7 @@ impl EngineHandle {
 							return Ok(ApplyOutcome::Conflict { uuids: vec![raw_uuid] });
 						}
 						*task = Some(TaskData::create(uuid, &mut batch));
+						checks.creates.push(uuid);
 					}
 					PlannedOperation::SetStatus { uuid, status } => {
 						let value = Some(status.stored_value().to_string());
@@ -409,7 +501,18 @@ impl EngineHandle {
 					}
 				}
 			}
-			replica.commit_operations(batch.clone()).await?;
+			self.checks.lock().unwrap().pending = Some(checks);
+			let committed = replica.commit_operations(batch.clone()).await;
+			// Cleared whether or not the commit reached its transaction, so no later call runs them.
+			let conflicts = {
+				let mut commit_checks = self.checks.lock().unwrap();
+				commit_checks.pending = None;
+				std::mem::take(&mut commit_checks.conflicts)
+			};
+			if !conflicts.is_empty() {
+				return Ok(ApplyOutcome::Conflict { uuids: conflicts });
+			}
+			committed?;
 			Ok(ApplyOutcome::Committed {
 				operations: batch
 					.into_iter()
@@ -500,5 +603,144 @@ impl EngineHandle {
 			});
 		}
 		Err(failed("the Replica kept changing while it was read"))
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	/// An empty Replica in a temporary directory, open in a handle.
+	fn open_replica() -> (tempfile::TempDir, EngineHandle) {
+		let directory = tempfile::tempdir().unwrap();
+		runtime()
+			.block_on(SqliteStorage::new(directory.path(), AccessMode::ReadWrite, true))
+			.unwrap();
+		let handle = EngineHandle::open(directory.path().to_string_lossy().into_owned()).unwrap();
+		(directory, handle)
+	}
+
+	fn set_description(uuid: Uuid, value: &str) -> PlannedOperation {
+		PlannedOperation::SetValue {
+			uuid: uuid.to_string(),
+			property: "description".into(),
+			value: Some(value.into()),
+		}
+	}
+
+	fn description_is(uuid: Uuid, value: &str) -> Expectation {
+		Expectation {
+			uuid: uuid.to_string(),
+			property: "description".into(),
+			value: Some(value.into()),
+		}
+	}
+
+	fn description(handle: &EngineHandle, uuid: Uuid) -> Option<String> {
+		handle
+			.snapshot()
+			.unwrap()
+			.tasks
+			.into_iter()
+			.find(|task| task.uuid == uuid.to_string())
+			.and_then(|task| task.properties.get("description").cloned())
+	}
+
+	/// Runs `sql` from its own connection, as the CLI would, after `apply`'s fast path passes but
+	/// before the commit's transaction opens.
+	fn write_before_transaction(
+		handle: &EngineHandle,
+		directory: &tempfile::TempDir,
+		sql: &'static str,
+		uuid: Uuid,
+	) {
+		let database = directory.path().join(DATABASE_FILE);
+		handle.checks.lock().unwrap().before_transaction = Some(Box::new(move || {
+			let connection = Connection::open(database).unwrap();
+			connection.execute(sql, [uuid.to_string()]).unwrap();
+		}));
+	}
+
+	fn assert_conflict(outcome: ApplyOutcome, uuid: Uuid) {
+		let ApplyOutcome::Conflict { uuids } = outcome else {
+			panic!("expected a conflict");
+		};
+		assert_eq!(uuids, vec![uuid.to_string()]);
+	}
+
+	#[test]
+	fn refuses_an_update_changed_before_the_commit_transaction() {
+		let (directory, handle) = open_replica();
+		let uuid = Uuid::new_v4();
+		let create = PlannedOperation::Create {
+			uuid: uuid.to_string(),
+		};
+		handle.apply(vec![create, set_description(uuid, "app")], Vec::new()).unwrap();
+		write_before_transaction(
+			&handle,
+			&directory,
+			"UPDATE tasks SET data = json_set(data, '$.description', 'cli') WHERE uuid = ?1",
+			uuid,
+		);
+
+		let outcome = handle
+			.apply(vec![set_description(uuid, "stale")], vec![description_is(uuid, "app")])
+			.unwrap();
+
+		assert_conflict(outcome, uuid);
+		assert_eq!(description(&handle, uuid).as_deref(), Some("cli"));
+	}
+
+	#[test]
+	fn refuses_a_create_whose_task_appears_before_the_commit_transaction() {
+		let (directory, handle) = open_replica();
+		let uuid = Uuid::new_v4();
+		write_before_transaction(
+			&handle,
+			&directory,
+			"INSERT INTO tasks (uuid, data) VALUES (?1, '{\"description\":\"cli\"}')",
+			uuid,
+		);
+		let create = PlannedOperation::Create {
+			uuid: uuid.to_string(),
+		};
+
+		let outcome = handle.apply(vec![create, set_description(uuid, "app")], Vec::new()).unwrap();
+
+		assert_conflict(outcome, uuid);
+		assert_eq!(description(&handle, uuid).as_deref(), Some("cli"));
+		assert!(handle.get_undo_operations().unwrap().is_empty());
+	}
+
+	#[test]
+	fn leaves_no_checks_behind_after_a_conflict_in_the_transaction() {
+		let (directory, handle) = open_replica();
+		let uuid = Uuid::new_v4();
+		let create = PlannedOperation::Create {
+			uuid: uuid.to_string(),
+		};
+		handle.apply(vec![create, set_description(uuid, "app")], Vec::new()).unwrap();
+		write_before_transaction(
+			&handle,
+			&directory,
+			"UPDATE tasks SET data = json_set(data, '$.description', 'cli') WHERE uuid = ?1",
+			uuid,
+		);
+		let outcome = handle
+			.apply(vec![set_description(uuid, "stale")], vec![description_is(uuid, "app")])
+			.unwrap();
+		assert_conflict(outcome, uuid);
+
+		let outcome = handle
+			.apply(vec![set_description(uuid, "fresh")], vec![description_is(uuid, "cli")])
+			.unwrap();
+		let ApplyOutcome::Committed { operations } = outcome else {
+			panic!("expected a commit");
+		};
+		assert_eq!(description(&handle, uuid).as_deref(), Some("fresh"));
+
+		let undone = handle.commit_reversed_operations(operations).unwrap();
+		assert!(matches!(undone, UndoOutcome::Applied { error: None }));
+		assert_eq!(description(&handle, uuid).as_deref(), Some("cli"));
 	}
 }

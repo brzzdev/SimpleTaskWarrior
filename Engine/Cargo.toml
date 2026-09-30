@@ -17,6 +17,8 @@ publish = false
 crate-type = ["lib", "staticlib"]
 
 [dependencies]
+# Implements TaskChampion's `Storage` trait, which it declares with `async_trait`.
+async-trait = "0.1"
 # Must match the `rusqlite` taskchampion pins: `links = "sqlite3"` allows one `libsqlite3-sys`.
 # No `bundled`, so the process links the system libsqlite3 and holds one SQLite.
 rusqlite = "0.39"
@@ -24,3 +26,6 @@ rusqlite = "0.39"
 taskchampion = { version = "~3.1.0", default-features = false, features = ["storage-sqlite"] }
 tokio = { version = "1", features = ["rt"] }
 uniffi = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

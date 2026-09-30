@@ -566,10 +566,11 @@ fileprivate struct FfiConverterString: FfiConverter {
 public protocol EngineHandleProtocol: AnyObject, Sendable {
     
     /**
-     * Commits `operations` as one Undo point, but only if every expectation still holds just
-     * before the commit. TaskChampion's commit never checks an update's old value, so without this
-     * a plan made from a stale snapshot would overwrite whatever changed since. A write landing
-     * between the check and the commit still gets through, as it does for the CLI.
+     * Commits `operations` as one Undo point, but only if every expectation still holds and no
+     * created task exists. TaskChampion's commit never checks an update's old value, so without
+     * this a plan made from a stale snapshot would overwrite whatever changed since. The checks run
+     * first as a fast path, then again inside the commit's transaction, so no write lands between
+     * them and the commit.
      */
     func apply(operations: [PlannedOperation], expectations: [Expectation]) throws  -> ApplyOutcome
     
@@ -671,10 +672,11 @@ public static func `open`(directory: String)throws  -> EngineHandle  {
 
     
     /**
-     * Commits `operations` as one Undo point, but only if every expectation still holds just
-     * before the commit. TaskChampion's commit never checks an update's old value, so without this
-     * a plan made from a stale snapshot would overwrite whatever changed since. A write landing
-     * between the check and the commit still gets through, as it does for the CLI.
+     * Commits `operations` as one Undo point, but only if every expectation still holds and no
+     * created task exists. TaskChampion's commit never checks an update's old value, so without
+     * this a plan made from a stale snapshot would overwrite whatever changed since. The checks run
+     * first as a fast path, then again inside the commit's transaction, so no write lands between
+     * them and the commit.
      */
 open func apply(operations: [PlannedOperation], expectations: [Expectation])throws  -> ApplyOutcome  {
     return try  FfiConverterTypeApplyOutcome_lift(try rustCallWithError(FfiConverterTypeEngineError_lift) {
@@ -1782,7 +1784,7 @@ private let initializationResult: InitializationResult = {
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
     }
-    if (uniffi_engine_checksum_method_enginehandle_apply() != 53698) {
+    if (uniffi_engine_checksum_method_enginehandle_apply() != 15678) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_engine_checksum_method_enginehandle_commit_reversed_operations() != 38733) {
