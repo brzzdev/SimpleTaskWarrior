@@ -13,8 +13,8 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 {
 	private let store: StoreOf<ReplicaFeature>
 
-	/// The alert on screen, for a failed write or a broken chain, so a store change while it's up
-	/// doesn't show a second.
+	/// The alert on screen, for a failed write or a Done or Delete's question, so a store change while
+	/// it's up doesn't show a second.
 	private var alert: NSAlert?
 	private let commandItems = Dictionary(
 		uniqueKeysWithValues: ReplicaFeature.TaskCommand.all.map { command in
@@ -41,6 +41,8 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 	/// The file panel on screen, so a store change while it's up doesn't open a second.
 	private var openPanel: NSOpenPanel?
 	private let searchItem = NSSearchToolbarItem(itemIdentifier: searchIdentifier)
+	/// The controls of the sheet asking whether a Delete takes each Series, while it's up.
+	private var seriesDeleteAccessory: SeriesDeleteAccessory?
 
 	/// Every tag any selected task has, which Remove Tag lists.
 	fileprivate var selectedTags: [String] {
@@ -130,6 +132,17 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 				return
 			}
 			beginAlert(for: prompt)
+		}
+		observe { [weak self] in
+			guard let self, let prompt = store.seriesDeletePrompt else {
+				return
+			}
+			guard let alert, let seriesDeleteAccessory else {
+				beginAlert(for: prompt)
+				return
+			}
+			seriesDeleteAccessory.update(prompt)
+			alert.layout()
 		}
 		// The store clears a search that would hide the task New Task created.
 		observe { [weak self] in
@@ -443,6 +456,40 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 			default:
 				store.send(.chainRepairDismissed)
 			}
+		}
+	}
+
+	/// Asks as a sheet on the window whether the Delete `prompt` takes each Series, and the chains
+	/// that
+	/// breaks, and reports the answer.
+	private func beginAlert(for prompt: ReplicaFeature.SeriesDeletePrompt) {
+		guard alert == nil, let window else {
+			return
+		}
+		let alert = NSAlert()
+		alert.messageText = prompt.choices.count == 1
+			? String(localized: "Delete a Repeating Task?")
+			: String(localized: "Delete Repeating Tasks?")
+		alert.informativeText = String(
+			localized: "Delete only the selected tasks, or every pending task in their series too.",
+		)
+		let accessory = SeriesDeleteAccessory(prompt: prompt) { [store] in store.send($0) }
+		alert.accessoryView = accessory
+		alert.addButton(withTitle: String(localized: "Delete"))
+		alert.addButton(withTitle: String(localized: "Cancel"))
+		self.alert = alert
+		seriesDeleteAccessory = accessory
+		alert.beginSheetModal(for: window) { [weak self] response in
+			guard let self else {
+				return
+			}
+			self.alert = nil
+			seriesDeleteAccessory = nil
+			guard response == .alertFirstButtonReturn else {
+				store.send(.seriesDeleteDismissed)
+				return
+			}
+			store.send(.seriesDeleteButtonTapped)
 		}
 	}
 
