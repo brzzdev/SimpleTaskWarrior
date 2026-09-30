@@ -11,7 +11,7 @@ import Testing
 	.enabled(if: contractTask != nil, "`just contract` names the `task` to run"),
 	.timeLimit(.minutes(1)),
 )
-final class CLIContractTests {
+final class CLIContractTests: Sendable {
 	let directory = URL.temporaryDirectory.appending(path: UUID().uuidString)
 	let planner = WritePlanner(taskrc: .defaults, timeZone: .gmt)
 	let replicaClient = ReplicaClient.liveValue
@@ -71,26 +71,17 @@ final class CLIContractTests {
 		// `task` holds the lock only while it commits, never at a prompt or in a hook, so a long
 		// import is how it holds it again and again. It commits each task on its own, and this many
 		// keep it going for seconds.
-		let imported = (1 ... 500).map {
-			[
-				"description": "Imported \($0)",
-				"entry": "20260101T000000Z",
-				"status": "pending",
-				"uuid": UUID().uuidString.lowercased(),
-			]
-		}
+		let imported = (1 ... 500).map { ["description": "Imported \($0)"] }
 		let file = directory.appending(path: "import.json")
 		try JSONEncoder().encode(imported).write(to: file)
-		let importer = try taskProcess(["import", file.path(percentEncoded: false)])
-		importer.standardOutput = FileHandle.nullDevice
-		try importer.run()
+		async let importing = task("import", file.path(percentEncoded: false))
 
 		// The import's first commits.
-		var read = try #require(await tasks.next()?.get())
-		while read.tasks.count == 1 {
+		var read: TaskSnapshot
+		repeat {
 			read = try #require(await tasks.next()?.get())
-		}
-		try await apply(
+		} while read.tasks.count == 1
+		let written = try await apply(
 			planner.plan(
 				.edit([uuid], .set("project", .string("Home"))),
 				tasks: properties(of: read.tasks),
@@ -100,13 +91,10 @@ final class CLIContractTests {
 		)
 
 		// Committed between the import's transactions, not after them.
-		#expect(importer.isRunning)
-		while importer.isRunning {
-			try await _Concurrency.Task.sleep(for: .milliseconds(100))
-		}
+		#expect(written.tasks.count < imported.count + 1)
 		// Nor did the app's lock fail an import commit.
-		#expect(importer.terminationStatus == 0)
-		#expect(try task("count") == "501")
+		_ = try await importing
+		#expect(try task("count") == "\(imported.count + 1)")
 		#expect(try export(uuid).project == "Home")
 	}
 
@@ -195,9 +183,10 @@ final class CLIContractTests {
 		return try #require(exported.first)
 	}
 
-	/// `task` on the Replica with `arguments`, not yet run, in an environment of its own so neither
-	/// the user's Taskrc nor their hooks take part.
-	private func taskProcess(_ arguments: [String]) throws -> Process {
+	/// Runs `task` on the Replica with `arguments`, in an environment of its own so neither the
+	/// user's Taskrc nor their hooks take part, and returns what it printed, trimmed.
+	@discardableResult
+	private func task(_ arguments: String...) throws -> String {
 		let process = Process()
 		process.executableURL = try URL(filePath: #require(contractTask))
 		process.arguments = ["rc.confirmation=0", "rc.hooks=0", "rc.verbose=nothing"] + arguments
@@ -206,14 +195,6 @@ final class CLIContractTests {
 			"TASKDATA": replica.path(percentEncoded: false),
 			"TASKRC": directory.appending(path: "taskrc").path(percentEncoded: false),
 		]
-		return process
-	}
-
-	/// Runs `task` on the Replica with `arguments`, as `taskProcess(_:)` sets it up, and returns
-	/// what it printed, trimmed.
-	@discardableResult
-	private func task(_ arguments: String...) throws -> String {
-		let process = try taskProcess(arguments)
 		let output = Pipe()
 		process.standardOutput = output
 		try process.run()
