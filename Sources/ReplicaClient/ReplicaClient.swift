@@ -26,10 +26,12 @@ public struct ReplicaClient: Sendable {
 	/// Opens the Replica in `directory` for one window, yielding its tasks at once and again
 	/// whenever anything, the CLI included, commits to it. Each read that fails yields its error,
 	/// and the first to succeed after one yields the tasks whether or not they changed. Throws
-	/// `lost` and closes the Replica once its database is no longer the one opened. Ending
-	/// iteration closes the Replica once any open or read in flight returns.
-	public var tasks: @Sendable (_ directory: URL)
-		-> AsyncThrowingStream<Result<TaskSnapshot, ReplicaError>, any Error> = { _ in .finished() }
+	/// `lost` and closes the Replica once its database is no longer the one opened. Where `expected`
+	/// is given, opens only that database, throwing `lost(expected)` where another is there, as for
+	/// a Replica that moved. Ending iteration closes the Replica once any open or read in flight
+	/// returns.
+	public var tasks: @Sendable (_ directory: URL, _ expected: ReplicaIdentity?)
+		-> AsyncThrowingStream<Result<TaskSnapshot, ReplicaError>, any Error> = { _, _ in .finished() }
 
 	/// Reverts the window's newest Undo point, provided it's still the Replica's newest, so a CLI
 	/// change is never undone on the CLI's behalf. Reads every task again, as `apply` does.
@@ -172,11 +174,11 @@ extension ReplicaClient: DependencyKey {
 		redo: { directory in
 			try await replicaErrors { try await openReplica(directory).redo() }
 		},
-		tasks: { directory in
+		tasks: { directory, expected in
 			AsyncThrowingStream { continuation in
 				let polling = _Concurrency.Task {
 					do {
-						let replica = try await Replica.open(directory: directory)
+						let replica = try await Replica.open(directory: directory, expected: expected)
 						// Cancelled while `open` waited, the window has closed, and one reopened on the
 						// folder may have registered its own already. Checked under the lock, since a
 						// window can only reopen once this one is cancelled.
@@ -219,7 +221,7 @@ extension ReplicaClient: DependencyKey {
 			try await replicaErrors { try await openReplica(directory).undo() }
 		},
 		validate: { directory in
-			_ = try await Replica.open(directory: directory)
+			_ = try await Replica.open(directory: directory, expected: nil)
 		},
 	)
 
@@ -306,13 +308,20 @@ actor Replica {
 	/// last reference is dropped on the actor's queue rather than wherever it happens to go.
 	isolated deinit {}
 
-	private init(directory: URL, queue: DispatchSerialQueue) throws(ReplicaError) {
+	private init(
+		directory: URL,
+		expected: ReplicaIdentity?,
+		queue: DispatchSerialQueue,
+	) throws(ReplicaError) {
 		self.directory = directory
 		self.queue = queue
 		// Read before opening, so a replacement landing mid-open fails the check after it, rather than
 		// being recorded as the database the engine has open.
 		guard let identity = ReplicaIdentity(directory: directory) else {
 			throw .notAReplica
+		}
+		if let expected, identity != expected {
+			throw .lost(expected)
 		}
 		self.identity = identity
 		do {
@@ -327,12 +336,16 @@ actor Replica {
 
 	/// Opens on the actor's queue, since opening waits on a held lock like any other call. The
 	/// whole actor is built there, so only it crosses back to the caller, never the engine handle.
-	static func open(directory: URL) async throws(ReplicaError) -> Replica {
+	/// Opens the Replica in `directory`, only where its database is `expected`, if given.
+	static func open(
+		directory: URL,
+		expected: ReplicaIdentity?,
+	) async throws(ReplicaError) -> Replica {
 		let queue = DispatchSerialQueue(label: "dev.brzz.SimpleTaskWarrior.Replica")
 		let replica = await withCheckedContinuation { continuation in
 			queue.async {
 				continuation.resume(returning: Result { () throws(ReplicaError) in
-					try Replica(directory: directory, queue: queue)
+					try Replica(directory: directory, expected: expected, queue: queue)
 				})
 			}
 		}

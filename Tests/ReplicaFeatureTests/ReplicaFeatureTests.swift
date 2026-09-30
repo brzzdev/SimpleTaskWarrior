@@ -1738,6 +1738,7 @@ struct ReplicaFeatureTests {
 		let identity = ReplicaIdentity(device: 1, inode: 2)
 		let location = LockIsolated(replicaDirectory)
 		let streams = TaskStreams()
+		let expected = LockIsolated<[ReplicaIdentity?]>([])
 		let store = TestStore(initialState: ReplicaFeature.State(bookmark: Data())) {
 			ReplicaFeature()
 		} withDependencies: {
@@ -1749,7 +1750,10 @@ struct ReplicaFeatureTests {
 			$0.continuousClock = TestClock()
 			$0.date.now = now
 			$0.replicaClient.identity = { _ in identity }
-			$0.replicaClient.tasks = { _ in streams.make() }
+			$0.replicaClient.tasks = { _, identity in
+				expected.withValue { $0.append(identity) }
+				return streams.make()
+			}
 			$0.taskrcClient.load = { _, _ in .finished }
 			$0.timeZone = .gmt
 		}
@@ -1782,6 +1786,8 @@ struct ReplicaFeatureTests {
 		await store.receive(\.directoryResolved) {
 			$0.directory = moved
 		}
+		// Only the Replica lost, should another replace it before it opens.
+		#expect(expected.value == [nil, identity])
 		// The Replica opened again counts its reads from 0.
 		streams[1].yield(.success(snapshot([milk])))
 		await store.receive(\.readSucceeded) {
@@ -1812,7 +1818,7 @@ struct ReplicaFeatureTests {
 			$0.continuousClock = TestClock()
 			$0.date.now = now
 			$0.replicaClient.identity = { _ in ReplicaIdentity(device: 1, inode: 3) }
-			$0.replicaClient.tasks = { _ in streams.make() }
+			$0.replicaClient.tasks = { _, _ in streams.make() }
 			$0.taskrcClient.load = { _, _ in .finished }
 			$0.timeZone = .gmt
 		}
@@ -1862,7 +1868,7 @@ struct ReplicaFeatureTests {
 			}
 			$0.continuousClock = TestClock()
 			$0.date.now = now
-			$0.replicaClient.tasks = { _ in streams.make() }
+			$0.replicaClient.tasks = { _, _ in streams.make() }
 			$0.taskrcClient.load = { _, _ in .finished }
 			$0.timeZone = .gmt
 		}
@@ -2127,7 +2133,7 @@ struct ReplicaFeatureTests {
 			$0.bookmarkClient.resolve = { _ in (directory, nil) }
 			$0.continuousClock = TestClock()
 			$0.date.now = now
-			$0.replicaClient.tasks = { _ in tasks }
+			$0.replicaClient.tasks = { _, _ in tasks }
 			$0.taskrcClient.load = { _, _ in .finished }
 			$0.timeZone = .gmt
 		}
@@ -2185,7 +2191,7 @@ struct ReplicaFeatureTests {
 			$0.bookmarkClient.resolve = { _ in (replicaDirectory, nil) }
 			$0.continuousClock = clock
 			$0.date = DateGenerator { time.value }
-			$0.replicaClient.tasks = { _ in tasks }
+			$0.replicaClient.tasks = { _, _ in tasks }
 			$0.taskrcClient.load = { _, _ in .finished }
 			$0.timeZone = .gmt
 		}
@@ -2440,7 +2446,7 @@ struct ReplicaFeatureTests {
 			$0.bookmarkClient.resolve = { _ in (replicaDirectory, nil) }
 			$0.continuousClock = clock
 			$0.date = DateGenerator { time.value }
-			$0.replicaClient.tasks = { _ in tasks }
+			$0.replicaClient.tasks = { _, _ in tasks }
 			$0.taskrcClient.load = { _, _ in .finished }
 			$0.timeZone = .gmt
 		}

@@ -28,7 +28,7 @@ final class ReplicaClientTests {
 	@Test
 	func applyCommitsOneActionAsOneUndoPoint() async throws {
 		let cli = try createReplica()
-		var tasks = replicaClient.tasks(directory).makeAsyncIterator()
+		var tasks = replicaClient.tasks(directory, nil).makeAsyncIterator()
 		_ = try await tasks.next()
 		let uuid = UUID()
 		let plan = try WritePlanner(taskrc: .defaults, timeZone: .gmt)
@@ -47,7 +47,7 @@ final class ReplicaClientTests {
 	@Test
 	func applyFailsAsBusyWhileAnotherConnectionHoldsTheLock() async throws {
 		_ = try createReplica()
-		var tasks = replicaClient.tasks(directory).makeAsyncIterator()
+		var tasks = replicaClient.tasks(directory, nil).makeAsyncIterator()
 		_ = try await tasks.next()
 		let plan = try WritePlanner(taskrc: .defaults, timeZone: .gmt)
 			.plan(.create(UUID(), description: "Buy milk"), tasks: [:], at: .now)
@@ -68,7 +68,7 @@ final class ReplicaClientTests {
 	func applyRefusesAStalePlanAndCommitsNothing() async throws {
 		let cli = try createReplica()
 		let uuid = try addPendingTask("Buy milk", with: cli)
-		var tasks = replicaClient.tasks(directory).makeAsyncIterator()
+		var tasks = replicaClient.tasks(directory, nil).makeAsyncIterator()
 		let stored = try #require(try await tasks.next()?.get().tasks.first)
 		let plan = try WritePlanner(taskrc: .defaults, timeZone: .gmt)
 			.plan(.complete([uuid], chains: .repair), tasks: [uuid: stored.properties], at: .now)
@@ -86,7 +86,7 @@ final class ReplicaClientTests {
 	@Test
 	func replacedDatabaseEndsTheStreamAndRefusesWrites() async throws {
 		_ = try createReplica()
-		var tasks = replicaClient.tasks(directory).makeAsyncIterator()
+		var tasks = replicaClient.tasks(directory, nil).makeAsyncIterator()
 		_ = try await tasks.next()
 		let identity = try #require(replicaClient.identity(directory))
 		let plan = try WritePlanner(taskrc: .defaults, timeZone: .gmt)
@@ -108,7 +108,7 @@ final class ReplicaClientTests {
 	func redoReappliesTheUndoneChangeUntilAnythingWrites() async throws {
 		let cli = try createReplica()
 		let uuid = try addPendingTask("Buy milk", with: cli)
-		var tasks = replicaClient.tasks(directory).makeAsyncIterator()
+		var tasks = replicaClient.tasks(directory, nil).makeAsyncIterator()
 		let stored = try #require(try await tasks.next()?.get().tasks.first)
 		try await complete(uuid, stored, as: "Complete Task")
 		_ = try await replicaClient.undo(directory)
@@ -128,9 +128,20 @@ final class ReplicaClientTests {
 	}
 
 	@Test
+	func tasksOpensOnlyTheDatabaseExpected() async throws {
+		_ = try createReplica()
+		let other = ReplicaIdentity(device: 0, inode: 0)
+		var tasks = replicaClient.tasks(directory, other).makeAsyncIterator()
+
+		await #expect(throws: ReplicaError.lost(other)) {
+			_ = try await tasks.next()
+		}
+	}
+
+	@Test
 	func tasksReadsAgainWhenTheCLICommits() async throws {
 		let cli = try createReplica()
-		var tasks = replicaClient.tasks(directory).makeAsyncIterator()
+		var tasks = replicaClient.tasks(directory, nil).makeAsyncIterator()
 		#expect(try await tasks.next()?.get().tasks.isEmpty == true)
 
 		let uuid = try addPendingTask("Buy milk", with: cli)
@@ -147,7 +158,7 @@ final class ReplicaClientTests {
 		let cli = try createReplica()
 		let uuid = try addPendingTask("Buy milk", with: cli)
 
-		var tasks = replicaClient.tasks(directory).makeAsyncIterator()
+		var tasks = replicaClient.tasks(directory, nil).makeAsyncIterator()
 
 		#expect(
 			try await tasks.next()?.get().tasks == [
@@ -160,7 +171,7 @@ final class ReplicaClientTests {
 	func undoRefusesWhenACLIChangeIsNewest() async throws {
 		let cli = try createReplica()
 		let uuid = try addPendingTask("Buy milk", with: cli)
-		var tasks = replicaClient.tasks(directory).makeAsyncIterator()
+		var tasks = replicaClient.tasks(directory, nil).makeAsyncIterator()
 		let stored = try #require(try await tasks.next()?.get().tasks.first)
 		let completed = try await complete(uuid, stored, as: "Complete Task")
 		#expect(completed.undoName == "Complete Task")
@@ -178,7 +189,7 @@ final class ReplicaClientTests {
 	func undoRevertsTheWindowsNewestChange() async throws {
 		let cli = try createReplica()
 		let uuid = try addPendingTask("Buy milk", with: cli)
-		var tasks = replicaClient.tasks(directory).makeAsyncIterator()
+		var tasks = replicaClient.tasks(directory, nil).makeAsyncIterator()
 		let stored = try #require(try await tasks.next()?.get().tasks.first)
 		try await complete(uuid, stored, as: "Complete Task")
 

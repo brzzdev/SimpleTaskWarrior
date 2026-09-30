@@ -876,7 +876,8 @@ struct ReplicaFeature {
 				await send(.bookmarkRefreshed(refreshed))
 			}
 			await send(.directoryResolved(directory))
-			for try await read in replicaClient.tasks(directory) {
+			// The Replica lost only, should another replace it before it opens.
+			for try await read in replicaClient.tasks(directory, lost) {
 				switch read {
 				case let .failure(error):
 					await send(.readFailed(error.localizedDescription))
