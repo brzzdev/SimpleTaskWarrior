@@ -13,7 +13,7 @@ DerivedData/
 *.xcuserstate
 *.xcscmblueprint
 
-# Release artifacts (archive, export, notarization zip) — see `just release`
+# Release artifacts (archive, export, zip, DMG) — see `just release` and `just publish`
 .release/
 
 # macOS

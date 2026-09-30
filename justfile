@@ -388,7 +388,7 @@ run: build
 # Interactive — prompts for an App Store Connect API key (recommended) or your
 # Apple ID + an app-specific password (appleid.apple.com ▸ Sign-In and Security
 # ▸ App-Specific Passwords). Stored under the `{{ notary_profile }}` profile.
-# One-time setup for `just release` and `just publish`: store Apple notarization credentials
+# One-time setup for `release` and `publish`: store notarization credentials
 notary-setup:
 	xcrun notarytool store-credentials {{ notary_profile }} --team-id "${TUIST_DEVELOPMENT_TEAM:?set TUIST_DEVELOPMENT_TEAM in your shell profile}"
 
@@ -479,8 +479,9 @@ release quit_and_launch="true": archive
 
 	echo "✅ Released {{ scheme }} → $dest"
 
-# Checked before the minutes of archiving and notarizing, rather than left to
-# `gh release create --verify-tag` at the end.
+# Refuses a version that isn't a clean `main` commit tagged `vX.Y.Z` here and on
+# origin. Checked before the minutes of archiving and notarizing, rather than
+# left to `gh release create --verify-tag` at the end.
 [private]
 check-tag version:
 	#!/usr/bin/env bash
@@ -514,7 +515,7 @@ check-tag version:
 # Run `just notary-setup` once first, then tag HEAD `v<version>` and push the
 # tag. Never installs, quits or launches the app. The zip is what Sparkle
 # updates from; the DMG is for downloading by hand.
-# Archive, notarize, and publish a zip and DMG as the GitHub release `v<version>`
+# Archive, notarize, and publish a zip and DMG as release `v<version>`
 publish version: (check-tag version) (archive version)
 	#!/usr/bin/env bash
 	set -euo pipefail
@@ -525,9 +526,6 @@ publish version: (check-tag version) (archive version)
 	staging="{{ release_dir }}/dmg"
 	unzipped="{{ release_dir }}/unzipped"
 	zip="{{ release_zip }}"
-	# The staged `/Applications` link would lead SwiftLint's build phase, which
-	# walks the tree, through every installed app.
-	trap 'rm -rf "$staging" "$unzipped"' EXIT
 
 	echo "==> Building the DMG"
 	mkdir "$staging"
@@ -536,6 +534,10 @@ publish version: (check-tag version) (archive version)
 	diskutil image create from --volumeName {{ scheme }} "$staging" "$dmg"
 	# Signed by the certificate the export chose for the app.
 	identity="$(codesign -dvv "$app" 2>&1 | sed -n 's/^Authority=//p' | head -1)"
+	if [ -z "$identity" ]; then
+		echo "$app has no signing identity to sign the DMG with" >&2
+		exit 1
+	fi
 	codesign --sign "$identity" --timestamp "$dmg"
 
 	# One submission covers the DMG and the app inside it, which is the exported
