@@ -64,6 +64,53 @@ final class CLIContractTests {
 	}
 
 	@Test
+	func anAppWriteWaitsOutATaskImportHoldingTheLock() async throws {
+		let uuid = try addTask("Seed")
+		var tasks = replicaClient.tasks(replica, nil).makeAsyncIterator()
+		_ = try await tasks.next()
+		// `task` holds the lock only while it commits, never at a prompt or in a hook, so a long
+		// import is how it holds it again and again. It commits each task on its own, and this many
+		// keep it going for seconds.
+		let imported = (1 ... 500).map {
+			[
+				"description": "Imported \($0)",
+				"entry": "20260101T000000Z",
+				"status": "pending",
+				"uuid": UUID().uuidString.lowercased(),
+			]
+		}
+		let file = directory.appending(path: "import.json")
+		try JSONEncoder().encode(imported).write(to: file)
+		let importer = try taskProcess(["import", file.path(percentEncoded: false)])
+		importer.standardOutput = FileHandle.nullDevice
+		try importer.run()
+
+		// The import's first commits.
+		var read = try #require(await tasks.next()?.get())
+		while read.tasks.count == 1 {
+			read = try #require(await tasks.next()?.get())
+		}
+		try await apply(
+			planner.plan(
+				.edit([uuid], .set("project", .string("Home"))),
+				tasks: properties(of: read.tasks),
+				at: .now,
+			),
+			as: "Set Project",
+		)
+
+		// Committed between the import's transactions, not after them.
+		#expect(importer.isRunning)
+		while importer.isRunning {
+			try await _Concurrency.Task.sleep(for: .milliseconds(100))
+		}
+		// Nor did the app's lock fail an import commit.
+		#expect(importer.terminationStatus == 0)
+		#expect(try task("count") == "501")
+		#expect(try export(uuid).project == "Home")
+	}
+
+	@Test
 	func taskReadsAndChangesAnAppWrite() async throws {
 		// The app opens a Replica but never creates one.
 		try addTask("Seed")
@@ -148,10 +195,9 @@ final class CLIContractTests {
 		return try #require(exported.first)
 	}
 
-	/// Runs `task` on the Replica with `arguments`, in an environment of its own so neither the
-	/// user's Taskrc nor their hooks take part, and returns what it printed, trimmed.
-	@discardableResult
-	private func task(_ arguments: String...) throws -> String {
+	/// `task` on the Replica with `arguments`, not yet run, in an environment of its own so neither
+	/// the user's Taskrc nor their hooks take part.
+	private func taskProcess(_ arguments: [String]) throws -> Process {
 		let process = Process()
 		process.executableURL = try URL(filePath: #require(contractTask))
 		process.arguments = ["rc.confirmation=0", "rc.hooks=0", "rc.verbose=nothing"] + arguments
@@ -160,6 +206,14 @@ final class CLIContractTests {
 			"TASKDATA": replica.path(percentEncoded: false),
 			"TASKRC": directory.appending(path: "taskrc").path(percentEncoded: false),
 		]
+		return process
+	}
+
+	/// Runs `task` on the Replica with `arguments`, as `taskProcess(_:)` sets it up, and returns
+	/// what it printed, trimmed.
+	@discardableResult
+	private func task(_ arguments: String...) throws -> String {
+		let process = try taskProcess(arguments)
 		let output = Pipe()
 		process.standardOutput = output
 		try process.run()
