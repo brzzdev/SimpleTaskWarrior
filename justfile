@@ -28,12 +28,12 @@ swiftformat_base := "/tmp/swiftformat-base-SimpleTaskWarrior"
 swiftformat_url := "https://raw.githubusercontent.com/brzzdev/Configs/main/Configs/swiftformat"
 notary_profile := "SimpleTaskWarrior"
 release_dir := ".release"
-# The engine's one target. The `engine` build and the `engine-test` build both
-# write into `Engine/target/` under it, which CI caches.
+# The one target `Engine/rust-toolchain.toml` installs.
 engine_target := "aarch64-apple-darwin"
 # The Brewfile's rustup is keg-only, so it is off PATH unless the shell put it
 # there. Recipes prepend it, because Homebrew's `rust` formula puts a cargo in
-# /opt/homebrew/bin that ignores rust-toolchain.toml; rustup's proxies honour it.
+# /opt/homebrew/bin that ignores rust-toolchain.toml; rustup's proxies honour it,
+# from a recipe whose working directory is `Engine/`.
 rustup_bin := "/opt/homebrew/opt/rustup/bin"
 
 # List available recipes
@@ -45,12 +45,12 @@ default:
 # (cargo in a script phase fights the user-script sandbox), so run it after
 # pulling engine changes.
 # Build the Rust engine, its Swift bindings and the xcframework
+[working-directory: "Engine"]
 engine:
 	#!/usr/bin/env bash
 	set -euo pipefail
 
 	export PATH="{{ rustup_bin }}:$PATH"
-	cd Engine
 	target={{ engine_target }}
 	cargo build --locked --release --target "$target" --package engine
 	library="target/$target/release/libengine.a"
@@ -85,7 +85,6 @@ engine:
 		xcodebuild -create-xcframework -library "$library" -headers build/headers -output "$xcframework"
 	fi
 
-# `Engine/` is the working directory so rustup finds `rust-toolchain.toml`.
 # Run the Rust engine's tests
 [working-directory: "Engine"]
 engine-test:
