@@ -14,11 +14,15 @@ let fileAccessReason =
 let baseSettings: SettingsDictionary = [
 	"ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon",
 	"ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS": "YES",
+	// Development defaults, with `MARKETING_VERSION`: `just archive` stamps the build number, and
+	// `just publish` the version from the release's tag.
+	"CURRENT_PROJECT_VERSION": "0",
 	"ENABLE_HARDENED_RUNTIME": "YES",
 	// Off so the SwiftLint build phase can read the whole source tree. This is a
 	// build-time setting only — it does not affect the shipped app's hardened
 	// runtime or signing.
 	"ENABLE_USER_SCRIPT_SANDBOXING": "NO",
+	"MARKETING_VERSION": "0.0.0",
 	"SWIFT_VERSION": "6.0",
 ]
 
@@ -72,8 +76,8 @@ let project = Project(
 				"CFBundleInfoDictionaryVersion": "6.0",
 				"CFBundleName": "$(PRODUCT_NAME)",
 				"CFBundlePackageType": "APPL",
-				"CFBundleShortVersionString": "1.0",
-				"CFBundleVersion": "1",
+				"CFBundleShortVersionString": "$(MARKETING_VERSION)",
+				"CFBundleVersion": "$(CURRENT_PROJECT_VERSION)",
 				"LSApplicationCategoryType": "public.app-category.productivity",
 				"LSMinimumSystemVersion": "$(MACOSX_DEPLOYMENT_TARGET)",
 				"NSDesktopFolderUsageDescription": .string(fileAccessReason),

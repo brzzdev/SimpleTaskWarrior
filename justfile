@@ -19,7 +19,7 @@ destination := "platform=macOS"
 #
 # Xcode.app keeps its own DerivedData under ~/Library, so a CLI build and an
 # Xcode build do not share one; the first after switching cold-compiles.
-# `release` deliberately does not pin it — a notarised build has no business
+# `archive` deliberately does not pin it — a notarised build has no business
 # reusing an incremental dev cache.
 derived_data := ".build/xcode"
 # Repo-scoped because a path shared across repos lets two checkouts on different
@@ -30,6 +30,9 @@ swiftformat_url := "https://raw.githubusercontent.com/brzzdev/Configs/main/Confi
 debug_product := scheme + " Debug"
 notary_profile := "SimpleTaskWarrior"
 release_dir := ".release"
+# The app `archive` exports, which `release` and `publish` notarize.
+release_app := release_dir / "export" / scheme + ".app"
+release_zip := release_dir / scheme + ".zip"
 # The one target `Engine/rust-toolchain.toml` installs.
 engine_target := "aarch64-apple-darwin"
 # The Brewfile's rustup is keg-only, so it is off PATH unless the shell put it
@@ -385,26 +388,26 @@ run: build
 # Interactive — prompts for an App Store Connect API key (recommended) or your
 # Apple ID + an app-specific password (appleid.apple.com ▸ Sign-In and Security
 # ▸ App-Specific Passwords). Stored under the `{{ notary_profile }}` profile.
-# One-time setup for `just release`: store Apple notarization credentials
+# One-time setup for `release` and `publish`: store notarization credentials
 notary-setup:
 	xcrun notarytool store-credentials {{ notary_profile }} --team-id "${TUIST_DEVELOPMENT_TEAM:?set TUIST_DEVELOPMENT_TEAM in your shell profile}"
 
-# Run `just notary-setup` once first. By default the running app is quit and the
-# freshly notarized one launched; pass `false` to skip that:
-#   just release          # quit old, install, launch new (default)
-#   just release false    # install only, don't touch the running app
-# Archive, notarize (Developer ID), and install to /Applications
-release quit_and_launch="true": ensure-generated
+# Archives the app and exports it with Developer ID to `release_app`. The build
+# number counts the commits reaching HEAD, which only grows along `main` while
+# it is never rewritten; Sparkle orders releases by it. `version` stamps the
+# marketing version over the manifest's development default.
+[private]
+archive version="": ensure-generated
 	#!/usr/bin/env bash
 	set -euo pipefail
 
 	team="${TUIST_DEVELOPMENT_TEAM:?set TUIST_DEVELOPMENT_TEAM in your shell profile}"
 	archive="{{ release_dir }}/{{ scheme }}.xcarchive"
-	export_dir="{{ release_dir }}/export"
 	options="{{ release_dir }}/ExportOptions.plist"
-	app="$export_dir/{{ scheme }}.app"
-	zip="{{ release_dir }}/{{ scheme }}.zip"
-	dest="/Applications/{{ scheme }}.app"
+	versioning=("CURRENT_PROJECT_VERSION=$(git rev-list --count HEAD)")
+	if [ -n "{{ version }}" ]; then
+		versioning+=("MARKETING_VERSION={{ version }}")
+	fi
 
 	rm -rf "{{ release_dir }}"
 	mkdir -p "{{ release_dir }}"
@@ -414,7 +417,7 @@ release quit_and_launch="true": ensure-generated
 		-workspace {{ workspace }} -scheme {{ scheme }} \
 		-destination 'generic/platform=macOS' \
 		-archivePath "$archive" \
-		-allowProvisioningUpdates | xcbeautify
+		-allowProvisioningUpdates "${versioning[@]}" | xcbeautify
 
 	echo "==> Exporting (Developer ID)"
 	cat > "$options" <<-PLIST
@@ -435,8 +438,21 @@ release quit_and_launch="true": ensure-generated
 	PLIST
 	xcodebuild -exportArchive \
 		-archivePath "$archive" \
-		-exportPath "$export_dir" \
+		-exportPath "{{ parent_directory(release_app) }}" \
 		-exportOptionsPlist "$options" | xcbeautify
+
+# Run `just notary-setup` once first. By default the running app is quit and the
+# freshly notarized one launched; pass `false` to skip that:
+#   just release          # quit old, install, launch new (default)
+#   just release false    # install only, don't touch the running app
+# Archive, notarize (Developer ID), and install to /Applications
+release quit_and_launch="true": archive
+	#!/usr/bin/env bash
+	set -euo pipefail
+
+	app="{{ release_app }}"
+	zip="{{ release_zip }}"
+	dest="/Applications/{{ scheme }}.app"
 
 	echo "==> Notarizing (waiting for Apple — this can take a few minutes)"
 	ditto -c -k --keepParent "$app" "$zip"
@@ -462,6 +478,130 @@ release quit_and_launch="true": ensure-generated
 	fi
 
 	echo "✅ Released {{ scheme }} → $dest"
+
+# Refuses a version that isn't a clean `main` commit tagged `vX.Y.Z` here and on
+# origin, and newer than every other release. Checked before the minutes of
+# archiving and notarizing, rather than left to
+# `gh release create --verify-tag` at the end.
+[private]
+check-tag version:
+	#!/usr/bin/env bash
+	set -euo pipefail
+
+	tag="v{{ version }}"
+	if [[ ! "{{ version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+		echo "the version is X.Y.Z, not {{ version }}" >&2
+		exit 1
+	fi
+	if [ -n "$(git status --porcelain)" ]; then
+		echo "the working tree has changes the tag doesn't" >&2
+		exit 1
+	fi
+	if [ "$(git rev-parse -q --verify "refs/tags/$tag^{commit}")" != "$(git rev-parse HEAD)" ]; then
+		echo "$tag isn't a tag on HEAD" >&2
+		exit 1
+	fi
+	remote="$(git ls-remote --tags origin "refs/tags/$tag" | cut -f1)"
+	if [ "$remote" != "$(git rev-parse "refs/tags/$tag")" ]; then
+		echo "$tag isn't on origin as it is here: push it first" >&2
+		exit 1
+	fi
+	# A shallow clone counts only the commits it holds, so neither the build
+	# number nor the comparisons below would be right.
+	if [ "$(git rev-parse --is-shallow-repository)" = true ]; then
+		echo "the clone is shallow: run \`git fetch --unshallow\` first" >&2
+		exit 1
+	fi
+	# Off `main`, the commit count stops ordering releases.
+	git fetch --quiet origin main
+	if ! git merge-base --is-ancestor HEAD origin/main; then
+		echo "HEAD isn't on origin/main" >&2
+		exit 1
+	fi
+
+	# Sparkle upgrades only to a higher build number, the commit count `archive`
+	# stamps, so HEAD's must exceed every other release's. Releases are origin's
+	# `vX.Y.Z` tags, each with the commit it peels to, rather than local tags,
+	# which can be stale. Captured first so a failing git stops the check.
+	build="$(git rev-list --count HEAD)"
+	releases="$(git ls-remote --tags origin 'refs/tags/v*' | awk '
+		{ name = $2; sub("^refs/tags/", "", name); sub(/\^\{\}$/, "", name); commit[name] = $1 }
+		END { for (name in commit) if (name ~ /^v[0-9]+\.[0-9]+\.[0-9]+$/) print name, commit[name] }
+	')"
+	# Runs a git test whose exit status 1 means false, stopping the check on any
+	# other failure rather than reading it as false and skipping a release.
+	holds() {
+		local status=0
+		"$@" || status=$?
+		[ "$status" -le 1 ] || exit "$status"
+		return "$status"
+	}
+	while read -r other commit; do
+		[ -z "$other" ] && continue
+		[ "$other" = "$tag" ] && continue
+		# Only a tag on `main` can have been published. The clone holds all of
+		# `main`, so a commit it lacks is off it too.
+		holds git rev-parse -q --verify "$commit^{commit}" > /dev/null || continue
+		holds git merge-base --is-ancestor "$commit" origin/main || continue
+		count="$(git rev-list --count "$commit")"
+		if [ "$count" -ge "$build" ]; then
+			echo "$other is built at $count, not below HEAD's $build" >&2
+			exit 1
+		fi
+	done <<< "$releases"
+
+# Run `just notary-setup` once first, then tag HEAD `v<version>` and push the
+# tag. Never installs, quits or launches the app. The zip is what Sparkle
+# updates from; the DMG is for downloading by hand.
+# Archive, notarize, and publish a zip and DMG as release `v<version>`
+publish version: (check-tag version) (archive version)
+	#!/usr/bin/env bash
+	set -euo pipefail
+
+	tag="v{{ version }}"
+	app="{{ release_app }}"
+	dmg="{{ release_dir }}/{{ scheme }}.dmg"
+	staging="{{ release_dir }}/dmg"
+	unzipped="{{ release_dir }}/unzipped"
+	zip="{{ release_zip }}"
+
+	echo "==> Building the DMG"
+	mkdir "$staging"
+	ditto "$app" "$staging/{{ scheme }}.app"
+	ln -s /Applications "$staging/Applications"
+	diskutil image create from --volumeName {{ scheme }} "$staging" "$dmg"
+	# Signed by the certificate the export chose for the app.
+	identity="$(codesign -dvv "$app" 2>&1 | sed -n 's/^Authority=//p' | head -1)"
+	if [ -z "$identity" ]; then
+		echo "$app has no signing identity to sign the DMG with" >&2
+		exit 1
+	fi
+	codesign --sign "$identity" --timestamp "$dmg"
+
+	# One submission covers the DMG and the app inside it, which is the exported
+	# app unchanged, so its ticket staples to both.
+	echo "==> Notarizing (waiting for Apple — this can take a few minutes)"
+	xcrun notarytool submit "$dmg" --keychain-profile {{ notary_profile }} --wait
+
+	echo "==> Stapling and checking"
+	xcrun stapler staple "$dmg"
+	xcrun stapler staple "$app"
+	xcrun stapler validate "$dmg"
+	xcrun stapler validate "$app"
+	spctl -a -vv -t open --context context:primary-signature "$dmg"
+	spctl -a -vv -t exec "$app"
+
+	# Zipped after stapling, so the ticket travels with the app for offline use,
+	# and checked as it comes back out.
+	ditto -c -k --keepParent "$app" "$zip"
+	ditto -x -k "$zip" "$unzipped"
+	xcrun stapler validate "$unzipped/{{ scheme }}.app"
+	spctl -a -vv -t exec "$unzipped/{{ scheme }}.app"
+
+	echo "==> Publishing $tag"
+	gh release create "$tag" --verify-tag --generate-notes "$zip" "$dmg"
+
+	echo "✅ Published {{ scheme }} $tag"
 
 # Fetched rather than vendored, but at most once a day: this is a dependency of
 # `format-staged`, which the pre-commit hook runs on every commit, so an
