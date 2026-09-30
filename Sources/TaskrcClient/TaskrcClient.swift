@@ -10,8 +10,8 @@ public struct TaskrcClient: Sendable {
 	/// Parses the Taskrc that `taskrc` returns, or the one the CLI reads by default when it returns
 	/// nil, then parses it again whenever it or an include it read changes. Calls `taskrc` before
 	/// every parse, so a Taskrc that was moved or replaced is found again. With neither, yields TW's
-	/// defaults until a default Taskrc appears, and those defaults become the last good Taskrc. A
-	/// Debug build has no default Taskrc. Until a parse succeeds, a broken Taskrc runs on `lastGood`.
+	/// defaults, which become the last good Taskrc, until a default Taskrc appears; a Debug build has
+	/// none, so it waits for a pairing. Until a parse succeeds, a broken Taskrc runs on `lastGood`.
 	public var load: @Sendable (
 		_ taskrc: @escaping @Sendable () -> URL?,
 		_ lastGood: Taskrc,
@@ -76,7 +76,7 @@ extension TaskrcClient: DependencyKey {
 							lastGood = .defaults
 							publish(Loaded(taskrc: lastGood, url: nil))
 							watched = []
-							// Pairing a Taskrc starts another load.
+							// Waits on the default Taskrc alone, since pairing one starts another load.
 							await defaultTaskrcAppears()
 							continue
 						}
@@ -139,7 +139,8 @@ private func defaultTaskrc() -> URL? {
 	nil
 }
 
-/// Returns once cancelled: nothing yields to this stream.
+/// Returns once cancelled. Nothing yields to this stream, and dropping its continuation doesn't
+/// finish it, so only cancellation ends the iteration.
 private func defaultTaskrcAppears() async {
 	let never = AsyncStream<Void> { _ in }
 	for await _ in never {}

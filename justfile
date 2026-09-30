@@ -26,7 +26,7 @@ derived_data := ".build/xcode"
 # config revisions fight over one file, each overwriting the other's mid-commit.
 swiftformat_base := "/tmp/swiftformat-base-SimpleTaskWarrior"
 swiftformat_url := "https://raw.githubusercontent.com/brzzdev/Configs/main/Configs/swiftformat"
-# The Debug configuration's product name, which names the `.app` and executable Run and Test build.
+# The Debug configuration's product name, which names the `.app` and executable `run` launches.
 debug_product := scheme + " Debug"
 notary_profile := "SimpleTaskWarrior"
 release_dir := ".release"
