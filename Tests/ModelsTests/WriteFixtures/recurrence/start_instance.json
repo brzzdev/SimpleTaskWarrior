@@ -1,0 +1,70 @@
+{
+	"after": {
+		"5088debc-917c-485c-83ef-40b9d0dad7ea": {
+			"description": "Alpha",
+			"due": "1893456000",
+			"entry": "1790777722",
+			"imask": "0",
+			"modified": "1790777722",
+			"parent": "dea3aad5-7d1d-4338-9ad4-217ede01662c",
+			"recur": "weekly",
+			"rtype": "periodic",
+			"start": "1790777722",
+			"status": "pending"
+		},
+		"dea3aad5-7d1d-4338-9ad4-217ede01662c": {
+			"description": "Alpha",
+			"due": "1893456000",
+			"entry": "1790777722",
+			"mask": "-",
+			"modified": "1790777722",
+			"recur": "weekly",
+			"rtype": "periodic",
+			"status": "recurring"
+		}
+	},
+	"before": {
+		"5088debc-917c-485c-83ef-40b9d0dad7ea": {
+			"description": "Alpha",
+			"due": "1893456000",
+			"entry": "1790777722",
+			"imask": "0",
+			"modified": "1790777722",
+			"parent": "dea3aad5-7d1d-4338-9ad4-217ede01662c",
+			"recur": "weekly",
+			"rtype": "periodic",
+			"status": "pending"
+		},
+		"dea3aad5-7d1d-4338-9ad4-217ede01662c": {
+			"description": "Alpha",
+			"due": "1893456000",
+			"entry": "1790777722",
+			"mask": "-",
+			"modified": "1790777722",
+			"recur": "weekly",
+			"rtype": "periodic",
+			"status": "recurring"
+		}
+	},
+	"now": 1790777722,
+	"operations": [
+		{
+			"Update": {
+				"old_value": "1790777722",
+				"property": "modified",
+				"timestamp": "2026-09-30T14:15:22.325889Z",
+				"uuid": "5088debc-917c-485c-83ef-40b9d0dad7ea",
+				"value": "1790777722"
+			}
+		},
+		{
+			"Update": {
+				"old_value": null,
+				"property": "start",
+				"timestamp": "2026-09-30T14:15:22.325889Z",
+				"uuid": "5088debc-917c-485c-83ef-40b9d0dad7ea",
+				"value": "1790777722"
+			}
+		}
+	]
+}

@@ -1,0 +1,97 @@
+{
+	"after": {
+		"4ad84c27-bc8a-4386-a23a-fc184ac489bf": {
+			"description": "Alpha",
+			"due": "1893456000",
+			"entry": "1790777088",
+			"mask": "+",
+			"modified": "1790777088",
+			"recur": "weekly",
+			"rtype": "periodic",
+			"status": "recurring"
+		},
+		"5acc5af3-9652-451d-bdf0-7b0a7dae58c3": {
+			"description": "Alpha",
+			"due": "1893456000",
+			"end": "1790777088",
+			"entry": "1790777088",
+			"imask": "0",
+			"modified": "1790777088",
+			"parent": "4ad84c27-bc8a-4386-a23a-fc184ac489bf",
+			"recur": "weekly",
+			"rtype": "periodic",
+			"status": "completed"
+		}
+	},
+	"before": {
+		"4ad84c27-bc8a-4386-a23a-fc184ac489bf": {
+			"description": "Alpha",
+			"due": "1893456000",
+			"entry": "1790777088",
+			"mask": "-",
+			"modified": "1790777088",
+			"recur": "weekly",
+			"rtype": "periodic",
+			"status": "recurring"
+		},
+		"5acc5af3-9652-451d-bdf0-7b0a7dae58c3": {
+			"description": "Alpha",
+			"due": "1893456000",
+			"entry": "1790777088",
+			"imask": "0",
+			"modified": "1790777088",
+			"parent": "4ad84c27-bc8a-4386-a23a-fc184ac489bf",
+			"recur": "weekly",
+			"rtype": "periodic",
+			"status": "pending"
+		}
+	},
+	"now": 1790777088,
+	"operations": [
+		{
+			"Update": {
+				"old_value": "1790777088",
+				"property": "modified",
+				"timestamp": "2026-09-30T14:04:48.228506Z",
+				"uuid": "4ad84c27-bc8a-4386-a23a-fc184ac489bf",
+				"value": "1790777088"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "-",
+				"property": "mask",
+				"timestamp": "2026-09-30T14:04:48.228506Z",
+				"uuid": "4ad84c27-bc8a-4386-a23a-fc184ac489bf",
+				"value": "+"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "1790777088",
+				"property": "modified",
+				"timestamp": "2026-09-30T14:04:48.228913Z",
+				"uuid": "5acc5af3-9652-451d-bdf0-7b0a7dae58c3",
+				"value": "1790777088"
+			}
+		},
+		{
+			"Update": {
+				"old_value": null,
+				"property": "end",
+				"timestamp": "2026-09-30T14:04:48.228913Z",
+				"uuid": "5acc5af3-9652-451d-bdf0-7b0a7dae58c3",
+				"value": "1790777088"
+			}
+		},
+		{
+			"Update": {
+				"old_value": "pending",
+				"property": "status",
+				"timestamp": "2026-09-30T14:04:48.228918Z",
+				"uuid": "5acc5af3-9652-451d-bdf0-7b0a7dae58c3",
+				"value": "completed"
+			}
+		}
+	]
+}

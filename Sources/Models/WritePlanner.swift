@@ -24,7 +24,7 @@ public struct WritePlanner: Sendable {
 		let epoch = String(now.epoch)
 		switch action {
 		case let .complete(ids, chains):
-			return try plan(ids, tasks: tasks, at: epoch, chains: chains) { $0.complete(at: epoch) }
+			return try plan(ids, tasks: tasks, at: now, chains: chains) { $0.complete(at: epoch) }
 
 		case let .create(id, description):
 			let description = description.trimmingSpaces
@@ -47,7 +47,7 @@ public struct WritePlanner: Sendable {
 			return plan
 
 		case let .delete(ids, chains):
-			return try plan(ids, tasks: tasks, at: epoch, chains: chains) { $0.delete(at: epoch) }
+			return try plan(ids, tasks: tasks, at: now, chains: chains) { $0.delete(at: epoch) }
 
 		case let .edit(ids, edit):
 			let edit = edit.trimmed
@@ -61,10 +61,10 @@ public struct WritePlanner: Sendable {
 				try draft.apply(edit, at: now, resolving: self)
 			}
 			guard case let .addDependency(dependency) = edit else {
-				return try plan(ids, tasks: tasks, at: epoch, change: apply)
+				return try plan(ids, tasks: tasks, at: now, change: apply)
 			}
 			let searched = try refuseCycle(dependingOn: dependency, from: ids, tasks: tasks)
-			var plan = try plan(ids, tasks: tasks, at: epoch, change: apply)
+			var plan = try plan(ids, tasks: tasks, at: now, change: apply)
 			guard !plan.operations.isEmpty else {
 				return plan
 			}
@@ -74,13 +74,13 @@ public struct WritePlanner: Sendable {
 			return plan
 
 		case let .markPending(ids):
-			return try plan(ids, tasks: tasks, at: epoch) { $0.markPending() }
+			return try plan(ids, tasks: tasks, at: now) { $0.markPending() }
 
 		case let .start(ids):
-			return try plan(ids, tasks: tasks, at: epoch) { $0.start(at: epoch) }
+			return try plan(ids, tasks: tasks, at: now) { $0.start(at: epoch) }
 
 		case let .stop(ids):
-			return try plan(ids, tasks: tasks, at: epoch) { $0.stop() }
+			return try plan(ids, tasks: tasks, at: now) { $0.stop() }
 		}
 	}
 
@@ -195,7 +195,7 @@ public struct WritePlanner: Sendable {
 	private func plan(
 		_ ids: [Task.ID],
 		tasks: [Task.ID: [String: String]],
-		at epoch: String,
+		at now: Date,
 		chains: ChainRepair = .leave,
 		change: (inout Draft) throws(WritePlanError) -> Void,
 	) throws(WritePlanError) -> WritePlan {
@@ -216,11 +216,14 @@ public struct WritePlanner: Sendable {
 				repairedChains.append(chain)
 			}
 		}
-		var all = drafts.all
-		for index in all.indices {
-			all[index].rewriteLegacyWaiting()
+		// The indices are taken before the mask update drafts any template, which needs no pass of its
+		// own: it has no `parent`.
+		for index in drafts.all.indices {
+			try drafts[index].refuseRemovingSeriesDue()
+			drafts[index].rewriteLegacyWaiting()
+			updateRecurrenceMask(of: index, in: &drafts, at: now)
 		}
-		var plan = WritePlan(all, epoch: epoch)
+		var plan = WritePlan(drafts.all, epoch: String(now.epoch))
 		plan.repairedChains = repairedChains
 		return plan
 	}
@@ -339,6 +342,45 @@ public struct WritePlanner: Sendable {
 			}
 		}
 		return searched
+	}
+
+	/// Records the status of the Recurrence instance the draft at `index` changed in its template's
+	/// `mask`, as TW's `updateRecurrenceMask` does: `-` pending, `W` waiting at `now`, `+` completed,
+	/// `X` deleted. Only the instance's character changes, so the mask never shortens, and a missing,
+	/// invalid or out-of-range `imask` leaves it alone, where TW reads a missing or invalid one as 0.
+	private func updateRecurrenceMask(of index: Int, in drafts: inout Drafts, at now: Date) {
+		guard drafts[index].isChanged, drafts[index].properties["parent"] != nil else {
+			return
+		}
+		// Read, so a CLI write that moves the instance to another template or index fails the plan.
+		guard
+			let templateID = drafts[index].read("parent").flatMap(UUID.init(uuidString:)),
+			let imask = drafts[index].read("imask").flatMap(Int.init),
+			let template = drafts.index(templateID),
+			var mask = drafts[template].read("mask").map(Array.init),
+			mask.indices.contains(imask),
+			let status = drafts[index].read("status").flatMap(Status.init(rawValue:))
+		else {
+			return
+		}
+		let symbol: Character =
+			switch status {
+			case .completed:
+				"+"
+
+			case .deleted:
+				"X"
+
+			// `Task.isWaiting`, over the stored `wait`.
+			case .pending:
+				drafts[index].read("wait").flatMap { Date(epoch: $0) }.map { $0 > now } == true ? "W" : "-"
+
+			// Only a template has this status; TW writes `?` for an instance that has it anyway.
+			case .recurring:
+				"?"
+			}
+		mask[imask] = symbol
+		drafts[template].set("mask", String(mask))
 	}
 }
 
@@ -469,6 +511,8 @@ public enum WritePlanError: Equatable, LocalizedError, Sendable {
 	case invalidInput(property: String, DateInputError)
 	/// The task isn't in the snapshot, as after a `task undo` of its creation, or a purge.
 	case noSuchTask(Task.ID)
+	/// An edit removing `due` from a task in a Series, which repeats from it.
+	case removedSeriesDue
 	/// A virtual tag such as `PENDING`, which TW computes and refuses to add or remove.
 	case reservedTag(String)
 	/// The task would depend on itself.
@@ -493,6 +537,11 @@ public enum WritePlanError: Equatable, LocalizedError, Sendable {
 
 		case .noSuchTask:
 			String(localized: "The task no longer exists.")
+
+		case .removedSeriesDue:
+			String(
+				localized: "A repeating task needs a due date, which its series repeats from. Change the series with the task command.",
+			)
 
 		case let .reservedTag(tag):
 			String(localized: "\(tag) is a virtual tag, which Taskwarrior sets itself.")
@@ -599,6 +648,10 @@ private struct Draft {
 	private(set) var reads: [String: String?] = [:]
 
 	private let original: [String: String]
+
+	var isChanged: Bool {
+		properties != original
+	}
 
 	init(id: Task.ID, properties: [String: String], isNew: Bool) {
 		self.id = id
@@ -711,11 +764,20 @@ private struct Draft {
 		return properties[property]
 	}
 
+	/// Refuses removing `due` from a task with `recur`, as `task modify due:` does, whichever change
+	/// removed it. A removal reads `recur` either way, so a CLI write that adds one fails the plan.
+	mutating func refuseRemovingSeriesDue() throws(WritePlanError) {
+		guard original["due"] != nil, properties["due"] == nil, read("recur") != nil else {
+			return
+		}
+		throw .removedSeriesDue
+	}
+
 	/// A legacy stored `waiting` becomes `pending` on any write that changes the task, as TW 3 writes
 	/// it back, while a write that changes nothing leaves it. Runs after the change it follows, and
 	/// looks at `status` without reading it, so only a rewrite expects it.
 	mutating func rewriteLegacyWaiting() {
-		guard properties != original, properties["status"] == legacyWaiting else {
+		guard isChanged, properties["status"] == legacyWaiting else {
 			return
 		}
 		set("status", Status.pending.rawValue)
