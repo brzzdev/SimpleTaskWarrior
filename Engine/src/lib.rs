@@ -47,9 +47,10 @@ impl std::fmt::Display for EngineError {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		match self {
 			EngineError::Busy => f.write_str("the Replica is locked by another connection"),
-			EngineError::Failed { message } => f.write_str(message),
+			EngineError::Failed { message } | EngineError::UndoUnconfirmed { message } => {
+				f.write_str(message)
+			}
 			EngineError::NotAReplica => f.write_str("the folder has no TaskChampion database"),
-			EngineError::UndoUnconfirmed { message } => f.write_str(message),
 			EngineError::UnsupportedSchema { major, minor } => {
 				write!(f, "schema version {major}.{minor} is newer than this engine reads")
 			}
@@ -797,15 +798,8 @@ mod tests {
 	#[test]
 	fn reports_an_undo_whose_confirming_read_fails_too_as_unconfirmed() {
 		let (directory, handle) = open_replica();
-		let uuid = Uuid::new_v4();
-		let create = PlannedOperation::Create {
-			uuid: uuid.to_string(),
-		};
-		let ApplyOutcome::Committed { operations } =
-			handle.apply(vec![create, set_description(uuid, "app")], Vec::new()).unwrap()
-		else {
-			panic!("expected a commit");
-		};
+		create_task(&handle, Uuid::new_v4());
+		let operations = handle.get_undo_operations().unwrap();
 		// TaskChampion reads under `BEGIN IMMEDIATE` too, so the lock fails both the reversal and the
 		// read that would confirm it. The timeout covers the Replica's last read still rolling back.
 		let cli = Connection::open(directory.path().join(DATABASE_FILE)).unwrap();
