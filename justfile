@@ -19,7 +19,7 @@ destination := "platform=macOS"
 #
 # Xcode.app keeps its own DerivedData under ~/Library, so a CLI build and an
 # Xcode build do not share one; the first after switching cold-compiles.
-# `release` deliberately does not pin it — a notarised build has no business
+# `archive` deliberately does not pin it — a notarised build has no business
 # reusing an incremental dev cache.
 derived_data := ".build/xcode"
 # Repo-scoped because a path shared across repos lets two checkouts on different
@@ -392,9 +392,10 @@ run: build
 notary-setup:
 	xcrun notarytool store-credentials {{ notary_profile }} --team-id "${TUIST_DEVELOPMENT_TEAM:?set TUIST_DEVELOPMENT_TEAM in your shell profile}"
 
-# Archives the app and exports it with Developer ID to `release_app`. The build number counts the
-# commits reaching HEAD, which only grows while the default branch is never rewritten; Sparkle orders
-# releases by it. `version` stamps the marketing version over the manifest's development default.
+# Archives the app and exports it with Developer ID to `release_app`. The build
+# number counts the commits reaching HEAD, which only grows along `main` while
+# it is never rewritten; Sparkle orders releases by it. `version` stamps the
+# marketing version over the manifest's development default.
 [private]
 archive version="": ensure-generated
 	#!/usr/bin/env bash
@@ -498,14 +499,21 @@ check-tag version:
 		echo "$tag isn't a tag on HEAD" >&2
 		exit 1
 	fi
-	if [ -z "$(git ls-remote --tags origin "refs/tags/$tag")" ]; then
-		echo "$tag isn't on origin: push it first" >&2
+	remote="$(git ls-remote --tags origin "refs/tags/$tag" | cut -f1)"
+	if [ "$remote" != "$(git rev-parse "refs/tags/$tag")" ]; then
+		echo "$tag isn't on origin as it is here: push it first" >&2
+		exit 1
+	fi
+	# Off `main`, the commit count stops ordering releases.
+	git fetch --quiet origin main
+	if ! git merge-base --is-ancestor HEAD origin/main; then
+		echo "HEAD isn't on origin/main" >&2
 		exit 1
 	fi
 
-# Run `just notary-setup` once first, then tag HEAD `v<version>` and push the tag. Never installs,
-# quits or launches the app. The zip is what Sparkle updates from; the DMG is for downloading by
-# hand.
+# Run `just notary-setup` once first, then tag HEAD `v<version>` and push the
+# tag. Never installs, quits or launches the app. The zip is what Sparkle
+# updates from; the DMG is for downloading by hand.
 # Archive, notarize, and publish a zip and DMG as the GitHub release `v<version>`
 publish version: (check-tag version) (archive version)
 	#!/usr/bin/env bash
@@ -539,8 +547,13 @@ publish version: (check-tag version) (archive version)
 	spctl -a -vv -t open --context context:primary-signature "$dmg"
 	spctl -a -vv -t exec "$app"
 
-	# Zipped after stapling, so the ticket travels with the app for offline use.
+	# Zipped after stapling, so the ticket travels with the app for offline use,
+	# and checked as it comes back out.
 	ditto -c -k --keepParent "$app" "$zip"
+	unzipped="{{ release_dir }}/unzipped"
+	ditto -x -k "$zip" "$unzipped"
+	xcrun stapler validate "$unzipped/{{ scheme }}.app"
+	spctl -a -vv -t exec "$unzipped/{{ scheme }}.app"
 
 	echo "==> Publishing $tag"
 	gh release create "$tag" --verify-tag --generate-notes "$zip" "$dmg"
