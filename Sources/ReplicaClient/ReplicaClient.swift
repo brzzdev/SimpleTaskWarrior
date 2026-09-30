@@ -96,6 +96,9 @@ public enum ReplicaError: Equatable, LocalizedError {
 	case notAReplica
 	/// No window has the Replica open.
 	case notOpen
+	/// An undo failed, and the Replica couldn't be read to tell whether its reversal landed first.
+	/// Undoing again could revert the Undo point before it.
+	case undoUnconfirmed
 	case unsupportedSchema
 
 	public var errorDescription: String? {
@@ -111,6 +114,9 @@ public enum ReplicaError: Equatable, LocalizedError {
 
 		case .notOpen:
 			"The Replica isn't open"
+
+		case .undoUnconfirmed:
+			"The change may have been undone. A `task` command may be holding the Replica."
 
 		case .unsupportedSchema:
 			"This Replica needs a newer version of SimpleTaskWarrior"
@@ -329,7 +335,8 @@ actor Replica {
 	/// Reverts the newest Undo point, which the engine does only while it's the Replica's newest.
 	/// An error can follow a reversal that landed, so every outcome reads the tasks again, which
 	/// checks the Undo points afresh. An error where the reversal didn't land, as when the lock is
-	/// held, is thrown, and the point stays for another try.
+	/// held, is thrown, and the point stays for another try. So is `undoUnconfirmed`, where the
+	/// engine can't tell whether it landed, and the next read settles the point.
 	func undo() throws -> UndoOutcome {
 		guard
 			let point = undoPoints.last,
@@ -433,6 +440,7 @@ extension ReplicaError {
 		case EngineError.Busy: self = .busy
 		case let EngineError.Failed(message): self = .failed(message)
 		case EngineError.NotAReplica: self = .notAReplica
+		case EngineError.UndoUnconfirmed: self = .undoUnconfirmed
 		case EngineError.UnsupportedSchema: self = .unsupportedSchema
 		case let error as ReplicaError: self = error
 		default: self = .failed(error.localizedDescription)

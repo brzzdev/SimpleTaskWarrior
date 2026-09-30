@@ -36,6 +36,9 @@ pub enum EngineError {
 	Failed { message: String },
 	/// The folder has no TaskChampion database.
 	NotAReplica,
+	/// An undo failed, and so did the log read that would tell whether its reversal landed first, so
+	/// it may have.
+	UndoUnconfirmed { message: String },
 	/// The database's schema major version is newer than this engine reads.
 	UnsupportedSchema { major: u32, minor: u32 },
 }
@@ -44,7 +47,9 @@ impl std::fmt::Display for EngineError {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		match self {
 			EngineError::Busy => f.write_str("the Replica is locked by another connection"),
-			EngineError::Failed { message } => f.write_str(message),
+			EngineError::Failed { message } | EngineError::UndoUnconfirmed { message } => {
+				f.write_str(message)
+			}
 			EngineError::NotAReplica => f.write_str("the folder has no TaskChampion database"),
 			EngineError::UnsupportedSchema { major, minor } => {
 				write!(f, "schema version {major}.{minor} is newer than this engine reads")
@@ -556,9 +561,9 @@ impl EngineHandle {
 	/// Reverts `operations` if they are still TaskChampion's newest undo operations.
 	///
 	/// After a failure, whether the reversal landed is judged by re-reading the log, which is only a
-	/// best guess: a CLI write in between reads as applied, and a re-read that fails too (say, the
-	/// CLI still holding the lock) is reported as the original error though the reversal may have
-	/// committed. Refresh after any outcome but `NotApplied`.
+	/// best guess: a CLI write in between reads as applied. A re-read that fails too (say, the CLI
+	/// still holding the lock) is `UndoUnconfirmed`, since the reversal may have committed. Refresh
+	/// after any outcome but `NotApplied`.
 	pub fn commit_reversed_operations(
 		&self,
 		operations: Vec<UndoOperation>,
@@ -580,7 +585,10 @@ impl EngineHandle {
 				Ok(newest) if newest != operations => Ok(UndoOutcome::Applied {
 					error: Some(error.to_string()),
 				}),
-				_ => Err(error.into()),
+				Ok(_) => Err(error.into()),
+				Err(read_error) => Err(EngineError::UndoUnconfirmed {
+					message: format!("{error}; reading the log to confirm it failed too: {read_error}"),
+				}),
 			}
 		})
 	}
@@ -639,6 +647,8 @@ impl EngineHandle {
 
 #[cfg(test)]
 mod tests {
+	use std::time::Duration;
+
 	use super::*;
 
 	fn assert_conflict(outcome: ApplyOutcome, uuid: Uuid) {
@@ -783,5 +793,21 @@ mod tests {
 		let undone = handle.commit_reversed_operations(operations).unwrap();
 		assert!(matches!(undone, UndoOutcome::Applied { error: None }));
 		assert_eq!(description(&handle, uuid).as_deref(), Some("cli"));
+	}
+
+	#[test]
+	fn reports_an_undo_whose_confirming_read_fails_too_as_unconfirmed() {
+		let (directory, handle) = open_replica();
+		create_task(&handle, Uuid::new_v4());
+		let operations = handle.get_undo_operations().unwrap();
+		// TaskChampion reads under `BEGIN IMMEDIATE` too, so the lock fails both the reversal and the
+		// read that would confirm it. The timeout covers the Replica's last read still rolling back.
+		let cli = Connection::open(directory.path().join(DATABASE_FILE)).unwrap();
+		cli.busy_timeout(Duration::from_secs(1)).unwrap();
+		cli.execute_batch("BEGIN IMMEDIATE").unwrap();
+
+		let undone = handle.commit_reversed_operations(operations);
+
+		assert!(matches!(undone, Err(EngineError::UndoUnconfirmed { .. })));
 	}
 }

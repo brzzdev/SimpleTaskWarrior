@@ -578,9 +578,9 @@ public protocol EngineHandleProtocol: AnyObject, Sendable {
      * Reverts `operations` if they are still TaskChampion's newest undo operations.
      *
      * After a failure, whether the reversal landed is judged by re-reading the log, which is only a
-     * best guess: a CLI write in between reads as applied, and a re-read that fails too (say, the
-     * CLI still holding the lock) is reported as the original error though the reversal may have
-     * committed. Refresh after any outcome but `NotApplied`.
+     * best guess: a CLI write in between reads as applied. A re-read that fails too (say, the CLI
+     * still holding the lock) is `UndoUnconfirmed`, since the reversal may have committed. Refresh
+     * after any outcome but `NotApplied`.
      */
     func commitReversedOperations(operations: [UndoOperation]) throws  -> UndoOutcome
     
@@ -693,9 +693,9 @@ open func apply(operations: [PlannedOperation], expectations: [Expectation])thro
      * Reverts `operations` if they are still TaskChampion's newest undo operations.
      *
      * After a failure, whether the reversal landed is judged by re-reading the log, which is only a
-     * best guess: a CLI write in between reads as applied, and a re-read that fails too (say, the
-     * CLI still holding the lock) is reported as the original error though the reversal may have
-     * committed. Refresh after any outcome but `NotApplied`.
+     * best guess: a CLI write in between reads as applied. A re-read that fails too (say, the CLI
+     * still holding the lock) is `UndoUnconfirmed`, since the reversal may have committed. Refresh
+     * after any outcome but `NotApplied`.
      */
 open func commitReversedOperations(operations: [UndoOperation])throws  -> UndoOutcome  {
     return try  FfiConverterTypeUndoOutcome_lift(try rustCallWithError(FfiConverterTypeEngineError_lift) {
@@ -1123,6 +1123,12 @@ enum EngineError: Swift.Error, Equatable, Hashable, Foundation.LocalizedError {
      */
     case NotAReplica
     /**
+     * An undo failed, and so did the log read that would tell whether its reversal landed first, so
+     * it may have.
+     */
+    case UndoUnconfirmed(message: String
+    )
+    /**
      * The database's schema major version is newer than this engine reads.
      */
     case UnsupportedSchema(major: UInt32, minor: UInt32
@@ -1161,7 +1167,10 @@ public struct FfiConverterTypeEngineError: FfiConverterRustBuffer {
             message: try FfiConverterString.read(from: &buf)
             )
         case 3: return .NotAReplica
-        case 4: return .UnsupportedSchema(
+        case 4: return .UndoUnconfirmed(
+            message: try FfiConverterString.read(from: &buf)
+            )
+        case 5: return .UnsupportedSchema(
             major: try FfiConverterUInt32.read(from: &buf), 
             minor: try FfiConverterUInt32.read(from: &buf)
             )
@@ -1190,8 +1199,13 @@ public struct FfiConverterTypeEngineError: FfiConverterRustBuffer {
             writeInt(&buf, Int32(3))
         
         
-        case let .UnsupportedSchema(major,minor):
+        case let .UndoUnconfirmed(message):
             writeInt(&buf, Int32(4))
+            FfiConverterString.write(message, into: &buf)
+            
+        
+        case let .UnsupportedSchema(major,minor):
+            writeInt(&buf, Int32(5))
             FfiConverterUInt32.write(major, into: &buf)
             FfiConverterUInt32.write(minor, into: &buf)
             
@@ -1787,7 +1801,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_engine_checksum_method_enginehandle_apply() != 27128) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_engine_checksum_method_enginehandle_commit_reversed_operations() != 38733) {
+    if (uniffi_engine_checksum_method_enginehandle_commit_reversed_operations() != 3371) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_engine_checksum_method_enginehandle_data_version() != 28298) {
