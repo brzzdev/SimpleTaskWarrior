@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use async_trait::async_trait;
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
 use taskchampion::chrono::DateTime;
-use taskchampion::storage::{AccessMode, Storage, StorageTxn};
+use taskchampion::storage::{AccessMode, Storage, StorageTxn, TaskMap};
 use taskchampion::{Operation, Operations, Replica, SqliteStorage, TaskData, Uuid};
 use tokio::runtime::Runtime;
 
@@ -317,34 +317,33 @@ async fn update(
 struct Checks {
 	/// Tasks the batch creates, which must not exist yet.
 	creates: Vec<Uuid>,
-	/// Each task's property, and the value it must still hold.
-	expectations: Vec<(Uuid, Expectation)>,
+	/// Each task, property, and the value it must still hold.
+	expectations: Vec<(Uuid, String, Option<String>)>,
 }
 
 impl Checks {
-	/// The tasks that fail a check, each once.
+	/// The tasks that fail a check, each once. Each task is read once, since this runs under the
+	/// write lock the CLI waits on.
 	async fn conflicts(
 		&self,
 		txn: &mut (dyn StorageTxn + Send),
-	) -> Result<Vec<String>, taskchampion::Error> {
-		let mut conflicts: Vec<String> = Vec::new();
-		for (uuid, expectation) in &self.expectations {
-			if conflicts.contains(&expectation.uuid) {
-				continue;
+	) -> Result<Vec<Uuid>, taskchampion::Error> {
+		let mut tasks: HashMap<Uuid, Option<TaskMap>> = HashMap::new();
+		for &uuid in self.expectations.iter().map(|(uuid, ..)| uuid).chain(&self.creates) {
+			if let Entry::Vacant(entry) = tasks.entry(uuid) {
+				entry.insert(txn.get_task(uuid).await?);
 			}
-			let task = txn.get_task(*uuid).await?;
-			let current = task.as_ref().and_then(|task| task.get(&expectation.property));
-			if current == expectation.value.as_ref() {
-				continue;
-			}
-			conflicts.push(expectation.uuid.clone());
 		}
-		for uuid in &self.creates {
-			let uuid_string = uuid.to_string();
-			if conflicts.contains(&uuid_string) || txn.get_task(*uuid).await?.is_none() {
-				continue;
+		let changed = self.expectations.iter().filter(|(uuid, property, value)| {
+			let current = tasks[uuid].as_ref().and_then(|task| task.get(property));
+			current != value.as_ref()
+		});
+		let existing = self.creates.iter().filter(|uuid| tasks[*uuid].is_some());
+		let mut conflicts = Vec::new();
+		for &uuid in changed.map(|(uuid, ..)| uuid).chain(existing) {
+			if !conflicts.contains(&uuid) {
+				conflicts.push(uuid);
 			}
-			conflicts.push(uuid_string);
 		}
 		Ok(conflicts)
 	}
@@ -354,7 +353,7 @@ impl Checks {
 #[derive(Default)]
 struct CommitChecks {
 	/// The tasks the last checked transaction refused on.
-	conflicts: Vec<String>,
+	conflicts: Vec<Uuid>,
 	/// Checks for the next transaction, which takes them so they run once.
 	pending: Option<Checks>,
 	/// Runs just before the next checked transaction opens, so a test can write in that window.
@@ -373,16 +372,19 @@ struct CheckedStorage {
 #[async_trait]
 impl Storage for CheckedStorage {
 	async fn txn<'a>(&'a mut self) -> Result<Box<dyn StorageTxn + Send + 'a>, taskchampion::Error> {
-		let Some(checks) = self.checks.lock().unwrap().pending.take() else {
-			return self.inner.txn().await;
-		};
-		#[cfg(test)]
-		{
-			let hook = self.checks.lock().unwrap().before_transaction.take();
-			if let Some(hook) = hook {
+		let checks = {
+			let mut commit_checks = self.checks.lock().unwrap();
+			#[cfg(test)]
+			if commit_checks.pending.is_some()
+				&& let Some(hook) = commit_checks.before_transaction.take()
+			{
 				hook();
 			}
-		}
+			commit_checks.pending.take()
+		};
+		let Some(checks) = checks else {
+			return self.inner.txn().await;
+		};
 		let mut txn = self.inner.txn().await?;
 		let conflicts = checks.conflicts(txn.as_mut()).await?;
 		if conflicts.is_empty() {
@@ -456,15 +458,19 @@ impl EngineHandle {
 			let mut tasks = HashMap::new();
 			let mut checks = Checks::default();
 			let mut conflicts: Vec<String> = Vec::new();
-			for expectation in expectations {
-				let uuid = parse_uuid(&expectation.uuid)?;
+			for Expectation {
+				uuid: raw_uuid,
+				property,
+				value,
+			} in expectations
+			{
+				let uuid = parse_uuid(&raw_uuid)?;
 				let task = task_data(replica, &mut tasks, uuid).await?;
-				let current = task.as_ref().and_then(|task| task.get(&expectation.property));
-				let changed = current != expectation.value.as_deref();
-				if changed && !conflicts.contains(&expectation.uuid) {
-					conflicts.push(expectation.uuid.clone());
+				let current = task.as_ref().and_then(|task| task.get(&property));
+				if current != value.as_deref() && !conflicts.contains(&raw_uuid) {
+					conflicts.push(raw_uuid);
 				}
-				checks.expectations.push((uuid, expectation));
+				checks.expectations.push((uuid, property, value));
 			}
 			if !conflicts.is_empty() {
 				return Ok(ApplyOutcome::Conflict { uuids: conflicts });
@@ -510,7 +516,8 @@ impl EngineHandle {
 				std::mem::take(&mut commit_checks.conflicts)
 			};
 			if !conflicts.is_empty() {
-				return Ok(ApplyOutcome::Conflict { uuids: conflicts });
+				let uuids = conflicts.iter().map(Uuid::to_string).collect();
+				return Ok(ApplyOutcome::Conflict { uuids });
 			}
 			committed?;
 			Ok(ApplyOutcome::Committed {
@@ -610,6 +617,10 @@ impl EngineHandle {
 mod tests {
 	use super::*;
 
+	/// Changes a task's description to `cli`, as a `task modify` would.
+	const CLI_MODIFY: &str =
+		"UPDATE tasks SET data = json_set(data, '$.description', 'cli') WHERE uuid = ?1";
+
 	/// An empty Replica in a temporary directory, open in a handle.
 	fn open_replica() -> (tempfile::TempDir, EngineHandle) {
 		let directory = tempfile::tempdir().unwrap();
@@ -618,6 +629,13 @@ mod tests {
 			.unwrap();
 		let handle = EngineHandle::open(directory.path().to_string_lossy().into_owned()).unwrap();
 		(directory, handle)
+	}
+
+	fn create_task(handle: &EngineHandle, uuid: Uuid) {
+		let create = PlannedOperation::Create {
+			uuid: uuid.to_string(),
+		};
+		handle.apply(vec![create, set_description(uuid, "app")], Vec::new()).unwrap();
 	}
 
 	fn set_description(uuid: Uuid, value: &str) -> PlannedOperation {
@@ -669,29 +687,6 @@ mod tests {
 	}
 
 	#[test]
-	fn refuses_an_update_changed_before_the_commit_transaction() {
-		let (directory, handle) = open_replica();
-		let uuid = Uuid::new_v4();
-		let create = PlannedOperation::Create {
-			uuid: uuid.to_string(),
-		};
-		handle.apply(vec![create, set_description(uuid, "app")], Vec::new()).unwrap();
-		write_before_transaction(
-			&handle,
-			&directory,
-			"UPDATE tasks SET data = json_set(data, '$.description', 'cli') WHERE uuid = ?1",
-			uuid,
-		);
-
-		let outcome = handle
-			.apply(vec![set_description(uuid, "stale")], vec![description_is(uuid, "app")])
-			.unwrap();
-
-		assert_conflict(outcome, uuid);
-		assert_eq!(description(&handle, uuid).as_deref(), Some("cli"));
-	}
-
-	#[test]
 	fn refuses_a_create_whose_task_appears_before_the_commit_transaction() {
 		let (directory, handle) = open_replica();
 		let uuid = Uuid::new_v4();
@@ -713,23 +708,17 @@ mod tests {
 	}
 
 	#[test]
-	fn leaves_no_checks_behind_after_a_conflict_in_the_transaction() {
+	fn refuses_an_update_changed_before_the_commit_transaction_and_leaves_no_checks_behind() {
 		let (directory, handle) = open_replica();
 		let uuid = Uuid::new_v4();
-		let create = PlannedOperation::Create {
-			uuid: uuid.to_string(),
-		};
-		handle.apply(vec![create, set_description(uuid, "app")], Vec::new()).unwrap();
-		write_before_transaction(
-			&handle,
-			&directory,
-			"UPDATE tasks SET data = json_set(data, '$.description', 'cli') WHERE uuid = ?1",
-			uuid,
-		);
+		create_task(&handle, uuid);
+		write_before_transaction(&handle, &directory, CLI_MODIFY, uuid);
+
 		let outcome = handle
 			.apply(vec![set_description(uuid, "stale")], vec![description_is(uuid, "app")])
 			.unwrap();
 		assert_conflict(outcome, uuid);
+		assert_eq!(description(&handle, uuid).as_deref(), Some("cli"));
 
 		let outcome = handle
 			.apply(vec![set_description(uuid, "fresh")], vec![description_is(uuid, "cli")])
