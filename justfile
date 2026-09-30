@@ -314,6 +314,22 @@ build: ensure-generated
 test: ensure-generated
 	just xcodebuild-strict CODE_SIGNING_ALLOWED=NO test
 
+# By hand, not in CI, whenever TaskChampion or TW is bumped: `CLIContractTests` skips itself
+# unless `xcodebuild` forwards it a `task` in `TEST_RUNNER_CONTRACT_TASK`.
+# Check the app's writes, undo and a concurrent edit against the real `task` 3.5
+contract: ensure-generated
+	#!/usr/bin/env bash
+	set -euo pipefail
+
+	task="$(command -v task)"
+	version="$("$task" --version)"
+	if [ "$version" != 3.5.0 ]; then
+		echo "the contract is with task 3.5.0, not $version" >&2
+		exit 1
+	fi
+	TEST_RUNNER_CONTRACT_TASK="$task" just xcodebuild-strict CODE_SIGNING_ALLOWED=NO test \
+		-only-testing:ReplicaClientTests/CLIContractTests
+
 # `treatAllWarnings` can't catch every warning: Swift 6.4 downgrades a nonisolated
 # call into AppKit's imported main actor API to a warning that
 # `-warnings-as-errors` leaves alone. So this fails on any warning the raw log
