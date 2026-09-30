@@ -558,7 +558,7 @@ check-tag version:
 
 # Run `just notary-setup` once first, then tag HEAD `v<version>` and push the
 # tag. Never installs, quits or launches the app. The zip is what Sparkle
-# updates from, through the appcast; the DMG is for downloading by hand.
+# updates from; the DMG is for downloading by hand.
 # Archive, notarize, and publish a zip, DMG and appcast as release `v<version>`
 publish version: (check-tag version) (archive version)
 	#!/usr/bin/env bash
@@ -607,7 +607,7 @@ publish version: (check-tag version) (archive version)
 
 	# From the final zip, so its item's length and EdDSA signature match the upload. Alone in its
 	# folder, since `generate_appcast` takes in every archive there, so the appcast holds only this
-	# release. No deltas: no older release sits beside it to diff against.
+	# release.
 	echo "==> Generating the appcast"
 	mkdir "$appcast"
 	cp "$zip" "$appcast/"
