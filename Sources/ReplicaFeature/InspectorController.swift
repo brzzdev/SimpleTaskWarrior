@@ -416,7 +416,7 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 				)
 				let entry = verticalStack()
 				entry.spacing = 2
-				entry.setViews([date, selectableLabel(annotation.description)], in: .top)
+				entry.setViews([date, linkedLabel(annotation.description)], in: .top)
 				return removableRow(entry) { [store] in
 					store.send(.annotationDeleteButtonTapped(task.id, entry: annotation.entry))
 				}
@@ -615,6 +615,11 @@ extension TaskRow {
 
 private let addDependencyTitle = String(localized: "Add Dependency…")
 
+/// Finds links as macOS does elsewhere: schemes such as `https:` and `mailto:`, and bare domains.
+@MainActor private let linkDetector = try! NSDataDetector(
+	types: NSTextCheckingResult.CheckingType.link.rawValue,
+)
+
 /// An empty field's placeholder, as for a task with no project.
 private let noneTitle = String(localized: "None")
 
@@ -650,6 +655,31 @@ private func heading(_ title: String) -> NSTextField {
 	heading.font = .boldSystemFont(ofSize: NSFont.smallSystemFontSize)
 	heading.textColor = .secondaryLabelColor
 	return heading
+}
+
+/// A selectable label whose links open in their default app when clicked.
+@MainActor
+private func linkedLabel(_ text: String) -> NSTextField {
+	let label = selectableLabel(text)
+	let links = linkDetector.matches(in: text, range: NSRange(text.startIndex..., in: text))
+	guard !links.isEmpty else {
+		return label
+	}
+	// The label's font and colour, which an attributed value would otherwise drop.
+	let string = NSMutableAttributedString(
+		string: text,
+		attributes: [.font: label.font!, .foregroundColor: label.textColor!],
+	)
+	for link in links {
+		guard let url = link.url else {
+			continue
+		}
+		string.addAttributes([.foregroundColor: NSColor.linkColor, .link: url], range: link.range)
+	}
+	// The field editor follows a click on a link only where it may edit text attributes.
+	label.allowsEditingTextAttributes = true
+	label.attributedStringValue = string
+	return label
 }
 
 /// `view`, with a button after it that calls `remove`.

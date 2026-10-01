@@ -1,6 +1,7 @@
 import AppKit
 import ComposableArchitecture
 import Foundation
+import Models
 @testable import ReplicaFeature
 import SnapshotTesting
 import Taskrc
@@ -50,6 +51,29 @@ struct ContentSnapshotTests {
 		)
 		let inspector = InspectorController(store: Store(initialState: state) { ReplicaFeature() })
 		assertAppearanceSnapshots(of: inspector.view, size: CGSize(width: 270, height: 420))
+	}
+
+	@Test
+	func inspectorAnnotationLinks() {
+		var task = Models.Task(description: "Read a book", id: UUID(0), status: .pending, workingSetID: 4)
+		task.annotations = [
+			Models.Task.Annotation(
+				description: "Notes on example.com and https://taskwarrior.org",
+				entry: Date(timeIntervalSince1970: 1_790_000_000),
+			),
+		]
+		let row = TaskRow(isBlocked: false, task: task, udaColumns: [], urgency: 0, view: .pending)
+		var state = ReplicaFeature.State(bookmark: Data())
+		state.allRows = [row]
+		state.directory = replicaDirectory
+		state.inspectedTask = task.id
+		state.rows = [row]
+		let inspector = withDependencies {
+			$0.timeZone = .gmt
+		} operation: {
+			InspectorController(store: Store(initialState: state) { ReplicaFeature() })
+		}
+		assertAppearanceSnapshots(of: inspector.view, size: CGSize(width: 270, height: 820))
 	}
 
 	@Test
