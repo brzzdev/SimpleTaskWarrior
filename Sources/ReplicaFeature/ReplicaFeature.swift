@@ -114,6 +114,13 @@ struct ReplicaFeature {
 			redoName != nil && canWrite
 		}
 
+		/// Whether Add Dependency…, Remove Dependency and Remove Annotation apply: to the one task
+		/// the inspector shows, even once a search hides it from the table and so from the
+		/// selection. Not while the new-task row is open, whose editing moving the cursor would end.
+		var canEditInspectedTask: Bool {
+			isReplicaOpen && inspectedRow != nil && !isNewTaskRowPresented
+		}
+
 		/// Whether Set Project…, Add Tag… and Remove Tag apply: to any selection, but not while the
 		/// new-task row is open, whose editing moving the cursor would end. Their edits queue behind a
 		/// write in progress, as the inspector's do.
@@ -241,6 +248,17 @@ struct ReplicaFeature {
 			}
 			let adjacent = index + offset
 			return rows.indices.contains(adjacent) ? rows[adjacent].id : nil
+		}
+
+		/// The tasks `task` depends on, in UUID order, as the inspector and Remove Dependency list
+		/// them.
+		func dependencies(of task: Models.Task) -> [InspectedDependency] {
+			task.dependencies.sorted { $0.uuidString < $1.uuidString }.map { dependency in
+				InspectedDependency(
+					title: allRows.first { $0.id == dependency }?.inspectorTitle,
+					uuid: dependency,
+				)
+			}
 		}
 
 		/// Whether the toolbar and a row's context menu list `command`. Mark Pending takes the place of
@@ -1677,5 +1695,25 @@ extension ReplicaFeature.WriteFailure {
 		reason = error.localizedDescription
 		self.retry = error is WritePlanError ? nil : retry
 		self.title = title
+	}
+}
+
+/// A task the inspected task depends on.
+struct InspectedDependency: Equatable {
+	/// The task's `inspectorTitle`, where the Replica still has it.
+	var title: String?
+	var uuid: UUID
+
+	/// The title, or the UUID where the Replica no longer has the task.
+	var displayTitle: String {
+		title ?? uuid.uuidString.lowercased()
+	}
+}
+
+extension TaskRow {
+	/// The task as the inspector and Remove Dependency name it: its ID, where it has one, before its
+	/// description.
+	var inspectorTitle: String {
+		task.workingSetID.map { "\($0) \(task.description)" } ?? task.description
 	}
 }

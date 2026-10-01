@@ -1276,6 +1276,28 @@ struct ReplicaFeatureTests {
 	}
 
 	@Test
+	func inspectedTaskStaysEditableWhenASearchHidesIt() async throws {
+		let milk = storedTask(0, "Buy milk", workingSetID: 1)
+		let dog = storedTask(1, "Walk the dog", workingSetID: 2)
+		let initialState = try loadedState([milk, dog])
+		let store = TestStore(initialState: initialState) {
+			ReplicaFeature()
+		}
+
+		await store.send(\.binding.selection, [UUID(0)]) {
+			$0.inspectedTask = UUID(0)
+			$0.selection = [UUID(0)]
+		}
+		await store.send(\.binding.searchText, "dog") {
+			$0.rows = try [row(dog)]
+			$0.searchText = "dog"
+			$0.selection = []
+		}
+		#expect(!store.state.canEditSelection)
+		#expect(store.state.canEditInspectedTask)
+	}
+
+	@Test
 	func nextAndPreviousTaskMoveFromTheInspectedTaskInTheTablesOrder() async throws {
 		let milk = storedTask(0, "Buy milk", workingSetID: 1)
 		let dog = storedTask(1, "Walk the dog", workingSetID: 2)

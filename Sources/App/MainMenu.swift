@@ -73,6 +73,12 @@ func mainMenu(
 			key: "o",
 			modifiers: [.command, .shift],
 		),
+		menuItem(
+			"Reveal in Finder",
+			#selector(ReplicaWindowController.revealInFinder(_:)),
+			key: "r",
+			modifiers: [.command, .option],
+		),
 		.separator(),
 		menuItem(
 			"Choose Taskrc…",
