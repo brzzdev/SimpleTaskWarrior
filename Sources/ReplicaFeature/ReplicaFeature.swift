@@ -114,9 +114,9 @@ struct ReplicaFeature {
 			redoName != nil && canWrite
 		}
 
-		/// Whether Add Dependency…, Remove Dependency and Remove Annotation apply: to the inspected
-		/// task, which stays inspected when a search hides it from the table and so from the
-		/// selection, but not while the new-task row is open.
+		/// Whether Add Dependency…, Remove Dependency and Remove Annotation apply: to the one task
+		/// the inspector shows, even once a search hides it from the table and so from the
+		/// selection. Not while the new-task row is open, whose editing moving the cursor would end.
 		var canEditInspectedTask: Bool {
 			isReplicaOpen && inspectedRow != nil && !isNewTaskRowPresented
 		}
