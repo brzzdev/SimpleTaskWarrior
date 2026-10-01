@@ -691,6 +691,8 @@ private func removableRow(_ view: NSView, remove: @escaping @MainActor () -> Voi
 	button.setContentHuggingPriority(.required, for: .horizontal)
 	let row = NSStackView(views: [view, button])
 	row.alignment = .top
+	// Stretches `view` up to the button, so its text wraps at the row's width rather than its own.
+	row.distribution = .fill
 	return row
 }
 
