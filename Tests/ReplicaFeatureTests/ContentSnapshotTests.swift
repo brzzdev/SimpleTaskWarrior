@@ -55,7 +55,12 @@ struct ContentSnapshotTests {
 
 	@Test
 	func inspectorAnnotationLinks() {
-		var task = Models.Task(description: "Read a book", id: UUID(0), status: .pending, workingSetID: 4)
+		var task = Models.Task(
+			description: "Read a book",
+			id: UUID(0),
+			status: .pending,
+			workingSetID: 4,
+		)
 		task.annotations = [
 			Models.Task.Annotation(
 				description: "Notes on example.com and https://taskwarrior.org",

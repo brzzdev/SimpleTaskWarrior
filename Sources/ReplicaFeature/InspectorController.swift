@@ -665,16 +665,16 @@ private func linkedLabel(_ text: String) -> NSTextField {
 	guard !links.isEmpty else {
 		return label
 	}
-	let string = NSMutableAttributedString(attributedString: label.attributedStringValue)
+	let linked = NSMutableAttributedString(attributedString: label.attributedStringValue)
 	for link in links {
 		guard let url = link.url else {
 			continue
 		}
-		string.addAttributes([.foregroundColor: NSColor.linkColor, .link: url], range: link.range)
+		linked.addAttributes([.foregroundColor: NSColor.linkColor, .link: url], range: link.range)
 	}
 	// The field editor follows a click on a link only where it may edit text attributes.
 	label.allowsEditingTextAttributes = true
-	label.attributedStringValue = string
+	label.attributedStringValue = linked
 	return label
 }
 
