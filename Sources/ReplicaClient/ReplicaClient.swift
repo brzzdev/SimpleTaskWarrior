@@ -157,7 +157,7 @@ public enum ReplicaError: Equatable, LocalizedError {
 			"The change may have been undone. A `task` command may be holding the Replica."
 
 		case .unsupportedSchema:
-			"This Replica needs a newer version of SimpleTaskWarrior"
+			"This Replica needs a newer version of SimpleTaskwarrior"
 		}
 	}
 }
@@ -372,7 +372,7 @@ actor Replica {
 		directory: URL,
 		expected: ReplicaIdentity?,
 	) async throws(ReplicaError) -> Replica {
-		let queue = DispatchSerialQueue(label: "dev.brzz.SimpleTaskWarrior.Replica")
+		let queue = DispatchSerialQueue(label: "dev.brzz.SimpleTaskwarrior.Replica")
 		let replica = await withCheckedContinuation { continuation in
 			queue.async {
 				continuation.resume(returning: Result { () throws(ReplicaError) in

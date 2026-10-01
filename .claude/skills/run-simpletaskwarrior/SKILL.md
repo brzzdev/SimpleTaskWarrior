@@ -1,9 +1,9 @@
 ---
 name: run-simpletaskwarrior
-description: Run, drive, and screenshot the SimpleTaskWarrior macOS app with a scratch Replica and Taskrc. Use to launch the app, check a change in the running app, work a manual test plan, or reproduce a UI or window-restoration bug.
+description: Run, drive, and screenshot the SimpleTaskwarrior macOS app with a scratch Replica and Taskrc. Use to launch the app, check a change in the running app, work a manual test plan, or reproduce a UI or window-restoration bug.
 ---
 
-# Run SimpleTaskWarrior
+# Run SimpleTaskwarrior
 
 The app is native AppKit, driven from the shell by `driver.sh`: System Events for menus and keys, a
 compiled CGEvent helper (`mouse.swift`) for clicks, right-clicks and drags, `screencapture` for

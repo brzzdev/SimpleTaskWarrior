@@ -88,7 +88,7 @@ allow	just build && just test
 allow	rg "swift build" docs/
 allow	sed -i '' 's/swift build/just build/' README.md
 allow	bash .claude/hooks/block-swift-build.test.sh
-allow	xcodebuild -scheme SimpleTaskWarrior build
+allow	xcodebuild -scheme SimpleTaskwarrior build
 allow	git push && git log --oneline -1
 allow	git commit -m "swap swift build for just build" && git push
 allow	git push origin HEAD

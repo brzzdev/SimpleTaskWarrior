@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Drives the dev build of SimpleTaskWarrior through System Events and posted mouse events.
+# Drives the dev build of SimpleTaskwarrior through System Events and posted mouse events.
 # Run from the repo root. `driver.sh help` lists the commands.
 set -euo pipefail
 
 skill_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # The Debug product, which has its own name and bundle ID so it runs alongside an installed release.
-product="SimpleTaskWarrior Debug"
+product="SimpleTaskwarrior Debug"
 app="$PWD/.build/xcode/Build/Products/Debug/$product.app"
-bundle_id=dev.brzz.SimpleTaskWarrior.debug
+bundle_id=dev.brzz.SimpleTaskwarrior.debug
 mouse_bin="${TMPDIR:-/tmp}/simpletaskwarrior-mouse"
 # `frame` pins the window here, so the header row sits at a known y.
 window_x=100

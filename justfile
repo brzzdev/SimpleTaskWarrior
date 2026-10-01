@@ -2,8 +2,8 @@
 # successful `| xcbeautify` (which would otherwise let CI go green on a red build).
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
-scheme := "SimpleTaskWarrior"
-workspace := "SimpleTaskWarrior.xcworkspace"
+scheme := "SimpleTaskwarrior"
+workspace := "SimpleTaskwarrior.xcworkspace"
 destination := "platform=macOS"
 # Pinned so `run` can construct the product path instead of paying a second
 # `xcodebuild -showBuildSettings` to ask for it, which re-resolves the package
@@ -28,14 +28,14 @@ source_packages := derived_data / "SourcePackages"
 sparkle_bin := source_packages / "artifacts/sparkle/Sparkle/bin"
 # The `task` the fixtures are recorded from and the contract is with.
 task_version := "3.5.0"
-releases_url := "https://github.com/brzzdev/SimpleTaskWarrior/releases"
+releases_url := "https://github.com/brzzdev/SimpleTaskwarrior/releases"
 # Repo-scoped because a path shared across repos lets two checkouts on different
 # config revisions fight over one file, each overwriting the other's mid-commit.
-swiftformat_base := "/tmp/swiftformat-base-SimpleTaskWarrior"
+swiftformat_base := "/tmp/swiftformat-base-SimpleTaskwarrior"
 swiftformat_url := "https://raw.githubusercontent.com/brzzdev/Configs/main/Configs/swiftformat"
 # The Debug configuration's product name, which names the `.app` and executable `run` launches.
 debug_product := scheme + " Debug"
-notary_profile := "SimpleTaskWarrior"
+notary_profile := "SimpleTaskwarrior"
 release_dir := ".release"
 # The app `archive` exports, which `release` and `publish` notarize.
 release_app := release_dir / "export" / scheme + ".app"
@@ -149,7 +149,7 @@ fixtures:
 
 	# `_show` prints `TASKDATA` as `data.location`, so it's a fixed path rather than a temporary
 	# one: a re-recording leaves the goldens unchanged.
-	taskdata=/tmp/SimpleTaskWarrior-fixtures
+	taskdata=/tmp/SimpleTaskwarrior-fixtures
 	scratch="$(mktemp -d)"
 	trap 'rm -rf "$scratch"' EXIT
 	# `mkdir` claims the path atomically, and the cleanup below covers it only once it's this
