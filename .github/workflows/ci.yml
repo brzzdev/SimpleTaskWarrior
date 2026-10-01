@@ -20,7 +20,9 @@ jobs:
     # deployment target needs. The image is a preview until GitHub makes it GA.
     runs-on: xcode-27
     # A backstop for a wedged xcodebuild rather than a budget for a slow build,
-    # so a hang does not run to GitHub's 6-hour default.
+    # so a hang does not run to GitHub's 6-hour default. A run with every cache
+    # cold took 18 minutes on 2026-09-30, 10 of them building Mint's packages;
+    # a warm run takes about 6. Re-measure it after adding a cold step.
     timeout-minutes: 30
     steps:
       - name: Checkout
