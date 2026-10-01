@@ -673,7 +673,7 @@ impl EngineHandle {
 
 #[cfg(test)]
 mod tests {
-	use std::time::Duration;
+	use std::time::{Duration, Instant};
 
 	use super::*;
 
@@ -830,20 +830,16 @@ mod tests {
 		let hold = Duration::from_millis(250);
 		let cli = Connection::open(directory.path().join(DATABASE_FILE)).unwrap();
 		cli.execute_batch("BEGIN IMMEDIATE").unwrap();
-		let held = std::time::Instant::now();
+		let held = Instant::now();
 		let release = std::thread::spawn(move || {
 			std::thread::sleep(hold);
 			cli.execute_batch("COMMIT").unwrap();
 		});
-		let create = PlannedOperation::Create {
-			uuid: uuid.to_string(),
-		};
 
-		let outcome = handle.apply(vec![create, set_description(uuid, "app")], Vec::new()).unwrap();
+		create_task(&handle, uuid);
 		let waited = held.elapsed();
 
 		release.join().unwrap();
-		assert!(matches!(outcome, ApplyOutcome::Committed { .. }));
 		assert!(waited >= hold, "committed after {waited:?}, before the lock was released");
 		assert_eq!(description(&handle, uuid).as_deref(), Some("app"));
 	}
