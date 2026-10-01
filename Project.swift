@@ -9,7 +9,7 @@ let developmentTeam = Environment.developmentTeam.getString(default: "")
 // Shown when macOS asks whether the app may read a protected folder or volume: the app reads a
 // Replica or Taskrc there by path, outside the App Sandbox, as the CLI does.
 let fileAccessReason =
-	"SimpleTaskWarrior reads and writes your Replica and Taskrc here, as the task command does."
+	"SimpleTaskwarrior reads and writes your Replica and Taskrc here, as the task command does."
 
 let baseSettings: SettingsDictionary = [
 	"ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon",
@@ -48,22 +48,22 @@ if !developmentTeam.isEmpty {
 // The Debug build runs alongside the installed release as an app of its own, keeping its own state.
 // The app menu shows the process name, so the product is renamed too.
 let debugSettings: SettingsDictionary = [
-	"PRODUCT_BUNDLE_IDENTIFIER": "dev.brzz.SimpleTaskWarrior.debug",
-	"PRODUCT_NAME": "SimpleTaskWarrior Debug",
+	"PRODUCT_BUNDLE_IDENTIFIER": "dev.brzz.SimpleTaskwarrior.debug",
+	"PRODUCT_NAME": "SimpleTaskwarrior Debug",
 ]
 
 let project = Project(
-	name: "SimpleTaskWarrior",
+	name: "SimpleTaskwarrior",
 	packages: [
 		.package(path: "."),
 	],
 	settings: .settings(base: baseSettings),
 	targets: [
 		.target(
-			name: "SimpleTaskWarrior",
+			name: "SimpleTaskwarrior",
 			destinations: .macOS,
 			product: .app,
-			bundleId: "dev.brzz.SimpleTaskWarrior",
+			bundleId: "dev.brzz.SimpleTaskwarrior",
 			deploymentTargets: .macOS("27.0"),
 			// Tuist's default, spelled out without its `NSMainStoryboardFile`, which `extendingDefault`
 			// can't remove: the app builds its menu bar and windows in code.
@@ -90,7 +90,7 @@ let project = Project(
 				"NSRemovableVolumesUsageDescription": .string(fileAccessReason),
 				// GitHub redirects this to the appcast on the release marked latest; see ADR-0004.
 				"SUFeedURL":
-					"https://github.com/brzzdev/SimpleTaskWarrior/releases/latest/download/appcast.xml",
+					"https://github.com/brzzdev/SimpleTaskwarrior/releases/latest/download/appcast.xml",
 				// The private key is in the publisher's keychain, from Sparkle's `generate_keys`.
 				"SUPublicEDKey": "lKYYqEr4IfkOiNCNz6DAgZcWRDgf4t/zGjFxud4PEFQ=",
 			]),
@@ -134,11 +134,11 @@ let project = Project(
 	],
 	schemes: [
 		.scheme(
-			name: "SimpleTaskWarrior",
+			name: "SimpleTaskwarrior",
 			shared: true,
-			buildAction: .buildAction(targets: ["SimpleTaskWarrior"]),
-			testAction: .testPlans(["SimpleTaskWarrior.xctestplan"]),
-			runAction: .runAction(executable: "SimpleTaskWarrior"),
+			buildAction: .buildAction(targets: ["SimpleTaskwarrior"]),
+			testAction: .testPlans(["SimpleTaskwarrior.xctestplan"]),
+			runAction: .runAction(executable: "SimpleTaskwarrior"),
 		),
 	],
 )

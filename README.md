@@ -1,4 +1,4 @@
-# SimpleTaskWarrior
+# SimpleTaskwarrior
 
 A native macOS client for [Taskwarrior 3](https://taskwarrior.org) data. Each
 window works on one Replica, the TaskChampion database `TASKDATA` points at,

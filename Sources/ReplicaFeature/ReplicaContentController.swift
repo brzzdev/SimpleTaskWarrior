@@ -176,7 +176,7 @@ final class ReplicaContentController: NSViewController {
 				BannerView(
 					symbolName: "exclamationmark.triangle.fill",
 					message: String(
-						localized: "SimpleTaskWarrior couldn't keep access to the file: \(failure.message)",
+						localized: "SimpleTaskwarrior couldn't keep access to the file: \(failure.message)",
 					),
 					actions: failure.canRetry ? [tryAgain] : [],
 				),
@@ -389,7 +389,7 @@ private func message(for problem: Taskrc.Problem) -> String {
 			"\(path) doesn't exist." + unsetVariablesNote(variables)
 
 		case let .unreadable(path, variables):
-			"SimpleTaskWarrior needs access to \(path)." + unsetVariablesNote(variables)
+			"SimpleTaskwarrior needs access to \(path)." + unsetVariablesNote(variables)
 
 		case let .unsetVariables(variables, key):
 			"\(key) is missing variables." + unsetVariablesNote(variables)
@@ -409,5 +409,5 @@ private func unsetVariablesNote(_ variables: [String]) -> String {
 		return ""
 	}
 	let names = ListFormatter.localizedString(byJoining: variables.map { "$\($0)" })
-	return " \(names) \(variables.count == 1 ? "isn't" : "aren't") set for SimpleTaskWarrior."
+	return " \(names) \(variables.count == 1 ? "isn't" : "aren't") set for SimpleTaskwarrior."
 }

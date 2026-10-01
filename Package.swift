@@ -3,7 +3,7 @@
 import PackageDescription
 
 let package = Package(
-	name: "SimpleTaskWarrior",
+	name: "SimpleTaskwarrior",
 	platforms: [.macOS(.v27)],
 	products: [
 		.library(name: "App", targets: ["App"]),

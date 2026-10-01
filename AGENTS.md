@@ -1,4 +1,4 @@
-# SimpleTaskWarrior
+# SimpleTaskwarrior
 
 - Build and test through the `just` recipes (`just build`, `just test`)
 - Make project changes in `Project.swift`; Tuist generates the Xcode project from it
@@ -7,7 +7,7 @@
 
 ### Issue tracker
 
-Issues live in GitHub Issues for `brzzdev/SimpleTaskWarrior`, managed with the `gh` CLI. See `docs/agents/issue-tracker.md`.
+Issues live in GitHub Issues for `brzzdev/SimpleTaskwarrior`, managed with the `gh` CLI. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 

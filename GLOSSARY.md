@@ -1,4 +1,4 @@
-# SimpleTaskWarrior
+# SimpleTaskwarrior
 
 A native macOS client for Taskwarrior 3 data, where each window works on one replica alongside the `task` CLI.
 
