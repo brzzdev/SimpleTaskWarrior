@@ -665,11 +665,7 @@ private func linkedLabel(_ text: String) -> NSTextField {
 	guard !links.isEmpty else {
 		return label
 	}
-	// The label's font and colour, which an attributed value would otherwise drop.
-	let string = NSMutableAttributedString(
-		string: text,
-		attributes: [.font: label.font!, .foregroundColor: label.textColor!],
-	)
+	let string = NSMutableAttributedString(attributedString: label.attributedStringValue)
 	for link in links {
 		guard let url = link.url else {
 			continue
