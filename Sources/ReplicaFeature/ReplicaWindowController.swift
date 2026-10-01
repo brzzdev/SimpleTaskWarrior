@@ -3,6 +3,7 @@ public import AppKit
 import BookmarkClient
 import ComposableArchitecture
 public import Foundation
+import Models
 import ReplicaClient
 import SwiftNavigation
 import Taskrc
@@ -182,8 +183,9 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 		state.decodeObject(of: NSData.self, forKey: bookmarkKey) as Data?
 	}
 
-	/// The task commands, then Set Project…, the tag commands and the dependency commands, as the
-	/// menu bar's Task menu and a row's context menu list them. An uppercase key equivalent adds ⇧,
+	/// The task commands, then Set Project…, the tag commands, the dependency commands and Remove
+	/// Annotation, as the menu bar's Task menu and a row's context menu list them. An uppercase key
+	/// equivalent adds ⇧,
 	/// so Set Project… is ⌘⇧M.
 	public static func taskCommandMenuItems() -> [NSMenuItem] {
 		ReplicaFeature.TaskCommand.all.map { command in
@@ -208,6 +210,8 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 				keyEquivalent: "D",
 			),
 			submenuItem(String(localized: "Remove Dependency"), delegate: removeDependencyMenuDelegate),
+			.separator(),
+			submenuItem(String(localized: "Remove Annotation"), delegate: removeAnnotationMenuDelegate),
 		]
 	}
 
@@ -288,6 +292,18 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 	@objc
 	public func redo(_: Any?) {
 		store.send(.redoButtonTapped)
+	}
+
+	/// Removes the annotation a Remove Annotation item names from the inspected task.
+	@objc
+	public func removeAnnotation(_ sender: Any?) {
+		guard
+			let id = store.inspectedTask,
+			let entry = (sender as? NSMenuItem)?.representedObject as? Date
+		else {
+			return
+		}
+		store.send(.annotationDeleteButtonTapped(id, entry: entry))
 	}
 
 	/// Removes the dependency a Remove Dependency item names from the inspected task.
@@ -405,8 +421,9 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 			return validate(menuItem, for: command)
 		}
 		return switch menuItem.action {
-		case #selector(addDependency(_:)), #selector(removeDependency(_:)):
-			// The inspector shows dependencies for one task alone.
+		case #selector(addDependency(_:)), #selector(removeAnnotation(_:)),
+		     #selector(removeDependency(_:)):
+			// The inspector shows annotations and dependencies for one task alone.
 			store.canEditSelection && store.inspectedRow != nil
 
 		case #selector(addTag(_:)), #selector(removeTag(_:)), #selector(setProject(_:)):
@@ -421,9 +438,6 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 		case #selector(openReplacement(_:)):
 			store.canOpenReplacement
 
-		case #selector(revealInFinder(_:)):
-			store.directory != nil
-
 		case #selector(redo(_:)):
 			validate(
 				menuItem,
@@ -431,6 +445,9 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 					?? String(localized: "Can’t Redo"),
 				isEnabled: store.canRedo,
 			)
+
+		case #selector(revealInFinder(_:)):
+			store.directory != nil
 
 		case #selector(selectNextTask(_:)):
 			store.state.adjacentTask(1) != nil
@@ -741,15 +758,24 @@ private final class RemoveMenuDelegate: NSObject, NSMenuDelegate {
 	}
 }
 
+/// Shared by every Remove Annotation menu, since a menu holds its delegate weakly.
+@MainActor private let removeAnnotationMenuDelegate = RemoveMenuDelegate(
+	action: #selector(ReplicaWindowController.removeAnnotation(_:)),
+	emptyTitle: String(localized: "No Annotations"),
+) { controller in
+	controller.store.inspectedRow?.task.annotations.map { ($0.description, $0.entry) } ?? []
+}
+
 /// Shared by every Remove Dependency menu, since a menu holds its delegate weakly.
 @MainActor private let removeDependencyMenuDelegate = RemoveMenuDelegate(
 	action: #selector(ReplicaWindowController.removeDependency(_:)),
 	emptyTitle: String(localized: "No Dependencies"),
 ) { controller in
 	let state = controller.store.state
-	return state.inspectedRow
-		.map { state.dependencies(of: $0.task) }?
-		.map { ($0.displayTitle, $0.uuid) } ?? []
+	guard let task = state.inspectedRow?.task else {
+		return []
+	}
+	return state.dependencies(of: task).map { ($0.displayTitle, $0.uuid) }
 }
 
 /// Shared by every Remove Tag menu, since a menu holds its delegate weakly.

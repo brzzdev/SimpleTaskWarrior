@@ -234,6 +234,15 @@ struct ReplicaFeature {
 			self.directory = directory
 		}
 
+		/// The task `offset` rows from the inspected one, where the table shows both.
+		func adjacentTask(_ offset: Int) -> Models.Task.ID? {
+			guard let inspectedTask, let index = rows.index(id: inspectedTask) else {
+				return nil
+			}
+			let adjacent = index + offset
+			return rows.indices.contains(adjacent) ? rows[adjacent].id : nil
+		}
+
 		/// The tasks `task` depends on, in UUID order, as the inspector and Remove Dependency list
 		/// them.
 		func dependencies(of task: Models.Task) -> [InspectedDependency] {
@@ -243,15 +252,6 @@ struct ReplicaFeature {
 					uuid: dependency,
 				)
 			}
-		}
-
-		/// The task `offset` rows from the inspected one, where the table shows both.
-		func adjacentTask(_ offset: Int) -> Models.Task.ID? {
-			guard let inspectedTask, let index = rows.index(id: inspectedTask) else {
-				return nil
-			}
-			let adjacent = index + offset
-			return rows.indices.contains(adjacent) ? rows[adjacent].id : nil
 		}
 
 		/// Whether the toolbar and a row's context menu list `command`. Mark Pending takes the place of
@@ -1693,12 +1693,20 @@ extension ReplicaFeature.WriteFailure {
 
 /// A task the inspected task depends on.
 struct InspectedDependency: Equatable {
-	/// The task as the inspector names it, where the Replica still has it.
+	/// The task's `inspectorTitle`, where the Replica still has it.
 	var title: String?
 	var uuid: UUID
 
 	/// The title, or the UUID where the Replica no longer has the task.
 	var displayTitle: String {
 		title ?? uuid.uuidString.lowercased()
+	}
+}
+
+extension TaskRow {
+	/// The task as the inspector and Remove Dependency name it: its ID, where it has one, before its
+	/// description.
+	var inspectorTitle: String {
+		task.workingSetID.map { "\($0) \(task.description)" } ?? task.description
 	}
 }

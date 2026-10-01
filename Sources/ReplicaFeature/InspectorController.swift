@@ -601,14 +601,6 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 	}
 }
 
-extension TaskRow {
-	/// The task as the inspector and Remove Dependency name it: its ID, where it has one, before its
-	/// description.
-	var inspectorTitle: String {
-		task.workingSetID.map { "\($0) \(task.description)" } ?? task.description
-	}
-}
-
 private let addDependencyTitle = String(localized: "Add Dependency…")
 
 /// Finds links as macOS does elsewhere: schemes such as `https:` and `mailto:`, and bare domains.
