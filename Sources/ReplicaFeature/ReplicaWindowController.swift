@@ -51,6 +51,11 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 		store.claimedDirectory.map(standardizedFolder)
 	}
 
+	/// The tasks the inspected task depends on, which Remove Dependency lists.
+	fileprivate var inspectedDependencies: [InspectedDependency] {
+		store.inspectedDependencies
+	}
+
 	/// Every tag any selected task has, which Remove Tag lists.
 	fileprivate var selectedTags: [String] {
 		store.selectedTags
@@ -102,6 +107,9 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 		// Setting the content view controller sizes the window to its content, which has no size yet.
 		window.setContentSize(windowSize)
 		window.delegate = self
+		// The inspector builds controls after the window first displays, such as a tag's remove
+		// button or a UDA's field, which a key view loop worked out once would leave Tab skipping.
+		window.autorecalculatesKeyViewLoop = true
 
 		searchItem.searchField.action = #selector(searchFieldChanged(_:))
 		searchItem.searchField.target = self
@@ -183,14 +191,11 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 		state.decodeObject(of: NSData.self, forKey: bookmarkKey) as Data?
 	}
 
-	/// The task commands, then Set Project…, Add Tag… and Remove Tag, as the menu bar's Task menu
-	/// and a row's context menu list them. An uppercase key equivalent adds ⇧, so Set Project… is ⌘⇧M.
+	/// The task commands, then Set Project…, the tag commands and the dependency commands, as the
+	/// menu bar's Task menu and a row's context menu list them. An uppercase key equivalent adds ⇧,
+	/// so Set Project… is ⌘⇧M.
 	public static func taskCommandMenuItems() -> [NSMenuItem] {
-		let removeTag = NSMenu(title: String(localized: "Remove Tag"))
-		removeTag.delegate = removeTagMenuDelegate
-		let removeTagItem = NSMenuItem(title: removeTag.title, action: nil, keyEquivalent: "")
-		removeTagItem.submenu = removeTag
-		return ReplicaFeature.TaskCommand.all.map { command in
+		ReplicaFeature.TaskCommand.all.map { command in
 			NSMenuItem(title: command.title, action: command.action, keyEquivalent: command.keyEquivalent)
 		} + [
 			.separator(),
@@ -204,8 +209,21 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 				action: #selector(addTag(_:)),
 				keyEquivalent: "T",
 			),
-			removeTagItem,
+			submenuItem(String(localized: "Remove Tag"), delegate: removeTagMenuDelegate),
+			.separator(),
+			NSMenuItem(
+				title: String(localized: "Add Dependency…"),
+				action: #selector(addDependency(_:)),
+				keyEquivalent: "D",
+			),
+			submenuItem(String(localized: "Remove Dependency"), delegate: removeDependencyMenuDelegate),
 		]
+	}
+
+	/// Opens the menu of tasks the inspected task can come to depend on.
+	@objc
+	public func addDependency(_: Any?) {
+		inspector.chooseDependency()
 	}
 
 	/// Puts the cursor in the tag field for the selected tasks.
@@ -281,6 +299,18 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 		store.send(.redoButtonTapped)
 	}
 
+	/// Removes the dependency a Remove Dependency item names from the inspected task.
+	@objc
+	public func removeDependency(_ sender: Any?) {
+		guard
+			let id = store.inspectedTask,
+			let dependency = (sender as? NSMenuItem)?.representedObject as? UUID
+		else {
+			return
+		}
+		store.send(.dependencyRemoveButtonTapped(id, dependency: dependency))
+	}
+
 	/// Removes the tag a Remove Tag item names from every selected task.
 	@objc
 	public func removeTag(_ sender: Any?) {
@@ -288,6 +318,14 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 			return
 		}
 		store.send(.tagRemoveButtonTapped(store.selectedIDs, tag: tag))
+	}
+
+	@objc
+	public func revealInFinder(_: Any?) {
+		guard let directory = store.directory else {
+			return
+		}
+		NSWorkspace.shared.activateFileViewerSelecting([directory])
 	}
 
 	@objc
@@ -376,6 +414,10 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 			return validate(menuItem, for: command)
 		}
 		return switch menuItem.action {
+		case #selector(addDependency(_:)), #selector(removeDependency(_:)):
+			// The inspector shows dependencies for one task alone.
+			store.canEditSelection && store.inspectedRow != nil
+
 		case #selector(addTag(_:)), #selector(removeTag(_:)), #selector(setProject(_:)):
 			store.canEditSelection
 
@@ -387,6 +429,9 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 
 		case #selector(openReplacement(_:)):
 			store.canOpenReplacement
+
+		case #selector(revealInFinder(_:)):
+			store.directory != nil
 
 		case #selector(redo(_:)):
 			validate(
@@ -670,28 +715,56 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 	}
 }
 
-/// Lists the tags of the tasks selected in the window Remove Tag's items go to, as it opens.
+/// Lists, as a Remove menu opens, what the window its items go to can remove, each item sending
+/// `action` with the value it names.
 @MainActor
-private final class RemoveTagMenuDelegate: NSObject, NSMenuDelegate {
+private final class RemoveMenuDelegate: NSObject, NSMenuDelegate {
+	private let action: Selector
+	/// The item shown when there's nothing to remove.
+	private let emptyTitle: String
+	private let items: @MainActor (ReplicaWindowController) -> [(title: String, value: Any)]
+
+	init(
+		action: Selector,
+		emptyTitle: String,
+		items: @escaping @MainActor (ReplicaWindowController) -> [(title: String, value: Any)],
+	) {
+		self.action = action
+		self.emptyTitle = emptyTitle
+		self.items = items
+	}
+
 	func menuNeedsUpdate(_ menu: NSMenu) {
 		menu.removeAllItems()
-		let action = #selector(ReplicaWindowController.removeTag(_:))
 		let controller = NSApp.target(forAction: action) as? ReplicaWindowController
-		let tags = controller?.selectedTags ?? []
-		guard !tags.isEmpty else {
-			menu.addItem(withTitle: String(localized: "No Tags"), action: nil, keyEquivalent: "")
+		let items = controller.map(items) ?? []
+		guard !items.isEmpty else {
+			menu.addItem(withTitle: emptyTitle, action: nil, keyEquivalent: "")
 			return
 		}
-		for tag in tags {
-			let item = NSMenuItem(title: tag, action: action, keyEquivalent: "")
-			item.representedObject = tag
+		for (title, value) in items {
+			let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+			item.representedObject = value
 			menu.addItem(item)
 		}
 	}
 }
 
+/// Shared by every Remove Dependency menu, since a menu holds its delegate weakly.
+@MainActor private let removeDependencyMenuDelegate = RemoveMenuDelegate(
+	action: #selector(ReplicaWindowController.removeDependency(_:)),
+	emptyTitle: String(localized: "No Dependencies"),
+) { controller in
+	controller.inspectedDependencies.map { ($0.displayTitle, $0.uuid) }
+}
+
 /// Shared by every Remove Tag menu, since a menu holds its delegate weakly.
-@MainActor private let removeTagMenuDelegate = RemoveTagMenuDelegate()
+@MainActor private let removeTagMenuDelegate = RemoveMenuDelegate(
+	action: #selector(ReplicaWindowController.removeTag(_:)),
+	emptyTitle: String(localized: "No Tags"),
+) { controller in
+	controller.selectedTags.map { ($0, $0) }
+}
 
 /// Leaves ⌘Z and ⌘⇧Z to the window's own undo manager while a field being edited has typing to
 /// undo or redo. Otherwise the window disowns them, so they reach the controller, which undoes the
@@ -813,5 +886,15 @@ private let newTaskIdentifier = NSToolbarItem.Identifier("newTask")
 let newTaskTitle = String(localized: "New Task")
 
 private let searchIdentifier = NSToolbarItem.Identifier("search")
+
+/// An item titled `title` whose submenu `delegate` fills as it opens.
+@MainActor
+private func submenuItem(_ title: String, delegate: any NSMenuDelegate) -> NSMenuItem {
+	let menu = NSMenu(title: title)
+	menu.delegate = delegate
+	let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+	item.submenu = menu
+	return item
+}
 
 private let windowSize = NSSize(width: 1_000, height: 600)

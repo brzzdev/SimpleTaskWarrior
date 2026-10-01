@@ -138,10 +138,11 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 		// A path has few spaces to break at.
 		pathField.lineBreakMode = .byCharWrapping
 		pathField.isSelectable = true
+		// Down the responder chain to the window's controller, as the menu item's is.
 		let reveal = NSButton(
 			title: String(localized: "Reveal in Finder"),
-			target: self,
-			action: #selector(revealInFinderButtonClicked(_:)),
+			target: nil,
+			action: #selector(ReplicaWindowController.revealInFinder(_:)),
 		)
 		reveal.controlSize = .small
 		let replicaHeading = heading(String(localized: "Replica"))
@@ -219,6 +220,15 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 			case .tag: tagField
 			}
 		view.window?.makeFirstResponder(target)
+	}
+
+	/// Opens the menu of tasks the inspected task can come to depend on, expanding a collapsed
+	/// inspector.
+	func chooseDependency() {
+		splitViewItem?.isCollapsed = false
+		view.layoutSubtreeIfNeeded()
+		dependencyPopUp.scrollToVisible(dependencyPopUp.bounds)
+		dependencyPopUp.performClick(nil)
 	}
 
 	func controlTextDidBeginEditing(_: Notification) {
@@ -314,14 +324,6 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 	}
 
 	@objc
-	func revealInFinderButtonClicked(_: Any?) {
-		guard let directory = store.directory else {
-			return
-		}
-		NSWorkspace.shared.activateFileViewerSelecting([directory])
-	}
-
-	@objc
 	private func dependencyChosen(_ item: NSMenuItem) {
 		guard
 			let id = store.inspectedTask,
@@ -398,8 +400,7 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 
 		dependencyList.setViews(
 			lists.dependencies.map { dependency in
-				let label = selectableLabel(dependency.title ?? dependency.uuid.uuidString.lowercased())
-				return removableRow(label) { [store] in
+				removableRow(selectableLabel(dependency.displayTitle)) { [store] in
 					store.send(.dependencyRemoveButtonTapped(task.id, dependency: dependency.uuid))
 				}
 			},
@@ -465,17 +466,11 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 			showFields(of: task, isAnotherTask: isAnotherTask)
 		}
 
-		let rows = store.allRows
 		let lists = InspectedLists(
-			blocking: rows
+			blocking: store.allRows
 				.filter { $0.task.status.isOpen && $0.task.dependencies.contains(task.id) }
 				.map(\.inspectorTitle),
-			dependencies: task.dependencies.sorted { $0.uuidString < $1.uuidString }.map { dependency in
-				InspectedLists.Dependency(
-					title: rows.first { $0.id == dependency }?.inspectorTitle,
-					uuid: dependency,
-				)
-			},
+			dependencies: store.inspectedDependencies,
 			task: task,
 		)
 		if lists != shownLists {
@@ -603,6 +598,34 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 			popUp.lastItem?.representedObject = value
 		}
 		popUp.selectItem(at: values.firstIndex(of: stored) ?? 0)
+	}
+}
+
+/// A task the inspected task depends on.
+struct InspectedDependency: Equatable {
+	/// The task as the inspector names it, where the Replica still has it.
+	var title: String?
+	var uuid: UUID
+
+	/// The title, or the UUID where the Replica no longer has the task.
+	var displayTitle: String {
+		title ?? uuid.uuidString.lowercased()
+	}
+}
+
+extension ReplicaFeature.State {
+	/// The tasks the inspected task depends on, in UUID order, which the inspector and Remove
+	/// Dependency list.
+	var inspectedDependencies: [InspectedDependency] {
+		guard let task = inspectedRow?.task else {
+			return []
+		}
+		return task.dependencies.sorted { $0.uuidString < $1.uuidString }.map { dependency in
+			InspectedDependency(
+				title: allRows.first { $0.id == dependency }?.inspectorTitle,
+				uuid: dependency,
+			)
+		}
 	}
 }
 
@@ -782,14 +805,8 @@ private final class FlippedView: NSView {
 
 /// What the inspector's lists show: the task, and the titles of the tasks it depends on and blocks.
 private struct InspectedLists: Equatable {
-	struct Dependency: Equatable {
-		var title: String?
-		var uuid: UUID
-	}
-
 	var blocking: [String]
-	/// Each dependency's title, where the Replica still has it, beside its UUID.
-	var dependencies: [Dependency]
+	var dependencies: [InspectedDependency]
 	var task: Models.Task
 }
 
