@@ -470,7 +470,7 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 			blocking: store.allRows
 				.filter { $0.task.status.isOpen && $0.task.dependencies.contains(task.id) }
 				.map(\.inspectorTitle),
-			dependencies: store.inspectedDependencies,
+			dependencies: store.state.dependencies(of: task),
 			task: task,
 		)
 		if lists != shownLists {
@@ -601,37 +601,10 @@ final class InspectorController: NSViewController, NSMenuDelegate, NSTextFieldDe
 	}
 }
 
-/// A task the inspected task depends on.
-struct InspectedDependency: Equatable {
-	/// The task as the inspector names it, where the Replica still has it.
-	var title: String?
-	var uuid: UUID
-
-	/// The title, or the UUID where the Replica no longer has the task.
-	var displayTitle: String {
-		title ?? uuid.uuidString.lowercased()
-	}
-}
-
-extension ReplicaFeature.State {
-	/// The tasks the inspected task depends on, in UUID order, which the inspector and Remove
-	/// Dependency list.
-	var inspectedDependencies: [InspectedDependency] {
-		guard let task = inspectedRow?.task else {
-			return []
-		}
-		return task.dependencies.sorted { $0.uuidString < $1.uuidString }.map { dependency in
-			InspectedDependency(
-				title: allRows.first { $0.id == dependency }?.inspectorTitle,
-				uuid: dependency,
-			)
-		}
-	}
-}
-
 extension TaskRow {
-	/// The task as the inspector names it: its ID, where it has one, before its description.
-	fileprivate var inspectorTitle: String {
+	/// The task as the inspector and Remove Dependency name it: its ID, where it has one, before its
+	/// description.
+	var inspectorTitle: String {
 		task.workingSetID.map { "\($0) \(task.description)" } ?? task.description
 	}
 }

@@ -234,6 +234,17 @@ struct ReplicaFeature {
 			self.directory = directory
 		}
 
+		/// The tasks `task` depends on, in UUID order, as the inspector and Remove Dependency list
+		/// them.
+		func dependencies(of task: Models.Task) -> [InspectedDependency] {
+			task.dependencies.sorted { $0.uuidString < $1.uuidString }.map { dependency in
+				InspectedDependency(
+					title: allRows.first { $0.id == dependency }?.inspectorTitle,
+					uuid: dependency,
+				)
+			}
+		}
+
 		/// The task `offset` rows from the inspected one, where the table shows both.
 		func adjacentTask(_ offset: Int) -> Models.Task.ID? {
 			guard let inspectedTask, let index = rows.index(id: inspectedTask) else {
@@ -1677,5 +1688,17 @@ extension ReplicaFeature.WriteFailure {
 		reason = error.localizedDescription
 		self.retry = error is WritePlanError ? nil : retry
 		self.title = title
+	}
+}
+
+/// A task the inspected task depends on.
+struct InspectedDependency: Equatable {
+	/// The task as the inspector names it, where the Replica still has it.
+	var title: String?
+	var uuid: UUID
+
+	/// The title, or the UUID where the Replica no longer has the task.
+	var displayTitle: String {
+		title ?? uuid.uuidString.lowercased()
 	}
 }

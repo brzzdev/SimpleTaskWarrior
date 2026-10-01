@@ -13,7 +13,8 @@ import UniformTypeIdentifiers
 public final class ReplicaWindowController: NSWindowController, NSMenuItemValidation,
 	NSToolbarDelegate, NSWindowDelegate
 {
-	private let store: StoreOf<ReplicaFeature>
+	/// Read by the Remove menus' delegates too.
+	fileprivate let store: StoreOf<ReplicaFeature>
 
 	/// The alert on screen, for a failed write or a Done or Delete's question, so a store change while
 	/// it's up doesn't show a second.
@@ -49,16 +50,6 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 	/// The folder the window claims as its Replica's, standardized.
 	public var folder: URL? {
 		store.claimedDirectory.map(standardizedFolder)
-	}
-
-	/// The tasks the inspected task depends on, which Remove Dependency lists.
-	fileprivate var inspectedDependencies: [InspectedDependency] {
-		store.inspectedDependencies
-	}
-
-	/// Every tag any selected task has, which Remove Tag lists.
-	fileprivate var selectedTags: [String] {
-		store.selectedTags
 	}
 
 	/// A controller for the Replica `bookmark` locates, last in `folder` where known, which
@@ -755,7 +746,10 @@ private final class RemoveMenuDelegate: NSObject, NSMenuDelegate {
 	action: #selector(ReplicaWindowController.removeDependency(_:)),
 	emptyTitle: String(localized: "No Dependencies"),
 ) { controller in
-	controller.inspectedDependencies.map { ($0.displayTitle, $0.uuid) }
+	let state = controller.store.state
+	return state.inspectedRow
+		.map { state.dependencies(of: $0.task) }?
+		.map { ($0.displayTitle, $0.uuid) } ?? []
 }
 
 /// Shared by every Remove Tag menu, since a menu holds its delegate weakly.
@@ -763,7 +757,7 @@ private final class RemoveMenuDelegate: NSObject, NSMenuDelegate {
 	action: #selector(ReplicaWindowController.removeTag(_:)),
 	emptyTitle: String(localized: "No Tags"),
 ) { controller in
-	controller.selectedTags.map { ($0, $0) }
+	controller.store.selectedTags.map { ($0, $0) }
 }
 
 /// Leaves ⌘Z and ⌘⇧Z to the window's own undo manager while a field being edited has typing to
