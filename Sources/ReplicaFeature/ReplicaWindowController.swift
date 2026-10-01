@@ -423,8 +423,7 @@ public final class ReplicaWindowController: NSWindowController, NSMenuItemValida
 		return switch menuItem.action {
 		case #selector(addDependency(_:)), #selector(removeAnnotation(_:)),
 		     #selector(removeDependency(_:)):
-			// The inspector shows annotations and dependencies for one task alone.
-			store.canEditSelection && store.inspectedRow != nil
+			store.canEditInspectedTask
 
 		case #selector(addTag(_:)), #selector(removeTag(_:)), #selector(setProject(_:)):
 			store.canEditSelection
