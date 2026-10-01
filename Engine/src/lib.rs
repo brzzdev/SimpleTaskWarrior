@@ -822,6 +822,30 @@ mod tests {
 	}
 
 	#[test]
+	fn commits_once_another_connection_releases_the_lock() {
+		let (directory, handle) = open_replica();
+		let uuid = Uuid::new_v4();
+		// The wait is rusqlite's default 5 s busy timeout, which TaskChampion's connection inherits
+		// rather than sets. The hold is well under it, so only an engine that stops waiting fails.
+		let hold = Duration::from_millis(250);
+		let cli = Connection::open(directory.path().join(DATABASE_FILE)).unwrap();
+		cli.execute_batch("BEGIN IMMEDIATE").unwrap();
+		let release = std::thread::spawn(move || {
+			std::thread::sleep(hold);
+			cli.execute_batch("COMMIT").unwrap();
+		});
+		let create = PlannedOperation::Create {
+			uuid: uuid.to_string(),
+		};
+
+		let outcome = handle.apply(vec![create, set_description(uuid, "app")], Vec::new()).unwrap();
+
+		release.join().unwrap();
+		assert!(matches!(outcome, ApplyOutcome::Committed { .. }));
+		assert_eq!(description(&handle, uuid).as_deref(), Some("app"));
+	}
+
+	#[test]
 	fn reports_an_undo_whose_confirming_read_fails_too_as_unconfirmed() {
 		let (directory, handle) = open_replica();
 		create_task(&handle, Uuid::new_v4());
